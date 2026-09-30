@@ -750,7 +750,8 @@ input[type="number"]::-webkit-inner-spin-button, input[type="number"]::-webkit-o
 /* Mapa (kafelki TomTom) */
 .map-view { position: absolute; inset: 0; overflow: hidden; background: #2b3440; touch-action: none; }
 .map-view.interactive { cursor: grab; }
-.map-layer { position: absolute; left: 0; top: 0; width: 0; height: 0; transform-origin: 0 0; }
+/* will-change: warstwa na GPU — zmiana samego transform (co klatkę w HUD) to złożenie, nie ponowne rysowanie kafelków */
+.map-layer { position: absolute; left: 0; top: 0; width: 0; height: 0; transform-origin: 0 0; will-change: transform; backface-visibility: hidden; }
 .map-tile { position: absolute; display: block; user-select: none; pointer-events: none; }
 .map-tile.empty { background: transparent; }
 .map-overlay { position: absolute; overflow: visible; pointer-events: none; }
@@ -836,8 +837,8 @@ input[type="number"]::-webkit-inner-spin-button, input[type="number"]::-webkit-o
 .hud.navmode .nm-map { position: absolute; inset: 0; z-index: 0; }
 .hud.navmode .nm-map .hud-map { position: absolute; inset: 0; }
 /* Horyzont jak w nawigacji: u góry „niebo” zakrywa daleką, rozmytą mapę, pod nim mgiełka; na dole przyciemnienie pod kafelki */
-.hud.navmode .nm-map::after { content: ""; position: absolute; inset: 0; pointer-events: none; background: linear-gradient(to bottom, #0a1219 0, #0a1219 9%, rgba(16, 30, 42, .85) 13%, rgba(16, 30, 42, .35) 20%, transparent 32%, transparent 64%, rgba(7, 12, 17, .75) 100%); }
-.hud.navmode .nm-map::before { content: ""; position: absolute; left: 0; right: 0; top: 12.5%; height: 2px; z-index: 1; pointer-events: none; background: linear-gradient(90deg, transparent, rgba(140, 190, 220, .35), transparent); }
+.hud.navmode .nm-map::after { content: ""; position: absolute; inset: 0; pointer-events: none; background: linear-gradient(to bottom, #0a1219 0, #0a1219 15%, rgba(16, 30, 42, .92) 19%, rgba(16, 30, 42, .45) 26%, transparent 36%, transparent 64%, rgba(7, 12, 17, .75) 100%); }
+.hud.navmode .nm-map::before { content: ""; position: absolute; left: 0; right: 0; top: 18.5%; height: 2px; z-index: 1; pointer-events: none; background: linear-gradient(90deg, transparent, rgba(140, 190, 220, .35), transparent); }
 .nm-top { position: absolute; z-index: 3; top: calc(1.6 * var(--u) + env(safe-area-inset-top)); left: calc(2 * var(--u) + env(safe-area-inset-left)); right: calc(2 * var(--u) + env(safe-area-inset-right)); display: flex; gap: calc(1.2 * var(--u)); align-items: stretch; }
 .nm-top .hud-nav.card { flex: 1; min-width: 0; flex-wrap: wrap; padding: calc(1.8 * var(--u)) calc(2.4 * var(--u)); border-radius: calc(3 * var(--u)); background: rgba(12, 20, 28, .94); border: 1px solid rgba(140, 175, 195, .25); box-shadow: 0 10px 30px rgba(0, 0, 0, .35); }
 .hud-nav.card .hud-man svg { width: calc(11 * var(--u)); height: calc(11 * var(--u)); stroke: var(--hud-green); stroke-width: 3; filter: drop-shadow(0 0 8px rgba(68, 240, 124, .35)); }
@@ -969,3 +970,10 @@ input[type="number"]::-webkit-inner-spin-button, input[type="number"]::-webkit-o
 .hud-map-friend.stopped path { fill: #ef6a5b; }
 .hud-map-friend rect { fill: rgba(8, 17, 26, .85); stroke: rgba(140, 175, 195, .4); stroke-width: 1; }
 .hud-map-friend text { fill: #eef3f6; font: 800 15px system-ui, sans-serif; text-anchor: middle; }
+
+/* Pion: przy zasięgu 1,6 krawędź warstwy mapy wypada niżej niż w poziomie — mgła zakrywa ją do ~30 % wysokości */
+@media (orientation: portrait) {
+  .hud.navmode .nm-map::after { background: linear-gradient(to bottom, #0a1219 0, #0a1219 17%, rgba(14, 24, 34, .97) 24%, rgba(14, 24, 34, .6) 31%, transparent 40%, transparent 64%, rgba(7, 12, 17, .75) 100%); }
+  .hud.navmode .nm-map::before { top: 20.5%; }
+}
+.hud-map .map-view { background: #0a1219; }

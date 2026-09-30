@@ -172,6 +172,8 @@ Widoki nie liczą reguł same — tylko formatują wyniki silnika.
   „Do ekranu początkowego”.
 - HUD styl „Nawigacja” na Androidzie: nad warstwą 3D mapy nie używać `backdrop-filter` ani SVG `filter: drop-shadow` — wymuszały
   ponowną rasteryzację w każdej klatce (migotanie, znikająca strzałka); karty mają kryjące tło, strzałka obrys zamiast cienia.
+  Warstwa mapy (`.map-layer`) ma `will-change: transform` (zmiana transform co klatkę = złożenie na GPU), a jej zasięg to 1,6 przekątnej
+  (większy = ~10 000 px na telefonie → niedomalowane karty); daleki pas u góry zakrywa „niebo” i mgła (w pionie do ~30 %).
 - HUD: odległość do MOP-u i znajomych po trasie tylko z trasą z nawigacji (Premium) i tylko dla punktów ≤ 300 m od niej
   (`navmatch.alongRoute`); bez trasy — w linii prostej. Km do serwisu liczy tylko GPS przy otwartej aplikacji.
 

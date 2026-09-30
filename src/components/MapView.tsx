@@ -130,8 +130,10 @@ export function MapView({ token, center, zoom, bearing = 0, pitch = 0, anchorY =
   const z = Math.max(3, Math.min(18, Math.floor(zoom)));
   const scale = 2 ** (zoom - z);
   const [pxX, pxY] = worldPx(center, z);
-  // Warstwa większa niż ekran: po obrocie i pochyleniu nie może być pustych rogów.
-  const reach = Math.hypot(size.w, size.h) * (pitch > 0 ? 2 : 0.75);
+  // Warstwa większa niż ekran: po obrocie i pochyleniu nie może być pustych rogów. Przy pochyleniu daleki pas
+  // u góry zakrywa „niebo” (HUD), więc zasięg 1,6 wystarcza — większy dawał warstwę ~10 000 px na telefonie,
+  // której Android nie nadążał rysować (niedomalowane karty, migotanie, na iOS brak pamięci).
+  const reach = Math.hypot(size.w, size.h) * (pitch > 0 ? 1.6 : 0.75);
   const half = reach / scale;
   // Punkt odniesienia kafelków (cx, cy): przy płynnej mapie zostaje w miejscu, aż odjedziemy o ćwierć zasięgu.
   const origin = useRef<{ z: number; x: number; y: number } | null>(null);

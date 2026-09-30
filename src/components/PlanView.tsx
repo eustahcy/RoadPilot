@@ -33,13 +33,15 @@ interface Props {
   /** Prędkość z GPS, z której liczony jest przyjazd (km/h). */
   liveKmh?: number;
   gps: ReactNode;
+  /** Karta znajomych (tylko z kontem) — null, gdy nie ma kogo pokazać. */
+  friends?: ReactNode;
   stopControls: StopControlsProps;
   onOption: (option: WhatIf["option"], value: boolean) => void;
   onOptions: (options: PlanOptions) => void;
   goTo: (tab: "route" | "driver") => void;
 }
 
-export function PlanView({ state, route, comparison, hints, status, planNow, deadline, chosen, activePlan: active, onChoose, ongoing, onOngoing, work, service, liveKmh, gps, stopControls, onOption, onOptions, goTo }: Props) {
+export function PlanView({ state, route, comparison, hints, status, planNow, deadline, chosen, activePlan: active, onChoose, ongoing, onOngoing, work, service, liveKmh, gps, friends, stopControls, onOption, onOptions, goTo }: Props) {
   const best = comparison.scenarios.find((s) => s.id === comparison.bestId);
   const { trip, settings } = state;
   const parking = active ? parkingHint(active, route, settings.parkingBufferMin) : undefined;
@@ -150,6 +152,8 @@ export function PlanView({ state, route, comparison, hints, status, planNow, dea
           </p>
         )}
       </section>
+
+      {friends}
 
       {active && <Reminders plan={active} parking={parking} />}
 

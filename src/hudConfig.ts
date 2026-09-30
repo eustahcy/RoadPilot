@@ -4,7 +4,7 @@ export type HudStyle = "full" | "minimal" | "nav";
 
 export type HudItem =
   | "clock" | "dest" | "avg" | "weather" | "road" | "route" | "stats" | "arrival"
-  | "drive" | "break" | "work" | "better" | "parking" | "service" | "apps" | "floating" | "nav";
+  | "drive" | "break" | "work" | "better" | "parking" | "service" | "apps" | "floating" | "nav" | "friends";
 
 export type HudItems = Record<HudItem, boolean>;
 
@@ -24,6 +24,7 @@ export const HUD_ITEMS: { id: HudItem; label: string; hint?: string }[] = [
   { id: "weather", label: "Pogoda" },
   { id: "better", label: "Lepszy scenariusz" },
   { id: "parking", label: "Najbliższy MOP" },
+  { id: "friends", label: "Najbliższy znajomy", hint: "Konto — imię, km, status; w stylu „Nawigacja” znajomi są na mapie" },
   { id: "service", label: "Serwis" },
   { id: "apps", label: "Muzyka i zgłoszenia" },
   { id: "floating", label: "Przycisk pływającego okienka" },
@@ -35,8 +36,8 @@ export const DEFAULT_HUD_ITEMS: Record<HudStyle, HudItems> = {
   full: all(true),
   // Minimalistyczny: tylko to, co potrzebne w czasie jazdy.
   // Nawigacja: widok trasy zamiast osi i kafelków, na dole kilka liczb.
-  nav: { ...all(false), nav: true, clock: true, dest: true, arrival: true, break: true, road: true, apps: true, floating: true },
-  minimal: { ...all(false), nav: true, clock: true, dest: true, arrival: true, break: true, drive: true, road: true, route: true, apps: true, floating: true },
+  nav: { ...all(false), nav: true, clock: true, dest: true, arrival: true, break: true, road: true, apps: true, floating: true, friends: true },
+  minimal: { ...all(false), nav: true, clock: true, dest: true, arrival: true, break: true, drive: true, road: true, route: true, apps: true, floating: true, friends: true },
 };
 
 export const HUD_STYLES: { id: HudStyle; label: string; hint: string }[] = [

@@ -15,6 +15,8 @@ import { DEFAULT_VEHICLE, NavAccess, Vehicle } from "../nav";
 import { MapDataSection } from "./MapConsent";
 import { AdminMap } from "./AdminMap";
 import { REPORT_KINDS } from "../collect";
+import { FriendsApi } from "../friends";
+import { FriendsSettings } from "./Friends";
 
 interface Props {
   navAccess: NavAccess;
@@ -26,6 +28,8 @@ interface Props {
   onPlanTime: (t: number | null) => void;
   onReset: () => void;
   account: AccountProps;
+  /** Znajomi: API z konta (null bez konta) i czy GPS jest włączony (wysyłka obecności). */
+  friends: { api: FriendsApi | null; gpsOn: boolean };
 }
 
 interface AccountProps {
@@ -39,10 +43,10 @@ interface AccountProps {
   onDelete: (password: string) => Promise<void>;
 }
 
-export type SettingsCategory = "account" | "planning" | "work" | "service" | "vehicle" | "gps" | "hud" | "apps" | "data" | "admin";
+export type SettingsCategory = "account" | "friends" | "planning" | "work" | "service" | "vehicle" | "gps" | "hud" | "apps" | "data" | "admin";
 type Category = SettingsCategory;
 
-export function SettingsView({ initialCategory, navAccess, state, now, onSettings, onPlanTime, onReset, account }: Props) {
+export function SettingsView({ initialCategory, navAccess, state, now, onSettings, onPlanTime, onReset, account, friends }: Props) {
   const { settings, driver } = state;
   const set = (patch: Partial<Settings>) => onSettings({ ...settings, ...patch });
   const [confirmReset, setConfirmReset] = useState(false);
@@ -55,6 +59,7 @@ export function SettingsView({ initialCategory, navAccess, state, now, onSetting
 
   const categories: { id: Category; label: string; sub: string; icon: string }[] = [
     { id: "account", label: "Konto", sub: account.user ? `${account.user.email}${account.user.premium ? " · Premium" : ""}` : "Bez konta — dane tylko w tym telefonie", icon: "M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8ZM4 21a8 8 0 0 1 16 0" },
+    { id: "friends", label: "Znajomi", sub: friends.api ? (() => { const n = friends.api.friends.filter((f) => f.relation === "accepted").length; const p = friends.api.friends.filter((f) => f.relation === "pending").length; return `${n ? `${n} ${n === 1 ? "znajomy" : n < 5 ? "znajomych" : "znajomych"}` : "Nikogo jeszcze nie ma"}${p ? ` · ${p} do akceptacji` : ""}${settings.friendsShare ? "" : " · pozycja ukryta"}`; })() : "Kto gdzie jedzie — wymaga konta", icon: "M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8ZM2 21a7 7 0 0 1 14 0M16 3.5a4 4 0 0 1 0 7.5M22 21a7 7 0 0 0-5-6.7" },
     { id: "planning", label: "Planowanie", sub: "Wydłużenia, godzina planowania, prędkości", icon: "M4 12h4l3-8 4 16 3-8h2" },
     { id: "work", label: "Czas pracy", sub: `Limit ${fmtHm(settings.work.limitMin)} · przypomnienia ${settings.work.remind ? "włączone" : "wyłączone"}`, icon: "M12 7v5l3 2M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18Z" },
     { id: "service", label: "Serwis pojazdu", sub: "Termin i kilometry do przeglądu", icon: "M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.8-3.8a6 6 0 0 1-7.9 7.9l-6.9 6.9a2.1 2.1 0 0 1-3-3l6.9-6.9a6 6 0 0 1 7.9-7.9l-3.8 3.8Z" },
@@ -88,6 +93,8 @@ export function SettingsView({ initialCategory, navAccess, state, now, onSetting
       <h1 className="settings-title">{categories.find((c) => c.id === cat)!.label}</h1>
 
       {cat === "account" && <AccountSection {...account} />}
+
+      {cat === "friends" && <FriendsSettings api={friends.api} share={settings.friendsShare} onShare={(friendsShare) => set({ friendsShare })} gpsOn={friends.gpsOn} onLogin={account.onLogin} />}
 
       {cat === "planning" && (
         <>
@@ -206,6 +213,7 @@ export function SettingsView({ initialCategory, navAccess, state, now, onSetting
           W trybie HUD przybliżona pozycja (z dokładnością ~1 km) trafia do OpenStreetMap (Overpass) i Open-Meteo — po
           najbliższe MOP-y i parkingi, nazwy dróg i miejscowości oraz pogodę. Przy włączonej nawigacji wpisywany cel,
           punkt startu (pozycja GPS) i dane pojazdu idą przez serwer RoadPilot do TomTom; trasa zostaje tylko w telefonie. Kafelki mapy w HUD pobiera serwer RoadPilot — TomTom nie widzi Twojego telefonu.
+          {account.user ? " Znajomi (Ustawienia → Znajomi): przy włączonym GPS i udostępnianiu serwer RoadPilot trzyma Twoją ostatnią pozycję, prędkość, postój, cel i stan tachografu — widzą je tylko zaakceptowani znajomi; wyłączenie udostępniania kasuje te dane." : ""}
         </p>
         {confirmReset ? (
           <div className="row-buttons">

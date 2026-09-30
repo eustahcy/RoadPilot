@@ -10,6 +10,7 @@ import { parseValhalla, parseValhallaAlternates, valhallaRequest } from "./valha
 import { ALERT_KINDS, ALERT_TTL_H, applyVotes, blockingPoints, routeAlerts, routeBoxes, routeWarnings } from "./warnings.mjs";
 import { compareReports, REPORT_TO_OSM } from "./compare.mjs";
 import { parseRoutes, parseSearch, routeError, routeUrl, searchUrl, validPoint } from "./nav.mjs";
+import { cleanPresence, friendView } from "./friends.mjs";
 import { readFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { promisify } from "node:util";
@@ -631,6 +632,73 @@ routes["DELETE /api/collect"] = async (req, user) => {
   await db.query("DELETE FROM road_reports WHERE user_id = ?", [user.id]);
   await db.query("DELETE FROM alert_votes WHERE user_id = ?", [user.id]);
   await db.query("UPDATE users SET data_consent_at = NULL WHERE id = ?", [user.id]);
+  return [200, {}];
+};
+
+// ── Znajomi: zaproszenia po e-mailu i obecność (pozycja, postój, cel, tachograf) ──
+// Widzimy się dopiero po akceptacji drugiej strony. Obecność wysyła aplikacja co ~20 s przy włączonym GPS
+// i udostępnianiu; wyłączenie udostępniania kasuje wiersz z bazy.
+
+const FRIENDS_SQL = `
+  SELECT f.user_id, f.friend_id, f.accepted_at, u.email, u.name, p.data AS presence, p.updated_at AS presence_at
+  FROM friends f
+  JOIN users u ON u.id = IF(f.user_id = ?, f.friend_id, f.user_id)
+  LEFT JOIN presence p ON p.user_id = u.id
+  WHERE f.user_id = ? OR f.friend_id = ?
+  ORDER BY f.accepted_at IS NULL, u.name, u.email`;
+
+routes["GET /api/friends"] = async (req, user) => {
+  const [rows] = await db.query(FRIENDS_SQL, [user.id, user.id, user.id]);
+  const now = Date.now();
+  return [200, { friends: rows.map((r) => friendView(r, user.id, now)) }];
+};
+
+routes["POST /api/friends/invite"] = async (req, user) => {
+  const email = String((await readJson(req)).email ?? "").trim().toLowerCase();
+  if (!EMAIL_RE.test(email)) throw new HttpError(400, "Podaj prawidłowy adres e-mail.");
+  if (email === user.email) throw new HttpError(400, "To Twój własny adres.");
+  // Zaproszenia zdradzają, czy konto istnieje — dlatego limit prób jak przy logowaniu.
+  if (limited(`inv:${user.id}`)) throw new HttpError(429, "Za dużo zaproszeń. Spróbuj za kilkanaście minut.");
+  const [rows] = await db.query("SELECT id FROM users WHERE email = ?", [email]);
+  if (!rows.length) throw new HttpError(404, "Nie ma konta RoadPilot z tym adresem. Znajomy musi najpierw założyć konto.");
+  const other = rows[0].id;
+  // Druga strona już nas zaprosiła → to jest akceptacja.
+  const [back] = await db.query("SELECT accepted_at FROM friends WHERE user_id = ? AND friend_id = ?", [other, user.id]);
+  if (back.length) {
+    if (!back[0].accepted_at) await db.query("UPDATE friends SET accepted_at = NOW() WHERE user_id = ? AND friend_id = ?", [other, user.id]);
+    return [200, { relation: "accepted" }];
+  }
+  await db.query("INSERT IGNORE INTO friends (user_id, friend_id) VALUES (?, ?)", [user.id, other]);
+  return [201, { relation: "invited" }];
+};
+
+routes["POST /api/friends/accept"] = async (req, user) => {
+  const id = Number((await readJson(req)).id);
+  const [r] = await db.query("UPDATE friends SET accepted_at = NOW() WHERE user_id = ? AND friend_id = ? AND accepted_at IS NULL", [id, user.id]);
+  if (!r.affectedRows) throw new HttpError(404, "Nie ma takiego zaproszenia.");
+  return [200, {}];
+};
+
+/** Usunięcie znajomego, odrzucenie albo wycofanie zaproszenia — w obie strony. */
+routes["DELETE /api/friends"] = async (req, user) => {
+  const id = Number((await readJson(req)).id);
+  await db.query("DELETE FROM friends WHERE (user_id = ? AND friend_id = ?) OR (user_id = ? AND friend_id = ?)", [user.id, id, id, user.id]);
+  return [200, {}];
+};
+
+routes["POST /api/presence"] = async (req, user) => {
+  const body = await readJson(req);
+  if (body.off) {
+    await db.query("DELETE FROM presence WHERE user_id = ?", [user.id]);
+    return [200, {}];
+  }
+  let p;
+  try {
+    p = cleanPresence(body, Date.now());
+  } catch (e) {
+    throw new HttpError(400, e.message);
+  }
+  await db.query("INSERT INTO presence (user_id, data) VALUES (?, ?) ON DUPLICATE KEY UPDATE data = VALUES(data), updated_at = NOW(3)", [user.id, JSON.stringify(p)]);
   return [200, {}];
 };
 

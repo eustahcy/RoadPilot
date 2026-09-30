@@ -127,3 +127,25 @@ CREATE TABLE IF NOT EXISTS alert_votes (
   KEY (source, ref_id),
   CONSTRAINT fk_votes_user FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Znajomi (2026-09-30): zaproszenie po e-mailu, widoczność dopiero po akceptacji drugiej strony (accepted_at).
+-- Jeden wiersz na parę: user_id = kto zaprosił, friend_id = zaproszony.
+CREATE TABLE IF NOT EXISTS friends (
+  user_id INT UNSIGNED NOT NULL,
+  friend_id INT UNSIGNED NOT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  accepted_at DATETIME NULL,
+  PRIMARY KEY (user_id, friend_id),
+  KEY (friend_id),
+  CONSTRAINT fk_friends_user FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE,
+  CONSTRAINT fk_friends_friend FOREIGN KEY (friend_id) REFERENCES users (id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Obecność dla znajomych: ostatnia pozycja, prędkość, postój, cel i stan tachografu (JSON, patrz friends.mjs cleanPresence).
+-- Jeden wiersz na konto, nadpisywany; wyłączenie udostępniania kasuje wiersz. Starsze niż PRESENCE_TTL = „brak sygnału”.
+CREATE TABLE IF NOT EXISTS presence (
+  user_id INT UNSIGNED NOT NULL PRIMARY KEY,
+  data TEXT NOT NULL,
+  updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+  CONSTRAINT fk_presence_user FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

@@ -1,0 +1,110 @@
+// Znajomi: co wysyłamy o sobie (obecność) i jak opisujemy znajomego — odległość, status, od kiedy trwa.
+// Czyste funkcje; sieć jest w src/friends.ts.
+
+import { distanceM, Live } from "./gps";
+import { Plan } from "./plan";
+import { DriverStatus, fmtDuration } from "./scenarios";
+import { ActiveStop } from "./stop";
+
+export type PresenceStatus = "driving" | "standing" | "break" | "rest" | "dayEnd";
+
+/** To, co znajomi widzą o nas (server/friends.mjs → cleanPresence). Czasy w ms, odległości w km. */
+export interface Presence {
+  lat: number;
+  lon: number;
+  kmh: number | null;
+  heading: number | null;
+  status: PresenceStatus;
+  /** Od kiedy trwa jazda / postój. */
+  since: number | null;
+  /** Planowana długość postoju (min); null = do ruszenia. */
+  targetMin: number | null;
+  dest: string;
+  arrival: number | null;
+  leftKm: number | null;
+  driveLeftMin: number | null;
+  untilBreakMin: number | null;
+}
+
+export interface Friend {
+  id: number;
+  name: string;
+  email: string;
+  /** accepted = widzimy się; invited = my zaprosiliśmy, czeka; pending = zaprosili nas, do akceptacji. */
+  relation: "accepted" | "invited" | "pending";
+  /** null = brak świeżego sygnału (aplikacja zamknięta, GPS lub udostępnianie wyłączone). */
+  presence: (Presence & { at: number }) | null;
+}
+
+/** Poniżej tej prędkości uznajemy, że stoi (bez oznaczonego postoju). */
+const STANDING_KMH = 3;
+
+/**
+ * Nasza obecność do wysłania. `since` dla jazdy = początek dnia pracy (shiftStart), dla postoju = jego start.
+ * Bez pozycji nie ma czego wysyłać → undefined.
+ */
+export function presenceOf(live: Live | null, stop: ActiveStop | null, shiftStart: number, status: DriverStatus, plan: Plan | undefined, dest: string, leftKm: number): Presence | undefined {
+  if (!live) return undefined;
+  const st: PresenceStatus = stop ? (stop.dayEnd ? "dayEnd" : stop.targetMin !== null && stop.targetMin >= 540 ? "rest" : "break") : live.kmh !== null && live.kmh < STANDING_KMH ? "standing" : "driving";
+  return {
+    lat: live.lat,
+    lon: live.lon,
+    kmh: live.kmh === null ? null : Math.round(live.kmh),
+    heading: live.heading,
+    status: st,
+    since: stop ? stop.start : shiftStart,
+    targetMin: stop?.targetMin ?? null,
+    dest,
+    arrival: plan?.arrival ?? null,
+    leftKm: Math.round(leftKm),
+    driveLeftMin: Math.round(status.driveLeftToday),
+    untilBreakMin: Math.round(status.untilBreak),
+  };
+}
+
+export const STATUS_LABEL: Record<PresenceStatus, string> = {
+  driving: "Jedzie",
+  standing: "Stoi",
+  break: "Przerwa",
+  rest: "Odpoczynek",
+  dayEnd: "Koniec dnia",
+};
+
+export interface FriendInfo {
+  /** Odległość w linii prostej od nas (km) — undefined, gdy nie znamy własnej pozycji. */
+  km?: number;
+  status: string;
+  /** „od 25 min”, „25 min z 45 min”, „jedzie 3 h 10 min” — zależnie od statusu. */
+  duration: string;
+  /** Postój przekroczył plan albo jazda ciągła przy limicie. */
+  tone?: "warn" | "ok";
+}
+
+/** Opis znajomego do listy i kafelka. `me` = nasza pozycja (może jej nie być). */
+export function describeFriend(p: Presence & { at: number }, me: { lat: number; lon: number } | null, now: number): FriendInfo {
+  const km = me ? distanceM(me, p) / 1000 : undefined;
+  const elapsed = p.since !== null ? Math.max(0, (now - p.since) / 60_000) : undefined;
+  let duration = "";
+  let tone: FriendInfo["tone"];
+  if (p.status === "break" || p.status === "rest" || p.status === "dayEnd") {
+    if (elapsed !== undefined) {
+      duration = p.targetMin !== null ? `${fmtDuration(elapsed)} z ${fmtDuration(p.targetMin)}` : `od ${fmtDuration(elapsed)}`;
+      if (p.targetMin !== null && elapsed >= p.targetMin) tone = "ok";
+    }
+  } else if (p.status === "driving") {
+    duration = elapsed !== undefined ? `w trasie ${fmtDuration(elapsed)}` : "";
+    if (p.untilBreakMin !== null && p.untilBreakMin <= 30) tone = "warn";
+  }
+  return { km, status: STATUS_LABEL[p.status], duration, tone };
+}
+
+/** Najbliższy znajomy z sygnałem — do kafelka HUD. */
+export function nearestFriend(friends: Friend[], me: { lat: number; lon: number } | null): { friend: Friend; km?: number } | undefined {
+  let best: { friend: Friend; km?: number } | undefined;
+  for (const f of friends) {
+    if (f.relation !== "accepted" || !f.presence) continue;
+    const km = me ? distanceM(me, f.presence) / 1000 : undefined;
+    if (!best || (km !== undefined && (best.km === undefined || km < best.km))) best = { friend: f, km };
+  }
+  return best;
+}

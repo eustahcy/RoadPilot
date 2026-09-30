@@ -26,6 +26,8 @@ import { HUD_STYLES } from "../hudConfig";
 import { ReportKind } from "../collect";
 import { ReportSheet } from "./ReportSheet";
 import { ActiveStopPanel, confirmStartDay, fmtTimer, StopControlsProps, StopPicker } from "./StopControls";
+import { describeFriend, Friend, nearestFriend } from "../core/friends";
+import { FriendTile } from "./Friends";
 
 interface Props {
   origin: string;
@@ -76,6 +78,8 @@ interface Props {
   voice: { supported: boolean; on: boolean; toggle: () => void };
   /** Zgłoszenia z drogi do mapy RoadPilot — tylko ze zgodą kierowcy. */
   report?: { onSend: (kind: ReportKind, value: number | null) => Promise<void>; onVote: (w: RouteWarning, vote: 1 | -1) => Promise<void> };
+  /** Znajomi z konta (kafelek „Najbliższy znajomy”, znaczniki na mapie) — undefined bez konta. */
+  friends?: Friend[];
 }
 
 interface Floating {
@@ -261,7 +265,7 @@ export function HudView(p: Props) {
       <div className={`hud navmode ${p.mirror ? "mirror" : ""}`}>
         <NavVoice nav={p.nav} track={track} kmh={fresh?.kmh ?? null} enabled={p.voice.on} />
         <div className="nm-map">
-          {p.nav && p.mapToken ? <HudRouteMap nav={p.nav} track={track} live={fresh} token={p.mapToken} anchorY={0.6} zoomOffset={zoomOffset} /> : <div className="hud-map empty" />}
+          {p.nav && p.mapToken ? <HudRouteMap nav={p.nav} track={track} live={fresh} token={p.mapToken} anchorY={0.6} zoomOffset={zoomOffset} friends={show.friends ? p.friends : undefined} /> : <div className="hud-map empty" />}
         </div>
 
         <header className="nm-top">
@@ -394,6 +398,7 @@ export function HudView(p: Props) {
   const info = [
     show.better && p.better && "1.6fr",
     show.parking && "1.3fr",
+    show.friends && p.friends && "1.3fr",
     show.service && "1fr",
     apps && "auto",
   ].filter(Boolean) as string[];
@@ -453,6 +458,7 @@ export function HudView(p: Props) {
           <div className={`hud-info ${show.better && p.better ? "with-better" : ""} ${apps ? "with-apps" : ""}`} style={{ "--info": info.join(" ") } as CSSProperties}>
             {show.better && p.better && <BetterCard better={p.better} now={now} onPick={p.onBetter} />}
             {show.parking && <ParkingTile gpsOn={p.gpsOn} live={p.live} parkings={p.parkings} found={parking} />}
+            {show.friends && p.friends && <FriendTile friends={p.friends} me={p.live} now={now} />}
             {show.service && <ServiceTile service={p.service} />}
             {apps}
           </div>
@@ -672,6 +678,11 @@ function MinStats(p: Props & { now: number; parking?: NearestStation<Parking>; o
   if (show.parking) {
     const ok = p.parking && p.parking.ahead !== false ? p.parking : undefined;
     out.push({ key: "parking", label: ok ? PARKING_TITLE[ok.station.kind].replace("Najbliższy ", "") : "MOP", value: ok ? fmtStationKm(ok.km) : "—", sub: ok ? ok.station.name : undefined });
+  }
+  if (show.friends && p.friends) {
+    const n = nearestFriend(p.friends, p.live);
+    const info = n?.friend.presence ? describeFriend(n.friend.presence, p.live, now) : undefined;
+    out.push({ key: "friend", label: n ? n.friend.name : "Znajomi", value: info ? (info.km !== undefined ? fmtKm(info.km) : info.status) : "—", sub: info ? [info.km !== undefined ? info.status : "", info.duration].filter(Boolean).join(" · ") : "nikt nie nadaje", tone: info?.tone === "warn" ? "warn" : undefined });
   }
   if (show.service && p.service.level !== "none") {
     const km = p.service.kmLeft;

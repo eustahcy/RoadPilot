@@ -928,3 +928,28 @@ input[type="number"]::-webkit-inner-spin-button, input[type="number"]::-webkit-o
 .nav-trip small { color: var(--mute); font-size: 11px; font-weight: 650; }
 .nav-trip b { font-size: 18px; }
 .route-hint { margin: 4px 4px 0; }
+
+/* Znajomi: lista na Planie i w Ustawieniach, kafelek HUD, znaczniki na mapie */
+.friends { list-style: none; margin: 10px 0 0; padding: 0; display: grid; gap: 8px; }
+.friend { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 12px; padding: 10px 12px; border-radius: 14px; background: #10161d; border: 1px solid #222b35; }
+.friend.offline { opacity: .6; }
+.friend.warn { border-color: rgba(232, 180, 76, .45); }
+.friend.ok { border-color: rgba(66, 211, 146, .45); }
+.friend-avatar { display: grid; place-items: center; width: 38px; height: 38px; border-radius: 50%; background: rgba(78, 161, 255, .18); color: var(--blue); font-weight: 850; font-size: 17px; }
+.friend-body { display: grid; gap: 2px; min-width: 0; }
+.friend-body b { font-size: 15px; }
+.friend-body .muted { line-height: 1.4; }
+.friend-status { font-size: 13px; color: var(--dim); }
+.friend-status strong { color: var(--text); }
+.friend.warn .friend-status strong { color: var(--amber); }
+.friend.ok .friend-status strong { color: var(--green); }
+.friend-km { display: grid; text-align: right; }
+.friend-km strong { font-size: 18px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.friend-km small { color: var(--mute); font-size: 10px; }
+.friends.manage .row-buttons { margin-top: 0; }
+.hud-info-tile.is-friend { border-color: rgba(78, 161, 255, .55); }
+.hud-avatar { display: grid; place-items: center; flex: none; width: calc(7 * var(--u)); height: calc(7 * var(--u)); border-radius: 50%; background: rgba(78, 161, 255, .22); color: #8ec3ff; font-size: calc(4 * var(--u)); font-weight: 900; line-height: 1; }
+.hud-map-friend circle { fill: #4ea1ff; stroke: #08111a; stroke-width: 3; }
+.hud-map-friend.stopped circle { fill: #e8b44c; }
+.hud-map-friend rect { fill: rgba(8, 17, 26, .85); stroke: rgba(140, 175, 195, .4); stroke-width: 1; }
+.hud-map-friend text { fill: #eef3f6; font: 800 15px system-ui, sans-serif; text-anchor: middle; }

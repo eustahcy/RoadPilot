@@ -31,6 +31,9 @@ import { useWorkReminders } from "./components/Reminders";
 import { workStatus } from "./core/workday";
 import { FloatLine, useFloating } from "./floating";
 import { HudStyle } from "./hudConfig";
+import { useFriends } from "./friends";
+import { presenceOf } from "./core/friends";
+import { FriendsCard } from "./components/Friends";
 
 type Tab = "plan" | "route" | "driver" | "history" | "settings";
 
@@ -185,6 +188,10 @@ function App() {
   const pickBetter = (b: Better) =>
     b.kind === "scenario" ? choose(b.id) : setState((s) => ({ ...s, settings: { ...s.settings, [b.option]: true } }));
   const service = serviceStatus(settings.service, state.odoKm, now);
+  // Znajomi: nasza obecność (pozycja, postój, cel, tachograf) tylko z kontem, przy włączonym GPS i udostępnianiu.
+  const presence = useMemo(() => presenceOf(live, state.stop, state.driver.shiftStart, status, activePlan, trip.destination, route.totalKm), [live, state.stop, state.driver.shiftStart, status, activePlan, trip.destination, route.totalKm]);
+  const friends = useFriends(auth?.token ?? null, settings.friendsShare && settings.gps, presence);
+  const me = live ? { lat: live.lat, lon: live.lon } : null;
 
   // Pływające okienko: przyjazd i na zmianę przerwa / odpoczynek / koniec pracy — z tych samych danych co HUD.
   const floatLines: FloatLine[] = [];
@@ -326,6 +333,7 @@ function App() {
         musicApp={settings.musicApp}
         better={better}
         onBetter={pickBetter}
+        friends={auth ? friends.friends : undefined}
       />
     );
   }
@@ -374,6 +382,7 @@ function App() {
             onOngoing={setOngoing}
             liveKmh={liveKmh}
             stopControls={stopProps}
+            friends={auth ? <FriendsCard api={friends} me={me} now={now} onManage={() => { go("settings"); setSettingsCat("friends"); }} /> : null}
             gps={
               <GpsCard
                 on={settings.gps}
@@ -425,6 +434,7 @@ function App() {
             onPlanTime={(t) => setState((s) => ({ ...s, planTime: t }))}
             onReset={() => setState(defaultState())}
             navAccess={navAccess}
+            friends={{ api: auth ? friends : null, gpsOn: settings.gps }}
             account={{
               user: auth?.user ?? null,
               token: auth?.token ?? null,

@@ -3,6 +3,8 @@ import { Live } from "../core/gps";
 import { bearingAtKm, isOffRoute, lanesAhead, locate, NAV, NavInstruction, nextInstruction, pointAtKm, RoutePos, routeSlice, speedLimitAt } from "../core/navmatch";
 import { isAhead, jamMatters, jamTone, NavPlace, NavRoute, TrafficSection, warningText } from "../nav";
 import { MapView } from "./MapView";
+import { Friend } from "../core/friends";
+import { distanceM } from "../core/gps";
 
 /** Nawigacja w HUD: trasa (może jej nie być w tym urządzeniu — wtedy cel z konta) i wyznaczanie od bieżącej pozycji. */
 export interface HudNavData {
@@ -245,7 +247,7 @@ const MAP_PITCH = 52;
  * czerwono z opóźnieniem „+10 min”), punkt manewru,
  * cel; zielona strzałka = my (obrócona o różnicę między naszym kierunkiem a kierunkiem trasy).
  */
-export function HudRouteMap({ nav, track, live, token, anchorY = 0.8, zoomOffset = 0 }: { nav: HudNavData; track: NavTrack; live: Live | null; token: string; anchorY?: number; zoomOffset?: number }) {
+export function HudRouteMap({ nav, track, live, token, anchorY = 0.8, zoomOffset = 0, friends }: { nav: HudNavData; track: NavTrack; live: Live | null; token: string; anchorY?: number; zoomOffset?: number; friends?: Friend[] }) {
   const route = nav.route;
   const lastBearing = useRef(0);
   const zoomRef = useRef<number | null>(null);
@@ -279,6 +281,8 @@ export function HudRouteMap({ nav, track, live, token, anchorY = 0.8, zoomOffset
   });
   // Etykieta stoi prosto: cofamy obrót mapy i jej pochylenie (rotateX ściska pion o cos(pitch)).
   const upright = `rotate(${bearing}) scale(1 ${(1 / Math.cos((MAP_PITCH * Math.PI) / 180)).toFixed(3)})`;
+  // Znajomi z sygnałem: punkt + imię i km od nas (bez limitu odległości — mapa i tak pokazuje tylko okolicę).
+  const mates = (friends ?? []).filter((f) => f.relation === "accepted" && f.presence).map((f) => ({ f, p: f.presence!, km: live ? distanceM(live, f.presence!) / 1000 : undefined }));
 
   return (
     <div className="hud-map">
@@ -312,6 +316,18 @@ export function HudRouteMap({ nav, track, live, token, anchorY = 0.8, zoomOffset
                   <g key={`l${j.t.km}`} className={`hud-map-delay ${j.tone}`} transform={`translate(${x.toFixed(1)} ${y.toFixed(1)}) ${upright}`}>
                     <rect x={-w / 2} y={-40} width={w} height={26} rx={13} />
                     <text x={0} y={-22}>{text}</text>
+                  </g>
+                );
+              })}
+              {mates.map(({ f, p, km }) => {
+                const [x, y] = px(p);
+                const text = km !== undefined ? `${f.name} · ${km < 10 ? km.toFixed(1).replace(".", ",") : Math.round(km)} km` : f.name;
+                const w = text.length * 8.5 + 16;
+                return (
+                  <g key={`f${f.id}`} className={`hud-map-friend ${p.status === "driving" ? "" : "stopped"}`} transform={`translate(${x.toFixed(1)} ${y.toFixed(1)}) ${upright}`}>
+                    <circle r="9" />
+                    <rect x={-w / 2} y={-40} width={w} height={24} rx={12} />
+                    <text x={0} y={-23}>{text}</text>
                   </g>
                 );
               })}

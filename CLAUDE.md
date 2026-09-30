@@ -87,7 +87,14 @@ src/api.ts         zapytania do API, token sesji (localStorage "roadpilot:auth")
 src/sync.ts        useSync: stan ↔ konto (ostatni zapis wygrywa; wysyłka co ≤ 30 s i przy schowaniu, pobranie przy starcie/powrocie);
                    nie wysyła track/hud/planTime; meta w "roadpilot:sync" { rev, dirty }
 src/components/AuthScreen.tsx  logowanie / rejestracja / „Kontynuuj bez konta”
+src/core/friends.ts  znajomi: presenceOf (co wysyłamy: pozycja, prędkość, status driving/standing/break/rest/dayEnd, since, cel, przyjazd, tachograf),
+                   describeFriend (km w linii prostej, status, „25 min z 45 min”), nearestFriend; testy friends.test.ts
+src/friends.ts     useFriends: GET /api/friends co 30 s (gdy widoczna), POST /api/presence co 20 s tylko z kontem + GPS + friendsShare
+                   + ≥1 zaakceptowany znajomy; wyłączenie → POST {off:true} kasuje obecność. Friends.tsx = karta na Planie, Ustawienia → Znajomi, kafelek HUD
 public/sw.js       service worker (cache "roadpilot-vN"): nawigacja network-first, assets cache-first, /api/ zawsze z sieci
+server/friends.mjs   znajomi: cleanPresence (walidacja obecności, pozycja do 1e-4°), friendView (relation accepted/invited/pending, obecność tylko
+                   świeża ≤ PRESENCE_TTL 10 min); tabele friends (user_id zaprasza friend_id, accepted_at) i presence (JSON, 1 wiersz na konto);
+                   /api/friends (GET), /api/friends/invite|accept (POST), DELETE /api/friends, POST /api/presence — wszystkie z kontem
 server/            RoadPilot API: index.mjs (node:http + mysql2), schema.sql; nav.mjs = TomTom (routeUrl, parseRoute, parseSearch) + nav.test.mjs;
                    /api/nav/* tylko Premium (users.premium_until / role=admin) + limit na IP + dzienny limit na konto + budżet TomTom
                    (api_usage, okres TOMTOM_PERIOD=month|day, próg 80% limitów TOMTOM_LIMIT_SEARCH/ROUTING); collect.mjs + /api/consent,

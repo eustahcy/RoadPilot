@@ -73,6 +73,8 @@ src/components/MapView.tsx  mapa bez bibliotek: kafelki TomTom 512 px (noc) prze
                    AdminMap.tsx = podgląd danych (warstwy OSM, zgłoszenia, ślady)
 src/components/HudNav.tsx  useNavTrack (pozycja na trasie, poza trasą → onReroute po 15 s; brak trasy w urządzeniu, a jest cel → od razu; max 1/min),
                    HudNav (manewr + pasy + ograniczenie), HudRouteMap (styl HUD „nav”: mapa TomTom pochylona, kierunek jazdy w górę, trasa, zielona strzałka = my; zoom od prędkości)
+                   useSmoothPosition — jak w nawigacjach: między odczytami GPS przewidujemy ruch z ostatniej prędkości (po trasie / wzdłuż kierunku),
+                   20 klatek/s, nowy odczyt koryguje płynnie przez 1 s (SMOOTH); bez tego mapa skakała co sekundę
 src/collect.ts     mapa RoadPilot (za zgodą users.data_consent_at): useTraceCollector (ślad co 5 s / 60 m, >8 km/h, tylko PL, bufor w localStorage
                    "roadpilot:trace", wysyłka co 5 min / 400 pkt), sendReport, setConsent, deleteMyMapData; MapConsent.tsx, ReportSheet.tsx
 src/voice.ts       komunikaty głosowe (Web Speech, pl-PL): useNavVoice — manewry (progi zależne od prędkości) i ostrzeżenia ≤ 1 km; spokenDist

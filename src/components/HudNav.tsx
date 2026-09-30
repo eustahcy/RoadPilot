@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Live } from "../core/gps";
 import { alongRoute, bearingAtKm, isOffRoute, lanesAhead, locate, NAV, NavInstruction, nextInstruction, pointAtKm, RoutePos, routeSlice, speedLimitAt } from "../core/navmatch";
 import { isAhead, jamMatters, jamTone, NavPlace, NavRoute, TrafficSection, warningText } from "../nav";
@@ -243,6 +243,82 @@ function navZoom(kmh: number | null) {
 
 const MAP_PITCH = 52;
 
+/** Płynny ruch mapy między odczytami GPS. */
+const SMOOTH = {
+  /** Co ile ms przesuwamy mapę (20 klatek/s wystarcza — reszta w CSS transition). */
+  frameMs: 50,
+  /** Przez tyle ms po nowym odczycie wygaszamy różnicę między przewidywaniem a odczytem (bez skoku). */
+  correctMs: 1000,
+  /** Bez odczytu dłużej niż tyle s mapa staje — przewidywanie nie może uciec w siną dal. */
+  maxPredictS: 5,
+} as const;
+
+interface Shown {
+  lat: number;
+  lon: number;
+  /** Km na trasie, gdy jedziemy po niej. */
+  km?: number;
+  bearing?: number;
+}
+
+/**
+ * Pozycja do pokazania na mapie: jak w nawigacjach, między odczytami GPS (co ~1 s) przewidujemy ruch z ostatniej
+ * prędkości — po trasie (przyciągnięci do niej), a poza trasą wzdłuż kierunku. Nowy odczyt nie przestawia mapy skokiem:
+ * różnicę między przewidywaniem a odczytem wygaszamy przez SMOOTH.correctMs. Bez tego mapa skakała co sekundę.
+ */
+function useSmoothPosition(route: NavRoute | null, pos: RoutePos | undefined, off: boolean, live: Live | null): Shown | undefined {
+  const [shown, setShown] = useState<Shown | undefined>(undefined);
+  const shownRef = useRef<Shown | undefined>(undefined);
+  // Ostatni odczyt i korekta = to, co pokazywaliśmy w chwili odczytu, minus odczyt (wygaszana do zera).
+  const fix = useRef<{ live: Live; km?: number; at: number; corrKm: number; corrLat: number; corrLon: number } | null>(null);
+  const onRoute = !!route && !!pos && !off;
+  const fixT = live?.t;
+  useEffect(() => {
+    if (!live) {
+      fix.current = null;
+      return;
+    }
+    const s = shownRef.current;
+    const km = onRoute ? pos!.km : undefined;
+    fix.current = {
+      live,
+      km,
+      at: performance.now(),
+      corrKm: s?.km !== undefined && km !== undefined ? s.km - km : 0,
+      corrLat: s && km === undefined ? s.lat - live.lat : 0,
+      corrLon: s && km === undefined ? s.lon - live.lon : 0,
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fixT, onRoute]);
+
+  useEffect(() => {
+    const id = setInterval(() => {
+      const f = fix.current;
+      if (!f) return;
+      const dt = Math.min(SMOOTH.maxPredictS, (performance.now() - f.at) / 1000);
+      const fade = Math.max(0, 1 - (dt * 1000) / SMOOTH.correctMs);
+      const kmMoved = ((f.live.kmh ?? 0) / 3600) * dt;
+      let next: Shown;
+      if (f.km !== undefined && route) {
+        const km = Math.min(route.lengthKm, f.km + kmMoved + f.corrKm * fade);
+        const p = pointAtKm(route.points, km)!;
+        next = { lat: p.lat, lon: p.lon, km, bearing: bearingAtKm(route.points, km, 0.12) };
+      } else {
+        // Poza trasą: wzdłuż kierunku z odczytu (1° szerokości ≈ 111,32 km).
+        const h = f.live.heading;
+        const dLat = h === null ? 0 : (kmMoved * Math.cos((h * Math.PI) / 180)) / 111.32;
+        const dLon = h === null ? 0 : (kmMoved * Math.sin((h * Math.PI) / 180)) / (111.32 * Math.cos((f.live.lat * Math.PI) / 180));
+        next = { lat: f.live.lat + dLat + f.corrLat * fade, lon: f.live.lon + dLon + f.corrLon * fade };
+      }
+      shownRef.current = next;
+      setShown(next);
+    }, SMOOTH.frameMs);
+    return () => clearInterval(id);
+  }, [route]);
+
+  return live ? shown : undefined;
+}
+
 /**
  * Mapa wokół nas: kierunek jazdy w górę, widok pochylony jak w nawigacji, trasa na niebiesko (utrudnienia na żółto /
  * czerwono z opóźnieniem „+10 min”), punkt manewru,
@@ -252,15 +328,17 @@ export function HudRouteMap({ nav, track, live, token, anchorY = 0.8, zoomOffset
   const route = nav.route;
   const lastBearing = useRef(0);
   const zoomRef = useRef<number | null>(null);
-  const center = live ?? (route ? pointAtKm(route.points, 0) : undefined);
   const pos = track.pos;
-  const routeBearing = route && pos && !track.off ? bearingAtKm(route.points, pos.km, 0.12) : undefined;
+  const smooth = useSmoothPosition(route, pos, track.off, live);
+  const center = smooth ?? live ?? (route ? pointAtKm(route.points, 0) : undefined);
+  const routeBearing = smooth?.bearing ?? (route && pos && !track.off ? bearingAtKm(route.points, pos.km, 0.12) : undefined);
   const bearing = routeBearing ?? live?.heading ?? lastBearing.current;
   lastBearing.current = bearing;
   const arrowTurn = live?.heading != null && (live.kmh ?? 0) >= 5 ? ((live.heading - bearing + 540) % 360) - 180 : 0;
   // Zoom zmienia się płynnie (bez skakania przy każdej zmianie prędkości).
   const target = navZoom(live?.kmh ?? null);
-  zoomRef.current = zoomRef.current === null ? target : zoomRef.current + (target - zoomRef.current) * 0.15;
+  // Przy 20 klatkach/s mały krok — inaczej zoom skakałby przy każdej zmianie prędkości.
+  zoomRef.current = zoomRef.current === null ? target : zoomRef.current + (target - zoomRef.current) * 0.03;
   const zoom = Math.max(12, Math.min(18, Math.round(zoomRef.current * 20) / 20 + zoomOffset));
 
   if (!center) return <div className="hud-map empty"><span>Czekam na pozycję GPS…</span></div>;
@@ -298,7 +376,7 @@ export function HudRouteMap({ nav, track, live, token, anchorY = 0.8, zoomOffset
         bearing={bearing}
         pitch={MAP_PITCH}
         anchorY={anchorY}
-        smoothMs={1000}
+        smoothMs={SMOOTH.frameMs * 3}
         overlay={(px) => {
           const d = (pts: { lat: number; lon: number }[]) => pts.map((p, i) => `${i ? "L" : "M"}${px(p).map((v) => v.toFixed(1)).join(" ")}`).join("");
           const np = next && route ? px(pointAtKm(route.points, next.ins.km)!) : null;

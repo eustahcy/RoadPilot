@@ -424,6 +424,7 @@ export function HudRouteMap({ nav, track, live, token, anchorY = 0.8, zoomOffset
         }}
       >
         <svg className="hud-map-me-wrap" style={{ left: "50%", top: `${anchorY * 100}%` }} viewBox="-30 -34 60 64" aria-hidden>
+          <path className="hud-map-me-halo" transform={`rotate(${arrowTurn})`} d="M0 -30 L22 24 L0 12 L-22 24 Z" />
           <path className="hud-map-me" transform={`rotate(${arrowTurn})`} d="M0 -30 L22 24 L0 12 L-22 24 Z" />
         </svg>
       </MapView>

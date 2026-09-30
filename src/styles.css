@@ -699,7 +699,8 @@ input[type="number"]::-webkit-inner-spin-button, input[type="number"]::-webkit-o
 .hud-map-route { fill: none; stroke: #3d8bff; stroke-width: calc(9 * var(--mu, 1)); stroke-linecap: round; stroke-linejoin: round; }
 .hud-map-next { fill: #fff; stroke: #0b3d80; }
 .hud-map-end { fill: #f4f8fa; stroke: #0b1218; stroke-width: 2; stroke-linejoin: round; }
-.hud-map-me { fill: #44f07c; stroke: #0b2a16; stroke-width: 4; stroke-linejoin: round; filter: drop-shadow(0 0 10px rgba(68, 240, 124, .7)); }
+.hud-map-me { fill: #44f07c; stroke: #0b2a16; stroke-width: 4; stroke-linejoin: round; }
+.hud-map-me-halo { fill: none; stroke: rgba(68, 240, 124, .45); stroke-width: 10; stroke-linejoin: round; }
 .hud-nm-speed { position: absolute; left: calc(2 * var(--u)); bottom: calc(1.6 * var(--u)); display: flex; align-items: baseline; gap: calc(.8 * var(--u)); padding: calc(.6 * var(--u)) calc(2 * var(--u)); border-radius: calc(2 * var(--u)); background: rgba(8, 14, 20, .78); line-height: 1; }
 .hud-nm-speed strong { font-family: Bahnschrift, "DIN Alternate", "Roboto Condensed", "Arial Narrow", ui-sans-serif, sans-serif; font-size: calc(11 * var(--u)); font-weight: 800; color: var(--hud-green); font-variant-numeric: tabular-nums; }
 .hud-nm-speed strong.none { color: #4a5a66; }
@@ -754,7 +755,8 @@ input[type="number"]::-webkit-inner-spin-button, input[type="number"]::-webkit-o
 .map-tile.empty { background: transparent; }
 .map-overlay { position: absolute; overflow: visible; pointer-events: none; }
 .map-credit { position: absolute; right: 6px; bottom: 4px; color: rgba(220, 230, 240, .55); font-size: 10px; pointer-events: none; }
-.hud-map .hud-map-me-wrap { position: absolute; width: 56px; height: 60px; margin: -32px 0 0 -28px; overflow: visible; z-index: 2; transform: translateZ(0); will-change: transform; }
+/* Strzałka „my” nad warstwą 3D: własny kontekst i z-index wyżej niż cokolwiek w mapie — na Androidzie potrafiła znikać w klatkach */
+.hud-map .hud-map-me-wrap { position: absolute; width: 56px; height: 60px; margin: -32px 0 0 -28px; overflow: visible; z-index: 5; isolation: isolate; pointer-events: none; }
 .hud-map .hud-map-route-edge { stroke-width: 15; }
 .hud-map .hud-map-route { stroke-width: 10; }
 .hud-map .hud-map-done { stroke-width: 8; }
@@ -829,13 +831,15 @@ input[type="number"]::-webkit-inner-spin-button, input[type="number"]::-webkit-o
 
 /* HUD — styl Nawigacja (projekt): mapa na cały ekran, karta manewru, przyciski z boku, karta 2×2, rząd przycisków */
 .hud.navmode { display: block; padding: 0; background: #0a1219; }
+/* Bez rozmycia tła (backdrop-filter) nad mapą 3D — na Androidzie wymuszało ponowną rasteryzację w każdej klatce (migotanie) */
+.hud.navmode .hud-pill { backdrop-filter: none; }
 .hud.navmode .nm-map { position: absolute; inset: 0; z-index: 0; }
 .hud.navmode .nm-map .hud-map { position: absolute; inset: 0; }
 /* Horyzont jak w nawigacji: u góry „niebo” zakrywa daleką, rozmytą mapę, pod nim mgiełka; na dole przyciemnienie pod kafelki */
 .hud.navmode .nm-map::after { content: ""; position: absolute; inset: 0; pointer-events: none; background: linear-gradient(to bottom, #0a1219 0, #0a1219 9%, rgba(16, 30, 42, .85) 13%, rgba(16, 30, 42, .35) 20%, transparent 32%, transparent 64%, rgba(7, 12, 17, .75) 100%); }
 .hud.navmode .nm-map::before { content: ""; position: absolute; left: 0; right: 0; top: 12.5%; height: 2px; z-index: 1; pointer-events: none; background: linear-gradient(90deg, transparent, rgba(140, 190, 220, .35), transparent); }
 .nm-top { position: absolute; z-index: 3; top: calc(1.6 * var(--u) + env(safe-area-inset-top)); left: calc(2 * var(--u) + env(safe-area-inset-left)); right: calc(2 * var(--u) + env(safe-area-inset-right)); display: flex; gap: calc(1.2 * var(--u)); align-items: stretch; }
-.nm-top .hud-nav.card { flex: 1; min-width: 0; flex-wrap: wrap; padding: calc(1.8 * var(--u)) calc(2.4 * var(--u)); border-radius: calc(3 * var(--u)); background: rgba(12, 20, 28, .9); border: 1px solid rgba(140, 175, 195, .25); backdrop-filter: blur(10px); box-shadow: 0 10px 30px rgba(0, 0, 0, .35); }
+.nm-top .hud-nav.card { flex: 1; min-width: 0; flex-wrap: wrap; padding: calc(1.8 * var(--u)) calc(2.4 * var(--u)); border-radius: calc(3 * var(--u)); background: rgba(12, 20, 28, .94); border: 1px solid rgba(140, 175, 195, .25); box-shadow: 0 10px 30px rgba(0, 0, 0, .35); }
 .hud-nav.card .hud-man svg { width: calc(11 * var(--u)); height: calc(11 * var(--u)); stroke: var(--hud-green); stroke-width: 3; filter: drop-shadow(0 0 8px rgba(68, 240, 124, .35)); }
 .hud-nav.card .hud-man b { font-size: calc(7 * var(--u)); color: var(--hud-green); line-height: 1; }
 .hud-nav.card .hud-man small { font-size: calc(3.4 * var(--u)); color: #eef3f6; font-weight: 750; }
@@ -896,7 +900,7 @@ input[type="number"]::-webkit-inner-spin-button, input[type="number"]::-webkit-o
 }
 .nm-notice { position: absolute; z-index: 3; left: 50%; top: 30%; transform: translateX(-50%); width: min(92%, 520px); padding: 12px; border-radius: 16px; background: rgba(12, 20, 28, .92); }
 .nm-bottom { position: absolute; z-index: 3; left: calc(2 * var(--u) + env(safe-area-inset-left)); right: calc(2 * var(--u) + env(safe-area-inset-right)); bottom: calc(1.6 * var(--u) + env(safe-area-inset-bottom)); display: grid; gap: calc(1.4 * var(--u)); }
-.nm-info { display: grid; grid-template-columns: 1fr 1fr; border-radius: calc(3 * var(--u)); background: rgba(12, 20, 28, .92); border: 1px solid rgba(140, 175, 195, .25); backdrop-filter: blur(10px); box-shadow: 0 10px 30px rgba(0, 0, 0, .35); overflow: hidden; }
+.nm-info { display: grid; grid-template-columns: 1fr 1fr; border-radius: calc(3 * var(--u)); background: rgba(12, 20, 28, .95); border: 1px solid rgba(140, 175, 195, .25); box-shadow: 0 10px 30px rgba(0, 0, 0, .35); overflow: hidden; }
 .nm-info > * { display: flex; gap: calc(2 * var(--u)); align-items: flex-start; min-width: 0; padding: calc(2 * var(--u)) calc(2.6 * var(--u)); border: 0; background: none; color: inherit; font: inherit; text-align: left; }
 .nm-info > :nth-child(2n) { border-left: 1px solid rgba(140, 175, 195, .18); }
 .nm-info > :nth-child(n + 3) { border-top: 1px solid rgba(140, 175, 195, .18); }
@@ -961,7 +965,7 @@ input[type="number"]::-webkit-inner-spin-button, input[type="number"]::-webkit-o
 .ghost.active { border-color: var(--green); color: var(--green); }
 .hud-info-tile.is-friend { border-color: rgba(78, 161, 255, .55); }
 .hud-avatar { display: grid; place-items: center; flex: none; width: calc(7 * var(--u)); height: calc(7 * var(--u)); border-radius: 50%; background: rgba(78, 161, 255, .22); color: #8ec3ff; font-size: calc(4 * var(--u)); font-weight: 900; line-height: 1; }
-.hud-map-friend path { fill: #4ea1ff; stroke: #08111a; stroke-width: 3; stroke-linejoin: round; filter: drop-shadow(0 0 8px rgba(78, 161, 255, .6)); }
-.hud-map-friend.stopped path { fill: #ef6a5b; filter: drop-shadow(0 0 8px rgba(239, 106, 91, .6)); }
+.hud-map-friend path { fill: #4ea1ff; stroke: #08111a; stroke-width: 3; stroke-linejoin: round; }
+.hud-map-friend.stopped path { fill: #ef6a5b; }
 .hud-map-friend rect { fill: rgba(8, 17, 26, .85); stroke: rgba(140, 175, 195, .4); stroke-width: 1; }
 .hud-map-friend text { fill: #eef3f6; font: 800 15px system-ui, sans-serif; text-anchor: middle; }

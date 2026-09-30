@@ -170,6 +170,8 @@ Widoki nie liczą reguł same — tylko formatują wyniki silnika.
 
 - Pełny ekran nie działa na iPhonie (Safari nie obsługuje Fullscreen API dla stron) — HUD pokazuje wtedy wskazówkę
   „Do ekranu początkowego”.
+- HUD styl „Nawigacja” na Androidzie: nad warstwą 3D mapy nie używać `backdrop-filter` ani SVG `filter: drop-shadow` — wymuszały
+  ponowną rasteryzację w każdej klatce (migotanie, znikająca strzałka); karty mają kryjące tło, strzałka obrys zamiast cienia.
 - HUD: odległość do MOP-u i znajomych po trasie tylko z trasą z nawigacji (Premium) i tylko dla punktów ≤ 300 m od niej
   (`navmatch.alongRoute`); bez trasy — w linii prostej. Km do serwisu liczy tylko GPS przy otwartej aplikacji.
 

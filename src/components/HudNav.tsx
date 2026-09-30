@@ -298,6 +298,7 @@ export function HudRouteMap({ nav, track, live, token, anchorY = 0.8, zoomOffset
         bearing={bearing}
         pitch={MAP_PITCH}
         anchorY={anchorY}
+        smoothMs={1000}
         overlay={(px) => {
           const d = (pts: { lat: number; lon: number }[]) => pts.map((p, i) => `${i ? "L" : "M"}${px(p).map((v) => v.toFixed(1)).join(" ")}`).join("");
           const np = next && route ? px(pointAtKm(route.points, next.ins.km)!) : null;

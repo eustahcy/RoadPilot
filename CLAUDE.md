@@ -65,9 +65,12 @@ src/tracking.ts    Geolocation.watchPosition + Wake Lock → applyFix na stanie 
                    endDay/startDay — koniec dnia = postój { dayEnd: true, 11 h }, nowy dzień zeruje liczniki;
                    startStop/finishStop — ręczny postój (ruszenie z GPS kończy go; GPS nie zalicza tego postoju drugi raz)
 src/ongoing.ts     stałe powiadomienie: cicha pętla audio (WAV generowany w pamięci) + Media Session, ongoingInfo = tekst karty
-src/core/navmatch.ts  prowadzenie: pointAtKm, bearingAtKm, routeSlice, locate (rzut GPS na trasę, okno wokół podpowiedzi), nextInstruction, lanesAhead, speedLimitAt, isOffRoute; NAV = progi
+src/core/navmatch.ts  prowadzenie: pointAtKm, bearingAtKm, routeSlice, locate (rzut GPS na trasę, okno wokół podpowiedzi), nextInstruction, lanesAhead, speedLimitAt, isOffRoute; NAV = progi;
+                   alongRoute / nearestOnRoute — km po trasie do punktu przy niej (MOP, znajomy; ON_ROUTE_M = 300)
 src/components/MapView.tsx  mapa bez bibliotek: kafelki TomTom 512 px (noc) przez /api/tiles z tokenem (fetch → blob), Web Mercator,
-                   obrót (bearing) i pochylenie (pitch) warstwy, nakładki SVG w układzie mapy; AdminMap.tsx = podgląd danych (warstwy OSM, zgłoszenia, ślady)
+                   obrót (bearing) i pochylenie (pitch) warstwy, nakładki SVG w układzie mapy; smoothMs = płynny dojazd między odczytami GPS
+                   (kafelki względem stałego punktu odniesienia, przesunięcie w transformacji warstwy z transition; bez tego mapa skakała co 1 s);
+                   AdminMap.tsx = podgląd danych (warstwy OSM, zgłoszenia, ślady)
 src/components/HudNav.tsx  useNavTrack (pozycja na trasie, poza trasą → onReroute po 15 s; brak trasy w urządzeniu, a jest cel → od razu; max 1/min),
                    HudNav (manewr + pasy + ograniczenie), HudRouteMap (styl HUD „nav”: mapa TomTom pochylona, kierunek jazdy w górę, trasa, zielona strzałka = my; zoom od prędkości)
 src/collect.ts     mapa RoadPilot (za zgodą users.data_consent_at): useTraceCollector (ślad co 5 s / 60 m, >8 km/h, tylko PL, bufor w localStorage
@@ -160,7 +163,8 @@ Widoki nie liczą reguł same — tylko formatują wyniki silnika.
 
 - Pełny ekran nie działa na iPhonie (Safari nie obsługuje Fullscreen API dla stron) — HUD pokazuje wtedy wskazówkę
   „Do ekranu początkowego”.
-- HUD: odległość do MOP-u jest w linii prostej, nie po drodze; km do serwisu liczy tylko GPS przy otwartej aplikacji.
+- HUD: odległość do MOP-u i znajomych po trasie tylko z trasą z nawigacji (Premium) i tylko dla punktów ≤ 300 m od niej
+  (`navmatch.alongRoute`); bez trasy — w linii prostej. Km do serwisu liczy tylko GPS przy otwartej aplikacji.
 
 - Liczniki tygodniowe w `DriverState` (`weekDrivenMin`, `prevWeekDrivenMin`, `extensionsLeft`) **nie przewijają się
   same po poniedziałku 00:00** — robi to tylko symulacja. Po zmianie tygodnia kierowca musi je poprawić ręcznie,

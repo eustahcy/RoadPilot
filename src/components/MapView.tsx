@@ -88,9 +88,15 @@ export interface MapViewProps {
   /** Przesuwanie i przybliżanie palcem / myszą (podgląd). */
   onMove?: (center: LatLon, zoom: number) => void;
   className?: string;
+  /**
+   * Płynny dojazd do nowej pozycji i obrotu (ms) — GPS podaje pozycję co ~1 s, bez tego mapa skakałaby co sekundę.
+   * Kafelki leżą względem stałego punktu odniesienia, a przesunięcie do bieżącej pozycji jest w transformacji warstwy
+   * (animowanej CSS). Punkt odniesienia przenosimy dopiero, gdy odjedziemy daleko — wtedy bez animacji.
+   */
+  smoothMs?: number;
 }
 
-export function MapView({ token, center, zoom, bearing = 0, pitch = 0, anchorY = 0.5, overlay, children, onMove, className = "" }: MapViewProps) {
+export function MapView({ token, center, zoom, bearing = 0, pitch = 0, anchorY = 0.5, overlay, children, onMove, className = "", smoothMs = 0 }: MapViewProps) {
   const box = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState({ w: 800, h: 500 });
   useEffect(() => {
@@ -123,10 +129,31 @@ export function MapView({ token, center, zoom, bearing = 0, pitch = 0, anchorY =
 
   const z = Math.max(3, Math.min(18, Math.floor(zoom)));
   const scale = 2 ** (zoom - z);
-  const [cx, cy] = worldPx(center, z);
+  const [pxX, pxY] = worldPx(center, z);
   // Warstwa większa niż ekran: po obrocie i pochyleniu nie może być pustych rogów.
   const reach = Math.hypot(size.w, size.h) * (pitch > 0 ? 1.9 : 0.75);
   const half = reach / scale;
+  // Punkt odniesienia kafelków (cx, cy): przy płynnej mapie zostaje w miejscu, aż odjedziemy o ćwierć zasięgu.
+  const origin = useRef<{ z: number; x: number; y: number } | null>(null);
+  const o = origin.current;
+  const rebased = !smoothMs || !o || o.z !== z || Math.hypot(pxX - o.x, pxY - o.y) > half / 4;
+  if (rebased) origin.current = { z, x: pxX, y: pxY };
+  const [cx, cy] = [origin.current!.x, origin.current!.y];
+  // Przeniesienie punktu odniesienia przesuwa kafelki i transformację naraz — ta klatka bez animacji, następna już z nią.
+  const [, bump] = useState(0);
+  const snap = useRef(false);
+  if (rebased) snap.current = true;
+  useEffect(() => {
+    if (!snap.current || !smoothMs) return;
+    const id = requestAnimationFrame(() => {
+      snap.current = false;
+      bump((n) => n + 1);
+    });
+    return () => cancelAnimationFrame(id);
+  });
+  // Obrót bez „długiej drogi” przez 360° (359° → 1° to obrót o 2°, nie o −358°).
+  const turn = useRef(bearing);
+  turn.current += ((bearing - turn.current + 540) % 360) - 180;
   /** Kafelki poziomu `lz` w zasięgu (koło, nie kwadrat), od najbliższych — te ładują się pierwsze. */
   const level = (lz: number, cachedOnly: boolean) => {
     const f = 2 ** (z - lz); // rozmiar kafelka poziomu lz w pikselach poziomu z (w jednostkach TILE)
@@ -157,7 +184,8 @@ export function MapView({ token, center, zoom, bearing = 0, pitch = 0, anchorY =
   const ax = size.w / 2;
   const ay = size.h * anchorY;
   const layer: CSSProperties = {
-    transform: `translate(${ax}px, ${ay}px) rotateX(${pitch}deg) rotate(${-bearing}deg)`,
+    transform: `translate(${ax}px, ${ay}px) rotateX(${pitch}deg) rotate(${-turn.current}deg) translate(${(-(pxX - cx) * scale).toFixed(1)}px, ${(-(pxY - cy) * scale).toFixed(1)}px)`,
+    transition: smoothMs && !snap.current ? `transform ${smoothMs}ms linear` : "none",
   };
 
   return (

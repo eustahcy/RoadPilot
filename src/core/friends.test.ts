@@ -45,6 +45,24 @@ describe("describeFriend", () => {
   });
 });
 
+describe("describeFriend po trasie", () => {
+  // Trasa na północ po południku 21°, punkt co 100 m, 10 km; my na 3. km.
+  const KM = 1 / 110.574;
+  const points: [number, number, number][] = Array.from({ length: 101 }, (_, i) => [52 + i * 0.1 * KM, 21, i * 0.1]);
+  const route = { points, km: 3 };
+  it("znajomy przy trasie: km po trasie i czy przed nami", () => {
+    const ahead = describeFriend({ ...base, lat: 52 + 7.5 * KM, lon: 21.001, status: "driving", since: null }, { lat: 52 + 3 * KM, lon: 21 }, now, route);
+    expect(ahead.km).toBeCloseTo(4.5, 1);
+    expect(ahead).toMatchObject({ onRoute: true, ahead: true });
+    expect(describeFriend({ ...base, lat: 52 + 1 * KM, lon: 21, status: "driving", since: null }, null, now, route)).toMatchObject({ onRoute: true, ahead: false });
+  });
+  it("znajomy daleko od trasy: linia prosta", () => {
+    const off = describeFriend({ ...base, lat: 52 + 5 * KM, lon: 21.05, status: "driving", since: null }, { lat: 52 + 3 * KM, lon: 21 }, now, route);
+    expect(off.onRoute).toBe(false);
+    expect(off.km).toBeGreaterThan(3);
+  });
+});
+
 describe("nearestFriend", () => {
   const f = (id: number, lat: number, relation: Friend["relation"] = "accepted", presence = true): Friend => ({ id, name: `K${id}`, email: "", relation, presence: presence ? { ...base, lat, status: "driving", since: null } : null });
   it("najbliższy spośród zaakceptowanych z sygnałem", () => {

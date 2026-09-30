@@ -1,24 +1,35 @@
 import { FormEvent, useState } from "react";
-import { describeFriend, Friend, nearestFriend } from "../core/friends";
+import { describeFriend, Friend, FriendInfo, MyRoute, nearestFriend } from "../core/friends";
 import { fmtClock, fmtKm } from "../format";
+
+/** Odległość do znajomego: poniżej 10 km z jednym miejscem po przecinku (0,2 km zamiast „0 km”). */
+export const fmtFriendDist = (km: number) => (km < 10 ? `${km.toFixed(1).replace(".", ",")} km` : fmtKm(km));
 import { FriendsApi } from "../friends";
 import { Toggle } from "./fields";
 
 interface CardProps {
   api: FriendsApi;
   me: { lat: number; lon: number } | null;
+  /** Nasza trasa z nawigacji — km do znajomego po trasie zamiast w linii prostej. */
+  route?: MyRoute;
   now: number;
   onManage: () => void;
 }
 
+/** „12 km po trasie przed Tobą” / „8 km za Tobą” / „6 km w linii prostej”. */
+export function fmtFriendKm(info: FriendInfo): string {
+  if (info.km === undefined) return "";
+  return `${fmtFriendDist(info.km)}${info.onRoute ? (info.ahead ? " przed Tobą" : " za Tobą") : info.onRoute === false ? " w linii prostej" : ""}`;
+}
+
 /** Karta na Planie: znajomi z sygnałem (odległość, status, od kiedy, cel) i zaproszenia do akceptacji. */
-export function FriendsCard({ api, me, now, onManage }: CardProps) {
+export function FriendsCard({ api, me, route, now, onManage }: CardProps) {
   const accepted = api.friends.filter((f) => f.relation === "accepted");
   const pending = api.friends.filter((f) => f.relation === "pending");
   if (!accepted.length && !pending.length) return null;
   // Z sygnałem najpierw, najbliżsi na górze; bez sygnału na końcu.
   const rows = accepted
-    .map((f) => ({ f, info: f.presence ? describeFriend(f.presence, me, now) : undefined }))
+    .map((f) => ({ f, info: f.presence ? describeFriend(f.presence, me, now, route) : undefined }))
     .sort((a, b) => (a.info?.km ?? Infinity) - (b.info?.km ?? Infinity) || Number(!a.info) - Number(!b.info));
   return (
     <section className="card">
@@ -59,7 +70,7 @@ export function FriendsCard({ api, me, now, onManage }: CardProps) {
                 <span className="muted small">brak sygnału — aplikacja zamknięta albo GPS wyłączony</span>
               )}
             </span>
-            <span className="friend-km">{info?.km !== undefined ? <><strong>{fmtKm(info.km)}</strong><small>od Ciebie</small></> : null}</span>
+            <span className="friend-km">{info?.km !== undefined ? <><strong>{fmtFriendDist(info.km)}</strong><small>{info.onRoute ? (info.ahead ? "po trasie, przed Tobą" : "po trasie, za Tobą") : "w linii prostej"}</small></> : null}</span>
           </li>
         ))}
       </ul>
@@ -150,16 +161,16 @@ export function FriendsSettings({ api, share, onShare, gpsOn, onLogin }: Setting
 }
 
 /** Kafelek HUD (styl zwykły): najbliższy znajomy. */
-export function FriendTile({ friends, me, now }: { friends: Friend[]; me: { lat: number; lon: number } | null; now: number }) {
-  const n = nearestFriend(friends, me);
-  const info = n?.friend.presence ? describeFriend(n.friend.presence, me, now) : undefined;
+export function FriendTile({ friends, me, now, route }: { friends: Friend[]; me: { lat: number; lon: number } | null; now: number; route?: MyRoute }) {
+  const n = nearestFriend(friends, me, route);
+  const info = n?.friend.presence ? describeFriend(n.friend.presence, me, now, route) : undefined;
   return (
     <div className={`hud-info-tile is-friend ${info?.tone ?? ""}`}>
       <span className="hud-avatar" aria-hidden>{n ? n.friend.name.charAt(0).toUpperCase() : "?"}</span>
       <span className="hud-info-text">
         <small>{n ? n.friend.name : "Znajomi"}</small>
-        <b className="ellipsis">{n && info ? `${info.km !== undefined ? fmtKm(info.km) : "—"} · ${info.status}` : "—"}</b>
-        <span>{n && info && n.friend.presence ? [info.duration, n.friend.presence.dest ? `→ ${n.friend.presence.dest}` : ""].filter(Boolean).join(" · ") : "nikt nie nadaje"}</span>
+        <b className="ellipsis">{n && info ? `${info.km !== undefined ? fmtFriendDist(info.km) : "—"} · ${info.status}` : "—"}</b>
+        <span>{n && info && n.friend.presence ? [info.onRoute ? (info.ahead ? "po trasie przed Tobą" : "po trasie za Tobą") : "", info.duration, n.friend.presence.dest ? `→ ${n.friend.presence.dest}` : ""].filter(Boolean).join(" · ") : "nikt nie nadaje"}</span>
       </span>
     </div>
   );

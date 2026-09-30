@@ -18,6 +18,8 @@ export interface NearestStation<T = Station> {
   km: number;
   /** Przed nami (w kierunku jazdy) — null, gdy kierunek nieznany. */
   ahead: boolean | null;
+  /** km liczone po trasie z nawigacji (miejsce leży przy trasie), nie w linii prostej. */
+  onRoute?: boolean;
 }
 
 export const STATIONS = {

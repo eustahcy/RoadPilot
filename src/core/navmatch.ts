@@ -141,3 +141,29 @@ export function routeSlice(points: RoutePoint[], from: number, to: number): { la
   if (end) out.push(end);
   return out;
 }
+
+/** Tak daleko od trasy (m) punkt wciąż liczymy jako „na trasie” (MOP przy zjeździe, znajomy na tej samej drodze). */
+export const ON_ROUTE_M = 300;
+
+export interface AlongRoute {
+  /** Km po trasie od nas: dodatnie = przed nami, ujemne = za nami. */
+  km: number;
+  offM: number;
+}
+
+/** Odległość po trasie do punktu, jeśli leży przy niej (≤ maxOffM); inaczej undefined. `myKm` = nasz rzut na trasę. */
+export function alongRoute(points: RoutePoint[], target: { lat: number; lon: number }, myKm: number, maxOffM = ON_ROUTE_M): AlongRoute | undefined {
+  const p = locate(points, target);
+  if (!p || p.offM > maxOffM) return undefined;
+  return { km: p.km - myKm, offM: p.offM };
+}
+
+/** Najbliższe przed nami po trasie spośród punktów leżących przy niej — np. MOP na naszej drodze. */
+export function nearestOnRoute<T extends { lat: number; lon: number }>(items: T[], points: RoutePoint[], myKm: number, maxOffM = ON_ROUTE_M): { item: T; km: number } | undefined {
+  let best: { item: T; km: number } | undefined;
+  for (const item of items) {
+    const a = alongRoute(points, item, myKm, maxOffM);
+    if (a && a.km >= 0 && (!best || a.km < best.km)) best = { item, km: a.km };
+  }
+  return best;
+}

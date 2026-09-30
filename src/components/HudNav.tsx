@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
 import { Live } from "../core/gps";
-import { bearingAtKm, isOffRoute, lanesAhead, locate, NAV, NavInstruction, nextInstruction, pointAtKm, RoutePos, routeSlice, speedLimitAt } from "../core/navmatch";
+import { alongRoute, bearingAtKm, isOffRoute, lanesAhead, locate, NAV, NavInstruction, nextInstruction, pointAtKm, RoutePos, routeSlice, speedLimitAt } from "../core/navmatch";
 import { isAhead, jamMatters, jamTone, NavPlace, NavRoute, TrafficSection, warningText } from "../nav";
 import { MapView } from "./MapView";
 import { Friend, STATUS_LABEL } from "../core/friends";
@@ -283,7 +283,11 @@ export function HudRouteMap({ nav, track, live, token, anchorY = 0.8, zoomOffset
   // Etykieta stoi prosto: cofamy obrót mapy i jej pochylenie (rotateX ściska pion o cos(pitch)).
   const upright = `rotate(${bearing}) scale(1 ${(1 / Math.cos((MAP_PITCH * Math.PI) / 180)).toFixed(3)})`;
   // Znajomi z sygnałem: punkt + imię i km od nas (bez limitu odległości — mapa i tak pokazuje tylko okolicę).
-  const mates = (friends ?? []).filter((f) => f.relation === "accepted" && f.presence).map((f) => ({ f, p: f.presence!, km: live ? distanceM(live, f.presence!) / 1000 : undefined }));
+  // Km po trasie, gdy znajomy jest przy naszej trasie; inaczej w linii prostej.
+  const mates = (friends ?? []).filter((f) => f.relation === "accepted" && f.presence).map((f) => {
+    const along = route && pos && !track.off ? alongRoute(route.points, f.presence!, pos.km) : undefined;
+    return { f, p: f.presence!, km: along ? Math.abs(along.km) : live ? distanceM(live, f.presence!) / 1000 : undefined };
+  });
 
   return (
     <div className="hud-map">

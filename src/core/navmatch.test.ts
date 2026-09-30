@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { distanceM } from "./gps";
-import { bearingAtKm, isOffRoute, lanesAhead, locate, nextInstruction, pointAtKm, RoutePoint, routeSlice, speedLimitAt } from "./navmatch";
+import { alongRoute, bearingAtKm, isOffRoute, lanesAhead, locate, nearestOnRoute, nextInstruction, pointAtKm, RoutePoint, routeSlice, speedLimitAt } from "./navmatch";
 
 const KM_PER_DEG = distanceM({ lat: 0, lon: 0 }, { lat: 1, lon: 0 }) / 1000;
 /** Trasa na północ po południku 0, punkt co 100 m, 10 km. */
@@ -60,3 +60,18 @@ describe("geometria trasy do widoku nawigacji", () => {
   });
 });
 
+
+describe("odległość po trasie", () => {
+  it("punkt przy trasie: km przed / za nami; daleko od trasy: undefined", () => {
+    expect(alongRoute(route, at(7.5, 100), 3)!.km).toBeCloseTo(4.5, 2);
+    expect(alongRoute(route, at(1, 0), 3)!.km).toBeCloseTo(-2, 2);
+    expect(alongRoute(route, at(7.5, 900), 3)).toBeUndefined();
+  });
+  it("najbliższy przed nami po trasie pomija te za nami i te obok trasy", () => {
+    const items = [{ id: "za", ...at(2) }, { id: "obok", ...at(4, 800) }, { id: "dalej", ...at(8) }, { id: "blisko", ...at(5.5, 50) }];
+    const n = nearestOnRoute(items, route, 3)!;
+    expect(n.item.id).toBe("blisko");
+    expect(n.km).toBeCloseTo(2.5, 2);
+    expect(nearestOnRoute([items[0]], route, 3)).toBeUndefined();
+  });
+});

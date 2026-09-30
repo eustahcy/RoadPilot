@@ -5,6 +5,13 @@ import { distanceM, Live } from "./gps";
 import { Plan } from "./plan";
 import { DriverStatus, fmtDuration } from "./scenarios";
 import { ActiveStop } from "./stop";
+import { alongRoute, RoutePoint } from "./navmatch";
+
+/** Nasza trasa i rzut naszej pozycji na nią (km) — do odległości po trasie zamiast w linii prostej. */
+export interface MyRoute {
+  points: RoutePoint[];
+  km: number;
+}
 
 export type PresenceStatus = "driving" | "standing" | "break" | "rest" | "dayEnd";
 
@@ -71,8 +78,11 @@ export const STATUS_LABEL: Record<PresenceStatus, string> = {
 };
 
 export interface FriendInfo {
-  /** Odległość w linii prostej od nas (km) — undefined, gdy nie znamy własnej pozycji. */
+  /** Odległość od nas (km) — po trasie, gdy znajomy jest na naszej trasie (onRoute), inaczej w linii prostej; undefined bez własnej pozycji. */
   km?: number;
+  onRoute?: boolean;
+  /** Na trasie: przed nami (true) czy za nami (false). */
+  ahead?: boolean;
   status: string;
   /** „od 25 min”, „25 min z 45 min”, „jedzie 3 h 10 min” — zależnie od statusu. */
   duration: string;
@@ -80,9 +90,12 @@ export interface FriendInfo {
   tone?: "warn" | "ok";
 }
 
-/** Opis znajomego do listy i kafelka. `me` = nasza pozycja (może jej nie być). */
-export function describeFriend(p: Presence & { at: number }, me: { lat: number; lon: number } | null, now: number): FriendInfo {
-  const km = me ? distanceM(me, p) / 1000 : undefined;
+/** Opis znajomego do listy i kafelka. `me` = nasza pozycja (może jej nie być), `route` = nasza trasa (km po niej, gdy znajomy przy niej). */
+export function describeFriend(p: Presence & { at: number }, me: { lat: number; lon: number } | null, now: number, route?: MyRoute): FriendInfo {
+  const along = route ? alongRoute(route.points, p, route.km) : undefined;
+  const km = along ? Math.abs(along.km) : me ? distanceM(me, p) / 1000 : undefined;
+  const onRoute = along ? true : me ? false : undefined;
+  const ahead = along ? along.km >= 0 : undefined;
   const elapsed = p.since !== null ? Math.max(0, (now - p.since) / 60_000) : undefined;
   let duration = "";
   let tone: FriendInfo["tone"];
@@ -95,15 +108,16 @@ export function describeFriend(p: Presence & { at: number }, me: { lat: number; 
     duration = elapsed !== undefined ? `w trasie ${fmtDuration(elapsed)}` : "";
     if (p.untilBreakMin !== null && p.untilBreakMin <= 30) tone = "warn";
   }
-  return { km, status: STATUS_LABEL[p.status], duration, tone };
+  return { km, onRoute, ahead, status: STATUS_LABEL[p.status], duration, tone };
 }
 
-/** Najbliższy znajomy z sygnałem — do kafelka HUD. */
-export function nearestFriend(friends: Friend[], me: { lat: number; lon: number } | null): { friend: Friend; km?: number } | undefined {
+/** Najbliższy znajomy z sygnałem — do kafelka HUD. Z trasą: najpierw po trasie (w obie strony), reszta w linii prostej. */
+export function nearestFriend(friends: Friend[], me: { lat: number; lon: number } | null, route?: MyRoute): { friend: Friend; km?: number } | undefined {
   let best: { friend: Friend; km?: number } | undefined;
   for (const f of friends) {
     if (f.relation !== "accepted" || !f.presence) continue;
-    const km = me ? distanceM(me, f.presence) / 1000 : undefined;
+    const along = route ? alongRoute(route.points, f.presence, route.km) : undefined;
+    const km = along ? Math.abs(along.km) : me ? distanceM(me, f.presence) / 1000 : undefined;
     if (!best || (km !== undefined && (best.km === undefined || km < best.km))) best = { friend: f, km };
   }
   return best;

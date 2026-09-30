@@ -17,7 +17,7 @@ import { MUSIC_APPS, musicLink, MusicApp } from "../core/apps";
 import { launch, platform } from "../launch";
 import { HudItems, HudStyle } from "../hudConfig";
 import { HudNav, HudNavData, HudRouteMap, NavTrack, useNavTrack } from "./HudNav";
-import { nextInstruction, NavInstruction, speedLimitAt } from "../core/navmatch";
+import { nearestOnRoute, nextInstruction, NavInstruction, speedLimitAt } from "../core/navmatch";
 import { isAhead, RouteWarning, warningText } from "../nav";
 import { AlertVote } from "./AlertVote";
 import { HudPlanner, HudRoutePicker } from "./HudRoutePicker";
@@ -26,8 +26,8 @@ import { HUD_STYLES } from "../hudConfig";
 import { ReportKind } from "../collect";
 import { ReportSheet } from "./ReportSheet";
 import { ActiveStopPanel, confirmStartDay, fmtTimer, StopControlsProps, StopPicker } from "./StopControls";
-import { describeFriend, Friend, nearestFriend } from "../core/friends";
-import { FriendTile } from "./Friends";
+import { describeFriend, Friend, MyRoute, nearestFriend } from "../core/friends";
+import { fmtFriendDist, FriendTile } from "./Friends";
 
 interface Props {
   origin: string;
@@ -120,14 +120,19 @@ export function HudView(p: Props) {
   const moving = speed !== null && speed >= LANES_MIN_KMH;
   // Okres przerywanej linii przesuwa się tym szybciej, im szybciej jedziemy (90 km/h ≈ 0,28 s).
   const laneStyle = { "--lane-dur": `${moving ? Math.min(3, Math.max(0.12, 25 / speed!)) : 1}s` } as CSSProperties;
-  // Parking tylko przed nami — to, co za plecami, nie trafia ani na oś, ani do kafelka.
-  const parking = show.parking && p.live && p.parkings.data ? nearestStation(p.parkings.data, p.live, p.live.heading) : undefined;
+  // Animacja drogi zostaje też z panelem nawigacji (poza stylem „Nawigacja” z mapą); pozycję na trasie liczymy raz — dla panelu i widoku trasy.
+  const track = useNavTrack(p.nav ?? NO_NAV, fresh);
+  // Z trasą z nawigacji odległości do MOP-ów i znajomych liczymy po trasie, nie w linii prostej.
+  const myRoute: MyRoute | undefined = p.nav?.route && track.pos && !track.off ? { points: p.nav.route.points, km: track.pos.km } : undefined;
+  // Parking tylko przed nami — to, co za plecami, nie trafia ani na oś, ani do kafelka. Z trasą: najbliższy przy trasie po km trasy.
+  const onRouteParking = myRoute && show.parking && p.parkings.data ? nearestOnRoute(p.parkings.data, myRoute.points, myRoute.km) : undefined;
+  const parking: NearestStation<Parking> | undefined = onRouteParking
+    ? { station: onRouteParking.item, km: onRouteParking.km, ahead: true, onRoute: true }
+    : show.parking && p.live && p.parkings.data ? nearestStation(p.parkings.data, p.live, p.live.heading) : undefined;
   const endDay = () => confirm("Zakończyć dzień pracy? Zacznie się odpoczynek dzienny.") && sc.onEndDay();
   const openSheet = () => { setSheet(true); setMenu(false); };
   const hasApps = show.apps && !!musicLink(p.musicApp, platform());
   const floatBtn = show.floating && p.floating.supported;
-  // Animacja drogi zostaje też z panelem nawigacji (poza stylem „Nawigacja” z mapą); pozycję na trasie liczymy raz — dla panelu i widoku trasy.
-  const track = useNavTrack(p.nav ?? NO_NAV, fresh);
   const nav = p.nav && p.planner ? { ...p.nav, onPlan: () => { setPlanning(true); setMenu(false); } } : p.nav;
   // W stylu standardowym i minimalnym panel nawigacji tylko wtedy, gdy jest cel — bez niego zbędny.
   const navEl = nav && (navMode || (show.nav && (nav.route || nav.dest))) ? <HudNav nav={nav} track={track} compact={minimal} /> : null;
@@ -377,7 +382,7 @@ export function HudView(p: Props) {
           {show.route && <MinProgress done={p.doneKm} left={p.route.totalKm} />}
         </section>
         <footer className="hud-min-foot">
-          <MinStats {...p} now={now} parking={parking} onBreak={openSheet} />
+          <MinStats {...p} now={now} parking={parking} myRoute={myRoute} onBreak={openSheet} />
           {(show.better && p.better) || apps ? (
             <div className="hud-min-extra">
               {show.better && p.better && <BetterCard better={p.better} now={now} onPick={p.onBetter} />}
@@ -458,7 +463,7 @@ export function HudView(p: Props) {
           <div className={`hud-info ${show.better && p.better ? "with-better" : ""} ${apps ? "with-apps" : ""}`} style={{ "--info": info.join(" ") } as CSSProperties}>
             {show.better && p.better && <BetterCard better={p.better} now={now} onPick={p.onBetter} />}
             {show.parking && <ParkingTile gpsOn={p.gpsOn} live={p.live} parkings={p.parkings} found={parking} />}
-            {show.friends && p.friends && <FriendTile friends={p.friends} me={p.live} now={now} />}
+            {show.friends && p.friends && <FriendTile friends={p.friends} me={p.live} now={now} route={myRoute} />}
             {show.service && <ServiceTile service={p.service} />}
             {apps}
           </div>
@@ -643,7 +648,7 @@ interface MinStat {
 }
 
 /** Styl minimalistyczny: same liczby z podpisami, bez kafelków i pasków. */
-function MinStats(p: Props & { now: number; parking?: NearestStation<Parking>; onBreak: () => void }) {
+function MinStats(p: Props & { now: number; parking?: NearestStation<Parking>; myRoute?: MyRoute; onBreak: () => void }) {
   const { items: show, now, status, driver, stopControls: sc } = p;
   const out: MinStat[] = [];
   if (show.dest) out.push({ key: "dest", label: "Do celu", value: fmtKm(p.route.totalKm) });
@@ -677,12 +682,12 @@ function MinStats(p: Props & { now: number; parking?: NearestStation<Parking>; o
   if (show.avg) out.push({ key: "avg", label: "Średnia", value: p.avgKmh !== undefined ? `${Math.round(p.avgKmh)} km/h` : "—" });
   if (show.parking) {
     const ok = p.parking && p.parking.ahead !== false ? p.parking : undefined;
-    out.push({ key: "parking", label: ok ? PARKING_TITLE[ok.station.kind].replace("Najbliższy ", "") : "MOP", value: ok ? fmtStationKm(ok.km) : "—", sub: ok ? ok.station.name : undefined });
+    out.push({ key: "parking", label: ok ? PARKING_TITLE[ok.station.kind].replace("Najbliższy ", "") : "MOP", value: ok ? fmtStationKm(ok.km) : "—", sub: ok ? `${ok.station.name}${ok.onRoute ? " · po trasie" : ""}` : undefined });
   }
   if (show.friends && p.friends) {
-    const n = nearestFriend(p.friends, p.live);
-    const info = n?.friend.presence ? describeFriend(n.friend.presence, p.live, now) : undefined;
-    out.push({ key: "friend", label: n ? n.friend.name : "Znajomi", value: info ? (info.km !== undefined ? fmtKm(info.km) : info.status) : "—", sub: info ? [info.km !== undefined ? info.status : "", info.duration].filter(Boolean).join(" · ") : "nikt nie nadaje", tone: info?.tone === "warn" ? "warn" : undefined });
+    const n = nearestFriend(p.friends, p.live, p.myRoute);
+    const info = n?.friend.presence ? describeFriend(n.friend.presence, p.live, now, p.myRoute) : undefined;
+    out.push({ key: "friend", label: n ? n.friend.name : "Znajomi", value: info ? (info.km !== undefined ? fmtFriendDist(info.km) : info.status) : "—", sub: info ? [info.onRoute ? (info.ahead ? "przed Tobą" : "za Tobą") : "", info.km !== undefined ? info.status : "", info.duration].filter(Boolean).join(" · ") : "nikt nie nadaje", tone: info?.tone === "warn" ? "warn" : undefined });
   }
   if (show.service && p.service.level !== "none") {
     const km = p.service.kmLeft;
@@ -833,7 +838,7 @@ function ParkingTile({ gpsOn, live, parkings, found }: { gpsOn: boolean; live: L
       <span className="hud-info-text">
         <small>{ok ? PARKING_TITLE[ok.station.kind] : "Najbliższy MOP"}</small>
         <b className="ellipsis">{ok ? ok.station.name : "—"}</b>
-        <span>{ok ? `${fmtStationKm(ok.km)}${ok.station.kind === "services" ? " · stacja paliw, bar" : ""}` : lookupText(gpsOn, live, parkings, "parkingów")}</span>
+        <span>{ok ? `${ok.onRoute ? "za " : ""}${fmtStationKm(ok.km)}${ok.onRoute ? " po trasie" : ""}${ok.station.kind === "services" ? " · stacja paliw, bar" : ""}` : lookupText(gpsOn, live, parkings, "parkingów")}</span>
       </span>
     </div>
   );

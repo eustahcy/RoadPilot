@@ -32,7 +32,8 @@ import { workStatus } from "./core/workday";
 import { FloatLine, useFloating } from "./floating";
 import { HudStyle } from "./hudConfig";
 import { useFriends } from "./friends";
-import { presenceOf } from "./core/friends";
+import { MyRoute, presenceOf } from "./core/friends";
+import { ON_ROUTE_M } from "./core/navmatch";
 import { FriendsCard } from "./components/Friends";
 
 type Tab = "plan" | "route" | "driver" | "history" | "settings";
@@ -192,6 +193,12 @@ function App() {
   const presence = useMemo(() => presenceOf(live, state.stop, state.driver.shiftStart, status, activePlan, trip.destination, route.totalKm), [live, state.stop, state.driver.shiftStart, status, activePlan, trip.destination, route.totalKm]);
   const friends = useFriends(auth?.token ?? null, settings.friendsShare && settings.gps, presence);
   const me = live ? { lat: live.lat, lon: live.lon } : null;
+  // Nasza pozycja na trasie z nawigacji — karta znajomych liczy wtedy km po trasie.
+  const myRoute = useMemo<MyRoute | undefined>(() => {
+    if (!state.navRoute || !live) return undefined;
+    const pos = locate(state.navRoute.points, live);
+    return pos && pos.offM <= ON_ROUTE_M ? { points: state.navRoute.points, km: pos.km } : undefined;
+  }, [state.navRoute, live]);
 
   // Pływające okienko: przyjazd i na zmianę przerwa / odpoczynek / koniec pracy — z tych samych danych co HUD.
   const floatLines: FloatLine[] = [];
@@ -382,7 +389,7 @@ function App() {
             onOngoing={setOngoing}
             liveKmh={liveKmh}
             stopControls={stopProps}
-            friends={auth ? <FriendsCard api={friends} me={me} now={now} onManage={() => { go("settings"); setSettingsCat("friends"); }} /> : null}
+            friends={auth ? <FriendsCard api={friends} me={me} route={myRoute} now={now} onManage={() => { go("settings"); setSettingsCat("friends"); }} /> : null}
             gps={
               <GpsCard
                 on={settings.gps}

@@ -131,7 +131,7 @@ export function MapView({ token, center, zoom, bearing = 0, pitch = 0, anchorY =
   const scale = 2 ** (zoom - z);
   const [pxX, pxY] = worldPx(center, z);
   // Warstwa większa niż ekran: po obrocie i pochyleniu nie może być pustych rogów.
-  const reach = Math.hypot(size.w, size.h) * (pitch > 0 ? 1.9 : 0.75);
+  const reach = Math.hypot(size.w, size.h) * (pitch > 0 ? 2.2 : 0.75);
   const half = reach / scale;
   // Punkt odniesienia kafelków (cx, cy): przy płynnej mapie zostaje w miejscu, aż odjedziemy o ćwierć zasięgu.
   const origin = useRef<{ z: number; x: number; y: number } | null>(null);
@@ -192,7 +192,7 @@ export function MapView({ token, center, zoom, bearing = 0, pitch = 0, anchorY =
     <div
       ref={box}
       className={`map-view ${onMove ? "interactive" : ""} ${className}`}
-      style={{ perspective: pitch > 0 ? `${Math.round(size.h * 1.3)}px` : undefined, perspectiveOrigin: `50% ${anchorY * 100}%` }}
+      style={{ perspective: pitch > 0 ? `${Math.round(size.h * 1.05)}px` : undefined, perspectiveOrigin: `50% ${anchorY * 100}%` }}
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}

@@ -361,6 +361,9 @@ input[type="number"]::-webkit-inner-spin-button, input[type="number"]::-webkit-o
 .hud-speed-num { display: flex; align-items: baseline; gap: calc(1 * var(--u)); line-height: .8; }
 .hud-speed strong { font-family: Bahnschrift, "DIN Alternate", "Roboto Condensed", "Arial Narrow", ui-sans-serif, sans-serif; font-size: calc(17 * var(--u)); font-weight: 800; letter-spacing: -.03em; font-variant-numeric: tabular-nums; color: var(--hud-green); text-shadow: 0 0 calc(3 * var(--u)) rgba(68, 240, 124, .35); }
 .hud-speed strong.none { color: #4a5a66; text-shadow: none; }
+/* Nad limitem: do +5 km/h żółto, wyżej czerwono (speedTone) */
+.hud-speed strong.warn, .nm-speed strong.warn { color: var(--amber); text-shadow: 0 0 calc(3 * var(--u)) rgba(232, 180, 76, .35); }
+.hud-speed strong.over, .nm-speed strong.over { color: var(--red); text-shadow: 0 0 calc(3 * var(--u)) rgba(239, 106, 91, .45); }
 .hud-speed-num.none { align-items: center; }
 .hud-speed-num.none span { display: none; }
 .hud-speed-num span { font-size: calc(4.4 * var(--u)); font-weight: 750; color: var(--hud-green); }
@@ -828,7 +831,9 @@ input[type="number"]::-webkit-inner-spin-button, input[type="number"]::-webkit-o
 .hud.navmode { display: block; padding: 0; background: #0a1219; }
 .hud.navmode .nm-map { position: absolute; inset: 0; z-index: 0; }
 .hud.navmode .nm-map .hud-map { position: absolute; inset: 0; }
-.hud.navmode .nm-map::after { content: ""; position: absolute; inset: 0; pointer-events: none; background: linear-gradient(to bottom, rgba(7, 12, 17, .55) 0, transparent 22%, transparent 62%, rgba(7, 12, 17, .75) 100%); }
+/* Horyzont jak w nawigacji: u góry „niebo” zakrywa daleką, rozmytą mapę, pod nim mgiełka; na dole przyciemnienie pod kafelki */
+.hud.navmode .nm-map::after { content: ""; position: absolute; inset: 0; pointer-events: none; background: linear-gradient(to bottom, #0a1219 0, #0a1219 9%, rgba(16, 30, 42, .85) 13%, rgba(16, 30, 42, .35) 20%, transparent 32%, transparent 64%, rgba(7, 12, 17, .75) 100%); }
+.hud.navmode .nm-map::before { content: ""; position: absolute; left: 0; right: 0; top: 12.5%; height: 2px; z-index: 1; pointer-events: none; background: linear-gradient(90deg, transparent, rgba(140, 190, 220, .35), transparent); }
 .nm-top { position: absolute; z-index: 3; top: calc(1.6 * var(--u) + env(safe-area-inset-top)); left: calc(2 * var(--u) + env(safe-area-inset-left)); right: calc(2 * var(--u) + env(safe-area-inset-right)); display: flex; gap: calc(1.2 * var(--u)); align-items: stretch; }
 .nm-top .hud-nav.card { flex: 1; min-width: 0; flex-wrap: wrap; padding: calc(1.8 * var(--u)) calc(2.4 * var(--u)); border-radius: calc(3 * var(--u)); background: rgba(12, 20, 28, .9); border: 1px solid rgba(140, 175, 195, .25); backdrop-filter: blur(10px); box-shadow: 0 10px 30px rgba(0, 0, 0, .35); }
 .hud-nav.card .hud-man svg { width: calc(11 * var(--u)); height: calc(11 * var(--u)); stroke: var(--hud-green); stroke-width: 3; filter: drop-shadow(0 0 8px rgba(68, 240, 124, .35)); }

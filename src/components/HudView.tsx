@@ -17,7 +17,7 @@ import { MUSIC_APPS, musicLink, MusicApp } from "../core/apps";
 import { launch, platform } from "../launch";
 import { HudItems, HudStyle } from "../hudConfig";
 import { HudNav, HudNavData, HudRouteMap, NavTrack, useNavTrack } from "./HudNav";
-import { nearestOnRoute, nextInstruction, NavInstruction, speedLimitAt } from "../core/navmatch";
+import { nearestOnRoute, nextInstruction, NavInstruction, speedLimitAt, speedTone } from "../core/navmatch";
 import { isAhead, RouteWarning, warningText } from "../nav";
 import { AlertVote } from "./AlertVote";
 import { HudPlanner, HudRoutePicker } from "./HudRoutePicker";
@@ -145,10 +145,15 @@ export function HudView(p: Props) {
     </div>
   );
 
+  // Kolor prędkości: limit z trasy (i ogranicznik pojazdu, gdy niższy) — zielony / żółty / czerwony.
+  const routeLimit = p.nav?.route && track.pos && !track.off ? speedLimitAt(p.nav.route.speedLimits, track.pos.km) : undefined;
+  const vehicleMax = p.planner?.vehicle.maxKmh;
+  const legal = routeLimit !== undefined && vehicleMax !== undefined ? Math.min(routeLimit, vehicleMax) : routeLimit ?? vehicleMax;
+  const tone = speedTone(speed, legal);
   const speedEl = (
     <div className="hud-speed" aria-label="Prędkość">
       <div className={`hud-speed-num ${speed === null ? "none" : ""}`}>
-        <strong className={speed === null ? "none" : ""}>{speed ?? "—"}</strong>
+        <strong className={speed === null ? "none" : tone ?? ""}>{speed ?? "—"}</strong>
         <span>km/h</span>
       </div>
       {(road || place) && (
@@ -270,7 +275,7 @@ export function HudView(p: Props) {
       <div className={`hud navmode ${p.mirror ? "mirror" : ""}`}>
         <NavVoice nav={p.nav} track={track} kmh={fresh?.kmh ?? null} enabled={p.voice.on} />
         <div className="nm-map">
-          {p.nav && p.mapToken ? <HudRouteMap nav={p.nav} track={track} live={fresh} token={p.mapToken} anchorY={0.6} zoomOffset={zoomOffset} friends={show.friends ? p.friends : undefined} /> : <div className="hud-map empty" />}
+          {p.nav && p.mapToken ? <HudRouteMap nav={p.nav} track={track} live={fresh} token={p.mapToken} anchorY={0.7} zoomOffset={zoomOffset} friends={show.friends ? p.friends : undefined} /> : <div className="hud-map empty" />}
         </div>
 
         <header className="nm-top">
@@ -310,7 +315,7 @@ export function HudView(p: Props) {
         {limit !== undefined && <span className="hud-limit nm-limit" aria-label={`Ograniczenie ${limit} km/h`}>{limit}</span>}
 
         <div className="nm-speed">
-          <strong className={speed === null ? "none" : ""}>{speed ?? "—"}</strong>
+          <strong className={speed === null ? "none" : tone ?? ""}>{speed ?? "—"}</strong>
           <span>km/h</span>
         </div>
         {notice && <div className="nm-notice">{notice}</div>}

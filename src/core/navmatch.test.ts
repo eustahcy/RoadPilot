@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { distanceM } from "./gps";
-import { alongRoute, bearingAtKm, isOffRoute, lanesAhead, locate, nearestOnRoute, nextInstruction, pointAtKm, RoutePoint, routeSlice, speedLimitAt } from "./navmatch";
+import { alongRoute, bearingAtKm, isOffRoute, lanesAhead, locate, NAV, nearestOnRoute, nextInstruction, pointAtKm, RoutePoint, routeSlice, speedLimitAt, speedTone } from "./navmatch";
 
 const KM_PER_DEG = distanceM({ lat: 0, lon: 0 }, { lat: 1, lon: 0 }) / 1000;
 /** Trasa na północ po południku 0, punkt co 100 m, 10 km. */
@@ -60,6 +60,24 @@ describe("geometria trasy do widoku nawigacji", () => {
   });
 });
 
+
+describe("ograniczenie prędkości i kolor prędkości", () => {
+  const limits = [{ km: 0, toKm: 2, kmh: 50 }, { km: 8, toKm: 10, kmh: 100 }];
+  it("w luce trzyma ostatnie znane do NAV.limitCarryKm, potem nic", () => {
+    expect(speedLimitAt(limits, 1)).toBe(50);
+    expect(speedLimitAt(limits, 2.5)).toBe(50);
+    expect(speedLimitAt(limits, 2 + NAV.limitCarryKm + 0.1)).toBeUndefined();
+    expect(speedLimitAt(limits, 9)).toBe(100);
+    expect(speedLimitAt(limits, 11)).toBe(100);
+  });
+  it("zielony do limitu, żółty do +5, czerwony wyżej; bez limitu brak oceny", () => {
+    expect(speedTone(80, 80)).toBe("ok");
+    expect(speedTone(85, 80)).toBe("warn");
+    expect(speedTone(86, 80)).toBe("over");
+    expect(speedTone(86, undefined)).toBeUndefined();
+    expect(speedTone(null, 80)).toBeUndefined();
+  });
+});
 
 describe("odległość po trasie", () => {
   it("punkt przy trasie: km przed / za nami; daleko od trasy: undefined", () => {

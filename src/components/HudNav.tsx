@@ -241,7 +241,8 @@ function navZoom(kmh: number | null) {
   return 16.3 - v * 1.6;
 }
 
-const MAP_PITCH = 52;
+/** Pochylenie mapy (stopnie) — mocniejsze = dalszy horyzont i większa perspektywa, jak w nawigacjach samochodowych. */
+const MAP_PITCH = 62;
 
 /** Płynny ruch mapy między odczytami GPS. */
 const SMOOTH = {

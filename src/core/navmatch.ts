@@ -38,6 +38,10 @@ export const NAV = {
   /** Szukanie pozycji wokół poprzedniej: tyle punktów wstecz i naprzód (punkty co ~50 m). */
   windowBack: 40,
   windowAhead: 600,
+  /** Dane o ograniczeniu mają luki — ostatnie znane trzymamy jeszcze tyle km za końcem odcinka (dalej lepiej nic niż nieaktualne). */
+  limitCarryKm: 3,
+  /** Prędkość: do tylu km/h nad limitem żółto, powyżej czerwono. */
+  overWarnKmh: 5,
 } as const;
 
 const M_PER_DEG = 111_320;
@@ -95,7 +99,20 @@ export function lanesAhead(list: LaneSection[], km: number): (LaneSection & { in
 }
 
 export function speedLimitAt(list: SpeedLimit[], km: number): number | undefined {
-  return list.find((x) => km >= x.km && km < x.toKm)?.kmh;
+  const here = list.find((x) => km >= x.km && km < x.toKm);
+  if (here) return here.kmh;
+  // Luka w danych: ostatni odcinek, który skończył się niedawno (na autostradzie znak nie znika co kilometr).
+  let last: SpeedLimit | undefined;
+  for (const x of list) if (x.toKm <= km && (!last || x.toKm > last.toKm)) last = x;
+  return last && km - last.toKm <= NAV.limitCarryKm ? last.kmh : undefined;
+}
+
+export type SpeedTone = "ok" | "warn" | "over";
+
+/** Kolor prędkości: zielony do limitu, żółty do NAV.overWarnKmh nad nim, czerwony wyżej; bez limitu — bez oceny. */
+export function speedTone(kmh: number | null, limit: number | undefined): SpeedTone | undefined {
+  if (kmh === null || limit === undefined) return undefined;
+  return kmh <= limit ? "ok" : kmh <= limit + NAV.overWarnKmh ? "warn" : "over";
 }
 
 /** Poza trasą: odległość większa niż próg plus niepewność pozycji. */

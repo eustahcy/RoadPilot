@@ -66,13 +66,15 @@ src/tracking.ts    Geolocation.watchPosition + Wake Lock → applyFix na stanie 
                    startStop/finishStop — ręczny postój (ruszenie z GPS kończy go; GPS nie zalicza tego postoju drugi raz)
 src/ongoing.ts     stałe powiadomienie: cicha pętla audio (WAV generowany w pamięci) + Media Session, ongoingInfo = tekst karty
 src/core/navmatch.ts  prowadzenie: pointAtKm, bearingAtKm, routeSlice, locate (rzut GPS na trasę, okno wokół podpowiedzi), nextInstruction, lanesAhead, speedLimitAt, isOffRoute; NAV = progi;
-                   alongRoute / nearestOnRoute — km po trasie do punktu przy niej (MOP, znajomy; ON_ROUTE_M = 300)
+                   alongRoute / nearestOnRoute — km po trasie do punktu przy niej (MOP, znajomy; ON_ROUTE_M = 300);
+                   speedLimitAt trzyma ostatni limit do NAV.limitCarryKm za końcem odcinka (luki w danych TomTom); speedTone ok/warn/over (NAV.overWarnKmh = 5)
 src/components/MapView.tsx  mapa bez bibliotek: kafelki TomTom 512 px (noc) przez /api/tiles z tokenem (fetch → blob), Web Mercator,
                    obrót (bearing) i pochylenie (pitch) warstwy, nakładki SVG w układzie mapy; smoothMs = płynny dojazd między odczytami GPS
                    (kafelki względem stałego punktu odniesienia, przesunięcie w transformacji warstwy z transition; bez tego mapa skakała co 1 s);
                    AdminMap.tsx = podgląd danych (warstwy OSM, zgłoszenia, ślady)
 src/components/HudNav.tsx  useNavTrack (pozycja na trasie, poza trasą → onReroute po 15 s; brak trasy w urządzeniu, a jest cel → od razu; max 1/min),
-                   HudNav (manewr + pasy + ograniczenie), HudRouteMap (styl HUD „nav”: mapa TomTom pochylona, kierunek jazdy w górę, trasa, zielona strzałka = my; zoom od prędkości)
+                   HudNav (manewr + pasy + ograniczenie), HudRouteMap (styl HUD „nav”: mapa TomTom pochylona MAP_PITCH 62° z horyzontem (gradient .nm-map::after/::before),
+                   kierunek jazdy w górę, trasa, zielona strzałka = my na 70% wysokości; zoom od prędkości)
                    useSmoothPosition — jak w nawigacjach: między odczytami GPS przewidujemy ruch z ostatniej prędkości (po trasie / wzdłuż kierunku),
                    20 klatek/s, nowy odczyt koryguje płynnie przez 1 s (SMOOTH); bez tego mapa skakała co sekundę
 src/collect.ts     mapa RoadPilot (za zgodą users.data_consent_at): useTraceCollector (ślad co 5 s / 60 m, >8 km/h, tylko PL, bufor w localStorage

@@ -36,6 +36,8 @@ export interface GlMapProps {
   markers: GlMarker[];
   /** Pozycja „na teraz” w każdej klatce (przewidywana między odczytami GPS). */
   follow?: () => { lat: number; lon: number; bearing?: number } | undefined;
+  /** Kolor „ziemi” pod kafelkami (RGBA 0–1) — sięga daleko za kafelki, więc przy pochyleniu nie widać ich krawędzi. */
+  ground?: [number, number, number, number];
   children?: ReactNode;
 }
 
@@ -142,7 +144,7 @@ function buildLines(lines: GlLine[], z: number, cx: number, cy: number, scale: n
 
 interface TileRect { k: string; x: number; y: number; size: number; d: number }
 
-export function GlMapView({ token, center, zoom, bearing = 0, pitch = 0, anchorY = 0.5, lines, markers, follow, children }: GlMapProps) {
+export function GlMapView({ token, center, zoom, bearing = 0, pitch = 0, anchorY = 0.5, lines, markers, follow, ground = [0.09, 0.13, 0.17, 1], children }: GlMapProps) {
   const box = useRef<HTMLDivElement>(null);
   const canvas = useRef<HTMLCanvasElement>(null);
   const svg = useRef<SVGSVGElement>(null);
@@ -192,8 +194,8 @@ export function GlMapView({ token, center, zoom, bearing = 0, pitch = 0, anchorY
   const markerPx = useMemo(() => markers.map((m) => { const [x, y] = worldPx(m, z); return { m, x: x - cx, y: y - cy }; }), [markers, z, cx, cy]);
 
   // Wszystko, czego pętla klatek potrzebuje, w jednym ref — render Reacta tylko go podmienia.
-  const frame = useRef({ token, size, z, scale, cx, cy, pxX, pxY, pitch, bearing, anchorY, tiles, backdrop, geometry, markerPx, follow });
-  frame.current = { token, size, z, scale, cx, cy, pxX, pxY, pitch, bearing, anchorY, tiles, backdrop, geometry, markerPx, follow };
+  const frame = useRef({ token, size, z, scale, cx, cy, pxX, pxY, pitch, bearing, anchorY, tiles, backdrop, geometry, markerPx, follow, ground, half });
+  frame.current = { token, size, z, scale, cx, cy, pxX, pxY, pitch, bearing, anchorY, tiles, backdrop, geometry, markerPx, follow, ground, half };
   const markerEls = useRef(new Map<string, SVGGElement>());
 
   useEffect(() => {
@@ -278,9 +280,16 @@ export function GlMapView({ token, center, zoom, bearing = 0, pitch = 0, anchorY
       const cam = camera(f.size.w, f.size.h, f.size.w / 2, f.size.h * f.anchorY, f.pitch, b, (nx - f.cx) * f.scale, (ny - f.cy) * f.scale, f.scale);
       gl.uniformMatrix4fv(uM, false, cam.m);
 
-      // Kafelki: podkład z sąsiednich poziomów, potem bieżący poziom (od najbliższych).
+      // „Ziemia” w kolorze mapy daleko poza kafelkami — przy pochyleniu daleki pas to jednolity kolor pod mgłą, nie krawędź kafelków.
       gl.bindBuffer(gl.ARRAY_BUFFER, quad);
       gl.vertexAttribPointer(aPos, 2, gl.FLOAT, false, 0, 0);
+      gl.uniform1f(uUseTex, 0);
+      const [gr, gg, gb, ga] = f.ground;
+      gl.uniform4f(uColor, gr * ga, gg * ga, gb * ga, ga);
+      const far = f.half * 12;
+      gl.uniform4f(uRect, f.pxX - f.cx - far, f.pxY - f.cy - far, far * 2, far * 2);
+      gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+      // Kafelki: podkład z sąsiednich poziomów, potem bieżący poziom (od najbliższych).
       gl.uniform1f(uUseTex, 1);
       for (const t of [...f.backdrop, ...f.tiles]) {
         const tx = ensure(t.k, f.token);

@@ -11,7 +11,7 @@ import { ALERT_KINDS, ALERT_TTL_H, applyVotes, blockingPoints, routeAlerts, rout
 import { compareReports, REPORT_TO_OSM } from "./compare.mjs";
 import { parseRoutes, parseSearch, ROUTE_TYPES, routeError, routeUrl, searchUrl, validPoint } from "./nav.mjs";
 import { cleanPresence, friendView } from "./friends.mjs";
-import { readFile } from "node:fs/promises";
+import { readFile, stat } from "node:fs/promises";
 import { createServer } from "node:http";
 import { promisify } from "node:util";
 import mysql from "mysql2/promise";
@@ -29,6 +29,10 @@ const RESET_MINUTES = 60;
 const TOMTOM_KEY = process.env.TOMTOM_KEY ?? "";
 // Własny silnik tras (Valhalla na OSM Polska) — np. http://127.0.0.1:8002; puste = tylko TomTom.
 const VALHALLA_URL = (process.env.VALHALLA_URL ?? "").replace(/\/+$/, "");
+// Własne kafelki wektorowe mapy (scripts/tiles-build.sh → katalog z/x/y.pbf, gzip); puste = mapa z kafelków TomTom.
+const VTILES_DIR = (process.env.VTILES_DIR ?? "").replace(/\/+$/, "");
+// Zasięg własnych kafelków (Polska) — poza nim aplikacja wraca do TomTom.
+const VTILES_BOUNDS = [14.07, 49.0, 24.15, 54.84];
 const APP_ORIGINS = (process.env.APP_ORIGINS ?? "").split(",").map((s) => s.trim()).filter(Boolean);
 
 const mailer = process.env.SMTP_HOST
@@ -817,6 +821,30 @@ routes["POST /api/admin/premium"] = async (req, user) => {
 // ── Kafelki mapy (TomTom, styl nocny) — przez serwer: klucz nie trafia do telefonu, każdy kafelek w budżecie ──
 
 const TILE_RE = /^\/api\/tiles\/(\d{1,2})\/(\d{1,7})\/(\d{1,7})\.png$/;
+const VTILE_RE = /^\/api\/vtiles\/(\d{1,2})\/(\d{1,7})\/(\d{1,7})$/;
+
+/** Czy własne kafelki są skonfigurowane i zbudowane. */
+const vtilesReady = async () => !!VTILES_DIR && (await stat(`${VTILES_DIR}/metadata.json`).then(() => true, () => false));
+
+routes["GET /api/vtiles/meta"] = async () => [200, { available: await vtilesReady(), bounds: VTILES_BOUNDS }];
+
+/** Kafelek wektorowy z dysku (gzip z tilemakera). Brak pliku = pusty kafelek (204), nie błąd. Dane OSM (ODbL) — dla każdego konta. */
+async function vtile(req, res, m) {
+  const user = await authUser(req);
+  if (!user) throw new HttpError(401, "Sesja wygasła — zaloguj się ponownie.");
+  if (!VTILES_DIR) throw new HttpError(404, "Własna mapa nie jest skonfigurowana.");
+  const [z, x, y] = m.slice(1).map(Number);
+  if (z < 0 || z > 20 || x >= 2 ** z || y >= 2 ** z) throw new HttpError(400, "Nieprawidłowy kafelek.");
+  let body;
+  try {
+    body = await readFile(`${VTILES_DIR}/${z}/${x}/${y}.pbf`);
+  } catch {
+    res.writeHead(204, { "Cache-Control": "private, max-age=3600" });
+    return res.end();
+  }
+  res.writeHead(200, { "Content-Type": "application/x-protobuf", "Content-Encoding": "gzip", "Cache-Control": "private, max-age=86400", "Content-Length": body.length });
+  res.end(body);
+}
 /** Pamięć kafelków na serwerze (zgodnie z Cache-Control TomTom, 24 h) — ten sam kafelek dla wielu kierowców liczy się raz. */
 const TILE_CACHE = new Map();
 const TILE_CACHE_MAX = 3000;
@@ -876,6 +904,8 @@ const server = createServer(async (req, res) => {
     }
     const tm = req.method === "GET" && TILE_RE.exec(path + (path.endsWith(".png") ? "" : ""));
     if (tm) return await tile(req, res, tm);
+    const vm = req.method === "GET" && VTILE_RE.exec(path);
+    if (vm) return await vtile(req, res, vm);
     const handler = routes[key];
     if (!handler) throw new HttpError(404, "Nie znaleziono.");
     let user = null;

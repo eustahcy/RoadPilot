@@ -327,6 +327,18 @@ function HudSection({ settings, onChange }: { settings: Settings; onChange: (pat
   return (
     <>
       <section className="card">
+        <div className="eyebrow">Mapa w stylu „Nawigacja”</div>
+        <div className="hud-style-pick engines">
+          {([["auto", "Automatycznie", "Dzień / noc z pogody, a bez niej z zegara (7–19)."], ["day", "Dzień", "Jasne tło, szare drogi."], ["night", "Noc", "Ciemne tło — jak dotąd."]] as const).map(([id, label, hint]) => (
+            <button key={id} className={`hud-style-opt ${settings.mapTheme === id ? "active" : ""}`} aria-pressed={settings.mapTheme === id} onClick={() => onChange({ mapTheme: id })}>
+              <strong>{label}</strong>
+              <small>{hint}</small>
+            </button>
+          ))}
+        </div>
+        <p className="muted small">Własna mapa RoadPilot (OpenStreetMap) działa w Polsce; drogi z zakazem dla Twojego zestawu są czerwono-białe (zakaz wjazdu) albo czerwone z białymi kreskami (ograniczenie masy, wysokości itp.). Poza Polską mapa TomTom.</p>
+      </section>
+      <section className="card">
         <div className="eyebrow">Styl</div>
         <div className="hud-style-pick">
           {HUD_STYLES.map((h) => (

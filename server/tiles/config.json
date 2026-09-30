@@ -1,0 +1,21 @@
+{
+  "layers": {
+    "water": { "minzoom": 6, "maxzoom": 14, "simplify_below": 13, "simplify_level": 0.0003 },
+    "landuse": { "minzoom": 7, "maxzoom": 14, "simplify_below": 13, "simplify_level": 0.0003, "filter_area_below": 0.0000003 },
+    "waterway": { "minzoom": 9, "maxzoom": 14, "simplify_below": 13, "simplify_level": 0.0002 },
+    "railway": { "minzoom": 10, "maxzoom": 14, "simplify_below": 13, "simplify_level": 0.0002 },
+    "road": { "minzoom": 6, "maxzoom": 14, "simplify_below": 13, "simplify_level": 0.0002 },
+    "building": { "minzoom": 14, "maxzoom": 14 },
+    "place": { "minzoom": 6, "maxzoom": 14 }
+  },
+  "settings": {
+    "minzoom": 6,
+    "maxzoom": 14,
+    "basezoom": 14,
+    "include_ids": false,
+    "compress": "gzip",
+    "name": "RoadPilot Polska",
+    "version": "1",
+    "description": "OpenStreetMap → kafelki wektorowe RoadPilot (drogi z ograniczeniami dla ciężarówek)"
+  }
+}

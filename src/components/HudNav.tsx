@@ -2,7 +2,7 @@ import { useEffect, useRef } from "react";
 import { Live } from "../core/gps";
 import { alongRoute, bearingAtKm, isOffRoute, lanesAhead, locate, NAV, NavInstruction, nextInstruction, pointAtKm, RoutePos, routeSlice, speedLimitAt } from "../core/navmatch";
 import { isAhead, jamMatters, jamTone, NavPlace, NavRoute, TrafficSection, warningText } from "../nav";
-import { GlLine, GlMapView, GlMarker } from "./GlMap";
+import { GlLine, GlMapView, GlMarker, GlVector } from "./GlMap";
 import { Friend, STATUS_LABEL } from "../core/friends";
 import { fmtDuration } from "../core/scenarios";
 import { distanceM } from "../core/gps";
@@ -320,7 +320,7 @@ function useSmoothPosition(route: NavRoute | null, pos: RoutePos | undefined, of
  * czerwono z opóźnieniem „+10 min”), punkt manewru,
  * cel; zielona strzałka = my (obrócona o różnicę między naszym kierunkiem a kierunkiem trasy).
  */
-export function HudRouteMap({ nav, track, live, token, anchorY = 0.8, zoomOffset = 0, friends }: { nav: HudNavData; track: NavTrack; live: Live | null; token: string; anchorY?: number; zoomOffset?: number; friends?: Friend[] }) {
+export function HudRouteMap({ nav, track, live, token, anchorY = 0.8, zoomOffset = 0, friends, vector }: { nav: HudNavData; track: NavTrack; live: Live | null; token: string; anchorY?: number; zoomOffset?: number; friends?: Friend[]; /** Własny styl mapy (kafelki wektorowe); brak = TomTom. */ vector?: GlVector }) {
   const route = nav.route;
   const lastBearing = useRef(0);
   const zoomRef = useRef<number | null>(null);
@@ -365,7 +365,7 @@ export function HudRouteMap({ nav, track, live, token, anchorY = 0.8, zoomOffset
   const rgba = (hex: string, a = 1): [number, number, number, number] => [parseInt(hex.slice(1, 3), 16) / 255, parseInt(hex.slice(3, 5), 16) / 255, parseInt(hex.slice(5, 7), 16) / 255, a];
   const JAM = { slow: "#f2c230", jam: "#e8322c", closed: "#8a1010" } as const;
   const lines: GlLine[] = [
-    ...(behind.length > 1 ? [{ pts: behind, color: rgba("#5b6b78", 0.6), widthPx: 8 }] : []),
+    ...(behind.length > 1 ? [{ pts: behind, color: rgba(vector?.theme === "day" ? "#8a949c" : "#5b6b78", 0.7), widthPx: 8 }] : []),
     ...(ahead.length > 1 ? [{ pts: ahead, color: rgba("#0b3d80"), widthPx: 15 }, { pts: ahead, color: rgba("#3d8bff"), widthPx: 10 }] : []),
     ...jams.map((j) => ({ pts: j.pts, color: rgba(JAM[j.tone]), widthPx: 9 })),
   ];
@@ -393,7 +393,7 @@ export function HudRouteMap({ nav, track, live, token, anchorY = 0.8, zoomOffset
 
   return (
     <div className="hud-map">
-      <GlMapView token={token} center={center} zoom={zoom} bearing={bearing} pitch={MAP_PITCH} anchorY={anchorY} lines={lines} markers={markers} follow={predict}>
+      <GlMapView token={token} center={center} zoom={zoom} bearing={bearing} pitch={MAP_PITCH} anchorY={anchorY} lines={lines} markers={markers} follow={predict} vector={vector}>
         <svg className="hud-map-me-wrap" style={{ left: "50%", top: `${anchorY * 100}%` }} viewBox="-30 -34 60 64" aria-hidden>
           <path className="hud-map-me-halo" transform={`rotate(${arrowTurn})`} d="M0 -30 L22 24 L0 12 L-22 24 Z" />
           <path className="hud-map-me" transform={`rotate(${arrowTurn})`} d="M0 -30 L22 24 L0 12 L-22 24 Z" />

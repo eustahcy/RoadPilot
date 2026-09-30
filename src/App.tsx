@@ -35,6 +35,7 @@ import { useFriends } from "./friends";
 import { MyRoute, presenceOf } from "./core/friends";
 import { ON_ROUTE_M } from "./core/navmatch";
 import { FriendsCard } from "./components/Friends";
+import { autoTheme } from "./mapStyle";
 
 type Tab = "plan" | "route" | "driver" | "history" | "settings";
 
@@ -128,6 +129,12 @@ function App() {
   }, [needWarnings, navRouteAt]);
   // Nawigacja jest zawsze włączona dla Premium (bez przełącznika w Ustawieniach); cel można wybrać też w HUD.
   const navOn = navAccess === "premium";
+  // Własne kafelki mapy (OSM, Polska): czy serwer je ma i czy jesteśmy w ich zasięgu — inaczej kafelki TomTom.
+  const [vtiles, setVtiles] = useState<{ available: boolean; bounds: number[] } | null>(null);
+  useEffect(() => {
+    if (!auth || !navOn) return;
+    api<{ available: boolean; bounds: number[] }>("GET", "/vtiles/meta", undefined, auth.token).then(setVtiles).catch(() => setVtiles(null));
+  }, [auth, navOn]);
   const dayOff = state.stop?.dayEnd === true;
   const work = workStatus(state.driver.shiftStart, now, settings.work, state.driver.reducedRestsLeft);
   useWorkReminders(settings.work, state.driver.shiftStart, state.driver.reducedRestsLeft, dayOff);
@@ -157,6 +164,7 @@ function App() {
   const parkings = useParkings(live, online, now);
   const weather = useWeather(live, online, now);
   const hudItems = settings.hudItems[settings.hudStyle];
+  const inVtiles = !!vtiles?.available && !!live && live.lon >= vtiles.bounds[0] && live.lat >= vtiles.bounds[1] && live.lon <= vtiles.bounds[2] && live.lat <= vtiles.bounds[3];
   const roads = useRoads(live, online && hudItems.road, now);
   const today = state.history.find((d) => d.date === dayKey(now));
   const avgKmh = today ? daySummary(today).avgKmh : undefined;
@@ -298,6 +306,7 @@ function App() {
         floating={floating}
         nav={navOn ? { route: state.navRoute, dest: navDest, rerouting, onReroute: reroute } : undefined}
         mapToken={navOn ? auth?.token : undefined}
+        mapVector={navOn && inVtiles ? { theme: settings.mapTheme === "auto" ? autoTheme(weather.data?.isDay, now) : settings.mapTheme, vehicle: settings.vehicle } : undefined}
         planner={navOn && auth ? {
           token: auth.token,
           vehicle: settings.vehicle,

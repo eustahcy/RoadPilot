@@ -28,6 +28,7 @@ import { ReportSheet } from "./ReportSheet";
 import { ActiveStopPanel, confirmStartDay, fmtTimer, StopControlsProps, StopPicker } from "./StopControls";
 import { describeFriend, Friend, MyRoute, nearestFriend } from "../core/friends";
 import { fmtFriendDist, FriendTile } from "./Friends";
+import { GlVector } from "./GlMap";
 
 interface Props {
   origin: string;
@@ -74,6 +75,8 @@ interface Props {
   planner?: HudPlanner;
   /** Token sesji do kafelków mapy (Premium). */
   mapToken?: string;
+  /** Własny styl mapy (kafelki wektorowe RoadPilot, dzień / noc) — undefined = kafelki TomTom. */
+  mapVector?: GlVector;
   /** Komunikaty głosowe nawigacji. */
   voice: { supported: boolean; on: boolean; toggle: () => void };
   /** Zgłoszenia z drogi do mapy RoadPilot — tylko ze zgodą kierowcy. */
@@ -272,10 +275,10 @@ export function HudView(p: Props) {
             : { label: "Przerwa", value: "—", sub: "dojedziesz bez postoju", tone: "" };
         })();
     return (
-      <div className={`hud navmode ${p.mirror ? "mirror" : ""}`}>
+      <div className={`hud navmode ${p.mirror ? "mirror" : ""} ${p.mapVector?.theme === "day" ? "day" : ""}`}>
         <NavVoice nav={p.nav} track={track} kmh={fresh?.kmh ?? null} enabled={p.voice.on} />
         <div className="nm-map">
-          {p.nav && p.mapToken ? <HudRouteMap nav={p.nav} track={track} live={fresh} token={p.mapToken} anchorY={0.7} zoomOffset={zoomOffset} friends={show.friends ? p.friends : undefined} /> : <div className="hud-map empty" />}
+          {p.nav && p.mapToken ? <HudRouteMap nav={p.nav} track={track} live={fresh} token={p.mapToken} anchorY={0.7} zoomOffset={zoomOffset} friends={show.friends ? p.friends : undefined} vector={p.mapVector} /> : <div className="hud-map empty" />}
         </div>
 
         <header className="nm-top">

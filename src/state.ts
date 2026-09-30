@@ -69,6 +69,8 @@ export interface Settings {
   navVoice: boolean;
   /** Znajomi widzą moją pozycję, postój, cel i stan tachografu (tylko zaakceptowani, tylko przy włączonym GPS). */
   friendsShare: boolean;
+  /** Styl własnej mapy w HUD: dzień / noc / automatycznie (pogoda albo zegar). */
+  mapTheme: "auto" | "day" | "night";
 }
 
 export interface AppState {
@@ -110,7 +112,7 @@ export function defaultState(now = Date.now()): AppState {
       weekDrivenMin: 0,
       prevWeekDrivenMin: 0,
     },
-    settings: { speeds: { ...DEFAULT_SPEEDS }, parkingBufferMin: 45, allowExtension: false, allowReducedRest: false, gps: false, liveEta: false, service: { date: null, km: null, odoAtSet: 0 }, hudMirror: false, ongoing: false, autoStop: true, hudAnimation: true, hudStyle: "full", hudItems: { full: { ...DEFAULT_HUD_ITEMS.full }, minimal: { ...DEFAULT_HUD_ITEMS.minimal }, nav: { ...DEFAULT_HUD_ITEMS.nav } }, work: { ...DEFAULT_WORK }, musicApp: "none", navEnabled: false, vehicle: { ...DEFAULT_VEHICLE }, navEngine: "tomtom", routeType: "fastest", navVoice: true, friendsShare: true },
+    settings: { speeds: { ...DEFAULT_SPEEDS }, parkingBufferMin: 45, allowExtension: false, allowReducedRest: false, gps: false, liveEta: false, service: { date: null, km: null, odoAtSet: 0 }, hudMirror: false, ongoing: false, autoStop: true, hudAnimation: true, hudStyle: "full", hudItems: { full: { ...DEFAULT_HUD_ITEMS.full }, minimal: { ...DEFAULT_HUD_ITEMS.minimal }, nav: { ...DEFAULT_HUD_ITEMS.nav } }, work: { ...DEFAULT_WORK }, musicApp: "none", navEnabled: false, vehicle: { ...DEFAULT_VEHICLE }, navEngine: "tomtom", routeType: "fastest", navVoice: true, friendsShare: true, mapTheme: "auto" },
     planTime: null,
     track: null,
     odoKm: 0,

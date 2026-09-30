@@ -70,7 +70,10 @@ src/core/navmatch.ts  prowadzenie: pointAtKm, bearingAtKm, routeSlice, locate (r
                    speedLimitAt trzyma ostatni limit do NAV.limitCarryKm za końcem odcinka (luki w danych TomTom); speedTone ok/warn/over (NAV.overWarnKmh = 5)
 src/components/MapView.tsx  mapa DOM bez bibliotek (podgląd admina, „Gdzie jest” znajomego — bez pochylenia): kafelki TomTom 512 px (noc) przez /api/tiles
                    z tokenem (fetch → blob, wspólny cache loadTile/cachedTile), Web Mercator, nakładki SVG; AdminMap.tsx = podgląd danych
-src/components/GlMap.tsx  mapa HUD w WebGL (GlMapView): kafelki jako tekstury (LRU 160), linie (trasa, korki) jako trójkąty, kamera = ta sama
+src/components/GlMap.tsx  mapa HUD w WebGL (GlMapView): kafelki rastrowe TomTom jako tekstury ALBO własne kafelki wektorowe (prop vector: theme + vehicle;
+                   /api/vtiles → core/mvt.ts decodeMvt → glVector.ts buildVectorTile: bufor [x,y,nx,ny,d], partie wg klucza stylu; wypełnienia przez
+                   bufor szablonu, drogi rozciągane w shaderze (u_hw), zakazy kreskowane (u_dash); etykiety z kafelków jako znaczniki SVG, LABELS_MAX 22);
+                   src/mapStyle.ts = palety dzień/noc, roadWidth, roadBan (tagi OSM vs pojazd), autoTheme; kamera = ta sama
                    macierz co dawniej w CSS (translate·perspective·rotateX·rotateZ), follow() = pozycja co klatkę (rAF); znaczniki = kilka
                    elementów SVG w układzie ekranu przestawianych atrybutem transform. Zastąpiła pochylanie warstwy HTML (CSS 3D), której
                    Chrome na Androidzie nie nadążał rasteryzować (migotanie, niedomalowane karty), a Safari na iOS wyczerpywało pamięć
@@ -129,6 +132,9 @@ alert_votes        głosy „jest / nie ma” po minięciu fotoradaru/kontroli (
 server/osm.mjs     OSM → ograniczenia (height/weight/axle/width/length/hgv/speed_hgv), parseValue; osm-import.mjs → tabela osm_restrictions
 /opt/roadpilot-valhalla  dane i build.sh Valhalla (docker ghcr.io/valhalla/valhalla); kontener roadpilot-valhalla na 127.0.0.1:8002;
                    budowa potrzebuje kilku GB RAM — na czas budowy zatrzymywany kontener Metin2 m2pb-06b67463-game (zgoda użytkownika)
+scripts/tiles-build.sh  własne kafelki wektorowe: tilemaker (server/tiles/config.json + process.lua: warstwy water, landuse, waterway, railway, road
+                   z tagami ograniczeń, building, place; z 6–14, gzip) → katalog VTILES_DIR (z/x/y.pbf) serwowany przez GET /api/vtiles/z/x/y
+                   (204 = pusty kafelek) i GET /api/vtiles/meta {available, bounds}; aplikacja używa własnych kafelków tylko w ich zasięgu
 scripts/osm-update.sh  pobranie Polski (lustro openstreetmap.fr — Geofabrik blokuje VPS) → osmium tags-filter → export → import; dane w /opt/roadpilot-osm
 scripts/deploy-ftp.sh  `npm run deploy:tuike`: build z VITE_API_URL → FTPS do tuike.pl/roadpilot/ (dane w ~/.config/roadpilot/ftp.env)
 ```

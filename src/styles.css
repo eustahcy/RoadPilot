@@ -982,3 +982,18 @@ input[type="number"]::-webkit-inner-spin-button, input[type="number"]::-webkit-o
 .gl-map { position: absolute; inset: 0; overflow: hidden; background: #0a1219; }
 .gl-canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
 .gl-markers { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none; }
+
+/* Etykiety własnej mapy (nazwy miejscowości, numery dróg) — kolory z palety przez zmienne na .gl-map */
+.vl-place { fill: var(--label); font: 700 13px system-ui, sans-serif; text-anchor: middle; paint-order: stroke; stroke: var(--halo); stroke-width: 3px; stroke-linejoin: round; }
+.vl-city { font-size: 16px; font-weight: 800; letter-spacing: .02em; }
+.vl-town { font-size: 14px; }
+.vl-village, .vl-hamlet { font-size: 12px; font-weight: 650; }
+.vl-ref rect { fill: #e8352d; stroke: #fff; stroke-width: 1.5; }
+.vl-ref text { fill: #fff; font: 800 12px system-ui, sans-serif; text-anchor: middle; }
+/* Dzień: niebo i mgła jasne (paleta day), nocą jak dotąd */
+.hud.navmode.day .nm-map::after { background: linear-gradient(to bottom, #dfe6ee 0, #dfe6ee 15%, rgba(238, 240, 230, .92) 19%, rgba(238, 240, 230, .45) 26%, transparent 36%, transparent 64%, rgba(20, 24, 28, .55) 100%); }
+.hud.navmode.day .nm-map::before { background: linear-gradient(90deg, transparent, rgba(60, 90, 120, .35), transparent); }
+@media (orientation: portrait) {
+  .hud.navmode.day .nm-map::after { background: linear-gradient(to bottom, #dfe6ee 0, #dfe6ee 17%, rgba(238, 240, 230, .97) 24%, rgba(238, 240, 230, .6) 31%, transparent 40%, transparent 64%, rgba(20, 24, 28, .55) 100%); }
+}
+.hud.navmode.day .hud-map-done { stroke: #9aa3ab; }

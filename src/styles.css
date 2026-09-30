@@ -988,6 +988,7 @@ input[type="number"]::-webkit-inner-spin-button, input[type="number"]::-webkit-o
 .vl-city { font-size: 16px; font-weight: 800; letter-spacing: .02em; }
 .vl-town { font-size: 14px; }
 .vl-village, .vl-hamlet { font-size: 12px; font-weight: 650; }
+.vl-street { fill: var(--label); font: 650 12px system-ui, sans-serif; text-anchor: middle; paint-order: stroke; stroke: var(--halo); stroke-width: 3px; stroke-linejoin: round; opacity: .9; }
 .vl-ref rect { fill: #e8352d; stroke: #fff; stroke-width: 1.5; }
 .vl-ref text { fill: #fff; font: 800 12px system-ui, sans-serif; text-anchor: middle; }
 /* Dzień: niebo i mgła jasne (paleta day), nocą jak dotąd */

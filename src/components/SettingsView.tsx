@@ -327,7 +327,7 @@ function HudSection({ settings, onChange }: { settings: Settings; onChange: (pat
   return (
     <>
       <section className="card">
-        <div className="eyebrow">Mapa w stylu „Nawigacja”</div>
+        <div className="eyebrow">Mapa w nawigacji</div>
         <div className="hud-style-pick engines">
           {([["auto", "Automatycznie", "Dzień / noc z pogody, a bez niej z zegara (7–19)."], ["day", "Dzień", "Jasne tło, szare drogi."], ["night", "Noc", "Ciemne tło — jak dotąd."]] as const).map(([id, label, hint]) => (
             <button key={id} className={`hud-style-opt ${settings.mapTheme === id ? "active" : ""}`} aria-pressed={settings.mapTheme === id} onClick={() => onChange({ mapTheme: id })}>
@@ -345,9 +345,7 @@ function HudSection({ settings, onChange }: { settings: Settings; onChange: (pat
             <button key={h.id} className={`hud-style-opt ${style === h.id ? "active" : ""}`} aria-pressed={style === h.id} onClick={() => onChange({ hudStyle: h.id })}>
               <span className={`hud-style-preview ${h.id}`} aria-hidden>
                 <b>78</b>
-                {h.id === "full" ? <><i /><i /><i /></> : h.id === "nav" ? (
-                  <svg viewBox="0 0 100 34" aria-hidden><path d="M50 34 Q52 18 70 4" stroke="#3d8bff" strokeWidth="6" fill="none" strokeLinecap="round" /><path d="M50 22 l6 12 l-6 -3 l-6 3 Z" fill="#44f07c" /></svg>
-                ) : <em>213 km · 15:12 · 1 h 52</em>}
+                {h.id === "full" ? <><i /><i /><i /></> : <em>213 km · 15:12 · 1 h 52</em>}
               </span>
               <strong>{h.label}</strong>
               <small>{h.hint}</small>

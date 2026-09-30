@@ -9,6 +9,7 @@ import { sendReport, useTraceCollector } from "./collect";
 import { polishVoiceMissing, speak, voiceSupported } from "./voice";
 import { GpsCard } from "./components/GpsCard";
 import { enterFullscreen, exitFullscreen, HudView } from "./components/HudView";
+import { NavView } from "./components/NavView";
 import { PlanView } from "./components/PlanView";
 import { RouteView } from "./components/RouteView";
 import { SettingsCategory, SettingsView } from "./components/SettingsView";
@@ -37,11 +38,12 @@ import { ON_ROUTE_M } from "./core/navmatch";
 import { FriendsCard } from "./components/Friends";
 import { autoTheme } from "./mapStyle";
 
-type Tab = "plan" | "route" | "driver" | "history" | "settings";
+type Tab = "plan" | "route" | "nav" | "driver" | "history" | "settings";
 
 const TABS: { id: Tab; label: string; icon: string }[] = [
   { id: "plan", label: "Plan", icon: "M4 12h4l3-8 4 16 3-8h2" },
   { id: "route", label: "Trasa", icon: "M6 20c0-6 12-4 12-10a4 4 0 0 0-8 0M6 20h.01M18 10h.01" },
+  { id: "nav", label: "Nawigacja", icon: "M3 11l18-8-8 18-2-8-8-2Z" },
   { id: "driver", label: "Tachograf", icon: "M12 7v5l3 2M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18Z" },
   { id: "history", label: "Historia", icon: "M5 4h14v16H5zM9 9h6M9 13h6M9 17h3" },
   { id: "settings", label: "Ustawienia", icon: "M4 7h10M18 7h2M4 17h4M12 17h8M14 5v4M8 15v4" },
@@ -222,9 +224,19 @@ function App() {
   useOngoingNotification(settings.ongoing, ongoingInfo(activePlan, status, state.stop, now), () => setOngoing(false));
 
   const go = (t: Tab) => {
+    // Nawigacja to osobny ekran na cały ekran (jak HUD), nie zakładka w powłoce.
+    if (t === "nav") {
+      enterFullscreen();
+      setState((s) => ({ ...s, navOpen: true, planTime: null }));
+      return;
+    }
     setTab(t);
     setSettingsCat(null);
     window.scrollTo({ top: 0 });
+  };
+  const exitNav = () => {
+    exitFullscreen();
+    setState((s) => ({ ...s, navOpen: false }));
   };
 
   const setGps = (on: boolean) => setState((s) => ({ ...s, settings: { ...s.settings, gps: on }, track: on ? s.track : null }));
@@ -282,31 +294,11 @@ function App() {
   if (resetToken) return <ResetPasswordScreen token={resetToken} onAuth={(a) => { closeReset(); signIn(a); }} onCancel={closeReset} />;
   if (!auth && !guest) return <AuthScreen onAuth={signIn} onGuest={continueAsGuest} />;
 
-  if (state.hud) {
+
+  if (state.navOpen) {
     return (
-      <HudView
-        origin={trip.origin}
-        destination={trip.destination}
-        route={route}
-        doneKm={trip.doneKm}
-        plan={activePlan}
-        deadline={deadline}
-        status={status}
-        driver={driver}
-        gpsOn={settings.gps}
-        gpsStatus={gpsStatus}
-        live={live}
-        weather={weather}
-        parkings={parkings}
-        mirror={settings.hudMirror}
-        roads={hudItems.road ? roads.data : undefined}
-        hudStyle={settings.hudStyle}
-        items={hudItems}
-        onStyle={(hudStyle: HudStyle) => setState((s) => ({ ...s, settings: { ...s.settings, hudStyle } }))}
-        floating={floating}
+      <NavView
         nav={navOn ? { route: state.navRoute, dest: navDest, rerouting, onReroute: reroute } : undefined}
-        mapToken={navOn ? auth?.token : undefined}
-        mapVector={navOn && inVtiles ? { theme: settings.mapTheme === "auto" ? autoTheme(weather.data?.isDay, now) : settings.mapTheme, vehicle: settings.vehicle } : undefined}
         planner={navOn && auth ? {
           token: auth.token,
           vehicle: settings.vehicle,
@@ -329,6 +321,8 @@ function App() {
             setState((s) => ({ ...s, settings: { ...s.settings, navVoice: on } }));
           },
         }}
+        mapToken={navOn ? auth?.token : undefined}
+        mapVector={navOn && inVtiles ? { theme: settings.mapTheme === "auto" ? autoTheme(weather.data?.isDay, now) : settings.mapTheme, vehicle: settings.vehicle } : undefined}
         report={consent && auth ? {
           onSend: async (kind, value) => {
             if (!live) throw new Error("Brak pozycji GPS.");
@@ -338,6 +332,43 @@ function App() {
             await voteAlert(auth.token, w, vote);
           },
         } : undefined}
+        friends={auth ? friends.friends : undefined}
+        live={live}
+        gpsOn={settings.gps}
+        gpsStatus={gpsStatus}
+        onEnableGps={() => setGps(true)}
+        route={route}
+        plan={activePlan}
+        deadline={deadline}
+        stopControls={stopProps}
+        vehicleMaxKmh={settings.vehicle.maxKmh}
+        onExit={exitNav}
+      />
+    );
+  }
+
+  if (state.hud) {
+    return (
+      <HudView
+        origin={trip.origin}
+        destination={trip.destination}
+        route={route}
+        doneKm={trip.doneKm}
+        plan={activePlan}
+        deadline={deadline}
+        status={status}
+        driver={driver}
+        gpsOn={settings.gps}
+        gpsStatus={gpsStatus}
+        live={live}
+        weather={weather}
+        parkings={parkings}
+        mirror={settings.hudMirror}
+        roads={hudItems.road ? roads.data : undefined}
+        hudStyle={settings.hudStyle}
+        items={hudItems}
+        onStyle={(hudStyle: HudStyle) => setState((s) => ({ ...s, settings: { ...s.settings, hudStyle } }))}
+        floating={floating}
         avgKmh={avgKmh}
         animation={settings.hudAnimation}
         onAnimation={(hudAnimation) => setState((s) => ({ ...s, settings: { ...s.settings, hudAnimation } }))}
@@ -350,7 +381,18 @@ function App() {
         musicApp={settings.musicApp}
         better={better}
         onBetter={pickBetter}
+        report={consent && auth ? {
+          onSend: async (kind, value) => {
+            if (!live) throw new Error("Brak pozycji GPS.");
+            await sendReport(auth.token, { kind, lat: live.lat, lon: live.lon, heading: live.heading, value, note: "" });
+          },
+          onVote: async (w, vote) => {
+            await voteAlert(auth.token, w, vote);
+          },
+        } : undefined}
         friends={auth ? friends.friends : undefined}
+        navRoute={state.navRoute}
+        vehicleMaxKmh={settings.vehicle.maxKmh}
       />
     );
   }

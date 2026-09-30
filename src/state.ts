@@ -86,6 +86,8 @@ export interface AppState {
   odoKm: number;
   /** Otwarty tryb HUD — po ponownym uruchomieniu aplikacja wraca do niego. */
   hud: boolean;
+  /** Otwarty ekran nawigacji (zakładka „Nawigacja”) — osobny od HUD, też wraca po uruchomieniu. */
+  navOpen: boolean;
   /** Trwający postój oznaczony przez kierowcę („zaczynam przerwę”) — null, gdy jedzie. */
   stop: ActiveStop | null;
   /** Scenariusz wybrany przez kierowcę zamiast zalecanego — null = zalecany przez RoadPilot. */
@@ -112,7 +114,7 @@ export function defaultState(now = Date.now()): AppState {
       weekDrivenMin: 0,
       prevWeekDrivenMin: 0,
     },
-    settings: { speeds: { ...DEFAULT_SPEEDS }, parkingBufferMin: 45, allowExtension: false, allowReducedRest: false, gps: false, liveEta: false, service: { date: null, km: null, odoAtSet: 0 }, hudMirror: false, ongoing: false, autoStop: true, hudAnimation: true, hudStyle: "full", hudItems: { full: { ...DEFAULT_HUD_ITEMS.full }, minimal: { ...DEFAULT_HUD_ITEMS.minimal }, nav: { ...DEFAULT_HUD_ITEMS.nav } }, work: { ...DEFAULT_WORK }, musicApp: "none", navEnabled: false, vehicle: { ...DEFAULT_VEHICLE }, navEngine: "tomtom", routeType: "fastest", navVoice: true, friendsShare: true, mapTheme: "auto" },
+    settings: { speeds: { ...DEFAULT_SPEEDS }, parkingBufferMin: 45, allowExtension: false, allowReducedRest: false, gps: false, liveEta: false, service: { date: null, km: null, odoAtSet: 0 }, hudMirror: false, ongoing: false, autoStop: true, hudAnimation: true, hudStyle: "full", hudItems: { full: { ...DEFAULT_HUD_ITEMS.full }, minimal: { ...DEFAULT_HUD_ITEMS.minimal } }, work: { ...DEFAULT_WORK }, musicApp: "none", navEnabled: false, vehicle: { ...DEFAULT_VEHICLE }, navEngine: "tomtom", routeType: "fastest", navVoice: true, friendsShare: true, mapTheme: "auto" },
     planTime: null,
     track: null,
     odoKm: 0,
@@ -120,6 +122,7 @@ export function defaultState(now = Date.now()): AppState {
     stop: null,
     choice: null,
     navRoute: null,
+    navOpen: false,
     history: [],
   };
 }
@@ -127,7 +130,7 @@ export function defaultState(now = Date.now()): AppState {
 /** Elementy HUD scalone z domyślnymi; dawne „hudRoadInfo: false” wyłącza nazwę drogi w obu stylach. */
 function hudItems(base: Settings["hudItems"], saved?: Partial<Settings> & { hudRoadInfo?: boolean }): Settings["hudItems"] {
   const road = saved?.hudItems === undefined && saved?.hudRoadInfo === false ? { road: false } : {};
-  return { full: { ...base.full, ...saved?.hudItems?.full, ...road }, minimal: { ...base.minimal, ...saved?.hudItems?.minimal, ...road }, nav: { ...base.nav, ...saved?.hudItems?.nav, ...road } };
+  return { full: { ...base.full, ...saved?.hudItems?.full, ...road }, minimal: { ...base.minimal, ...saved?.hudItems?.minimal, ...road } };
 }
 
 /** Zapisany (lub pobrany z konta) stan scalony z domyślnym — nowe pola dostają wartości domyślne. */
@@ -139,7 +142,8 @@ export function normalize(s: Partial<AppState>): AppState {
     ...s,
     trip: { ...base.trip, ...s.trip },
     driver: { ...base.driver, ...s.driver },
-    settings: { ...base.settings, ...s.settings, speeds: { ...base.settings.speeds, ...s.settings?.speeds }, service: { ...base.settings.service, ...s.settings?.service }, work: { ...base.settings.work, ...s.settings?.work }, hudItems: hudItems(base.settings.hudItems, s.settings), vehicle: { ...base.settings.vehicle, ...s.settings?.vehicle } },
+    settings: { ...base.settings, ...s.settings, speeds: { ...base.settings.speeds, ...s.settings?.speeds }, service: { ...base.settings.service, ...s.settings?.service }, work: { ...base.settings.work, ...s.settings?.work }, // Dawny styl HUD „nav” to dziś osobny ekran nawigacji.
+      hudStyle: (s.settings?.hudStyle as string) === "nav" ? "full" : s.settings?.hudStyle ?? base.settings.hudStyle, hudItems: hudItems(base.settings.hudItems, s.settings), vehicle: { ...base.settings.vehicle, ...s.settings?.vehicle } },
   };
 }
 

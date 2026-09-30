@@ -19,7 +19,7 @@ interface Meta {
 
 /** Pola tylko dla tego urządzenia — nie trafiają na konto. */
 export function syncable(s: AppState) {
-  const { track: _track, hud: _hud, planTime: _planTime, navRoute: _navRoute, ...rest } = s;
+  const { track: _track, hud: _hud, navOpen: _navOpen, planTime: _planTime, navRoute: _navRoute, ...rest } = s;
   return rest;
 }
 

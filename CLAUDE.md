@@ -72,13 +72,14 @@ src/components/MapView.tsx  mapa DOM bez bibliotek (podgląd admina, „Gdzie je
                    z tokenem (fetch → blob, wspólny cache loadTile/cachedTile), Web Mercator, nakładki SVG; AdminMap.tsx = podgląd danych
 src/components/GlMap.tsx  mapa HUD w WebGL (GlMapView): kafelki rastrowe TomTom jako tekstury ALBO własne kafelki wektorowe (prop vector: theme + vehicle;
                    /api/vtiles → core/mvt.ts decodeMvt → glVector.ts buildVectorTile: bufor [x,y,nx,ny,d], partie wg klucza stylu; wypełnienia przez
-                   bufor szablonu, drogi rozciągane w shaderze (u_hw), zakazy kreskowane (u_dash); etykiety z kafelków jako znaczniki SVG, LABELS_MAX 22);
+                   bufor szablonu, drogi rozciągane w shaderze (u_hw), zakazy kreskowane (u_dash); etykiety z kafelków jako znaczniki SVG (miejscowości, numery dróg,
+                   nazwy ulic wzdłuż drogi od STREETS_FROM_ZOOM 15; box → chowanie nachodzących w pętli klatek), LABELS_MAX 34);
                    src/mapStyle.ts = palety dzień/noc, roadWidth, roadBan (tagi OSM vs pojazd), autoTheme; kamera = ta sama
                    macierz co dawniej w CSS (translate·perspective·rotateX·rotateZ), follow() = pozycja co klatkę (rAF); znaczniki = kilka
                    elementów SVG w układzie ekranu przestawianych atrybutem transform. Zastąpiła pochylanie warstwy HTML (CSS 3D), której
                    Chrome na Androidzie nie nadążał rasteryzować (migotanie, niedomalowane karty), a Safari na iOS wyczerpywało pamięć
 src/components/HudNav.tsx  useNavTrack (pozycja na trasie, poza trasą → onReroute po 15 s; brak trasy w urządzeniu, a jest cel → od razu; max 1/min),
-                   HudNav (manewr + pasy + ograniczenie), HudRouteMap (styl HUD „nav”: GlMapView pochylona MAP_PITCH 62° z horyzontem (gradient .nm-map::after/::before),
+                   HudNav (manewr + pasy + ograniczenie), HudRouteMap (ekran Nawigacji: GlMapView pochylona MAP_PITCH 62° z horyzontem (gradient .nm-map::after/::before),
                    kierunek jazdy w górę, trasa, zielona strzałka = my na 70% wysokości; zoom od prędkości)
                    useSmoothPosition — jak w nawigacjach: między odczytami GPS przewidujemy ruch z ostatniej prędkości (po trasie / wzdłuż kierunku),
                    nowy odczyt koryguje płynnie przez 1 s (SMOOTH). Zwraca funkcję predict() → MapView.follow woła ją w każdej klatce (rAF) i zapisuje
@@ -89,13 +90,15 @@ src/voice.ts       komunikaty głosowe (Web Speech, pl-PL): useNavVoice — mane
 src/nav.ts         nawigacja (beta): Vehicle, NavPlace, NavRoute, RouteType (fastest/shortest/eco → Settings.routeType, POST /api/nav/route);
                    searchPlaces / fetchRoute przez API → TomTom; AppState.navRoute tylko lokalnie (nie w sync)
 src/components/NavCard.tsx  Trasa: wyszukiwanie celu, „Wyznacz trasę dla ciężarówki”; trasa → trip.segments (profil custom) → silnik przerw
-src/hudConfig.ts   HudStyle (full/minimal), HUD_ITEMS, DEFAULT_HUD_ITEMS — Settings.hudItems[styl]; element „road” steruje też pobieraniem dróg
+src/hudConfig.ts   HudStyle (full/minimal; dawny „nav” migrowany do „full” w normalize), HUD_ITEMS, DEFAULT_HUD_ITEMS — Settings.hudItems[styl]; element „road” steruje też pobieraniem dróg
 src/floating.ts    pływające okienko: canvas → captureStream → <video> → PiP (requestPictureInPicture / webkitSetPresentationMode); useFloating(info, prepare)
 src/install.ts     useInstall: beforeinstallprompt łapane przy wczytaniu modułu, isStandalone; InstallButton.tsx = przycisk + instrukcja iOS
 src/launch.ts      platform() z userAgent, launch(): otwiera link z apps.ts (iOS: po 1,5 s bez przejścia → strona)
 src/nearby.ts      HUD: useStations, useParkings, useRoads (Overpass, z serwerem zapasowym) i useWeather (Open-Meteo)
-src/App.tsx        jedyne miejsce łączące stan z silnikiem (useMemo); activePlan = wybór kierowcy (AppState.choice) → plan pod rozładunek → zalecany; 5 zakładek: Plan/Trasa/Tachograf/Historia/Ustawienia;
-                   gdy state.hud — renderuje tylko HudView
+src/App.tsx        jedyne miejsce łączące stan z silnikiem (useMemo); activePlan = wybór kierowcy (AppState.choice) → plan pod rozładunek → zalecany; zakładki: Plan/Trasa/Nawigacja/Tachograf/Historia/Ustawienia;
+                   gdy state.hud — renderuje tylko HudView; gdy state.navOpen — tylko NavView (zakładka „Nawigacja” = osobny ekran na cały ekran)
+src/components/NavView.tsx  nawigacja jako osobny system (nie HUD): HudRouteMap + HudNav (karta manewru), głos, ostrzeżenia, wyszukiwanie celu, zgłoszenia, postój;
+                   HUD dostaje trasę tylko jako dane (navRoute: km po trasie do MOP-u/znajomych, limit do koloru prędkości)
 src/components/    widoki; HudView.tsx = tryb HUD; fields.tsx = NumberField, OptionalNumberField, DurationField, Toggle, Stepper
 src/api.ts         zapytania do API, token sesji (localStorage "roadpilot:auth"), tryb bez konta ("roadpilot:guest")
 src/sync.ts        useSync: stan ↔ konto (ostatni zapis wygrywa; wysyłka co ≤ 30 s i przy schowaniu, pobranie przy starcie/powrocie);

@@ -27,6 +27,8 @@ export interface GlMarker {
   lon: number;
   /** Obrót w stopniach na ekranie — dostaje bieżący kierunek mapy (np. strzałka znajomego: heading − bearing). */
   rotate?: (bearing: number) => number;
+  /** Prostokąt etykiety (px) do unikania nachodzenia — etykieta nachodząca na wcześniejszą jest chowana. */
+  box?: [number, number];
   node: ReactNode;
 }
 
@@ -59,8 +61,10 @@ const MAX_DPR = 2;
 /** Najwyższy poziom własnych kafelków (tilemaker) — wyżej skalujemy je w górę. */
 const VT_MAX_Z = 14;
 const VT_MIN_Z = 6;
-/** Ile etykiet naraz (najbliższe środka, miasta przed wsiami). */
-const LABELS_MAX = 22;
+/** Ile etykiet naraz (najbliższe środka, miasta przed wsiami, ulice na końcu). */
+const LABELS_MAX = 34;
+/** Nazwy ulic dopiero od tego zoomu. */
+const STREETS_FROM_ZOOM = 15;
 
 const VS = `
 attribute vec2 a_pos;
@@ -172,7 +176,9 @@ interface TileRect { k: string; lz: number; x: number; y: number; size: number; 
 
 interface VTileGpu { buf: WebGLBuffer; batches: VTileGeometry["batches"]; labels: VLabel[] }
 
-const LABEL_RANK: Record<VLabel["kind"], number> = { city: 0, town: 1, ref: 2, village: 3, hamlet: 4 };
+const LABEL_RANK: Record<VLabel["kind"], number> = { city: 0, town: 1, ref: 2, village: 3, hamlet: 4, street: 5 };
+/** Kąt etykiety wzdłuż drogi na ekranie: zawsze czytelny (nigdy do góry nogami). */
+const readable = (deg: number) => { let a = ((deg % 360) + 540) % 360 - 180; if (a > 90) a -= 180; if (a < -90) a += 180; return a; };
 
 export function GlMapView({ token, center, zoom, bearing = 0, pitch = 0, anchorY = 0.5, lines, markers, follow, vector, children }: GlMapProps) {
   const box = useRef<HTMLDivElement>(null);
@@ -249,7 +255,8 @@ export function GlMapView({ token, center, zoom, bearing = 0, pitch = 0, anchorY
       const vt = vtiles.current.get(t.k);
       if (!vt || vt === "loading") continue;
       for (const l of vt.labels) {
-        const id = `${l.kind}:${l.text}`;
+        if (l.kind === "street" && zoom < STREETS_FROM_ZOOM) continue;
+        const id = l.kind === "street" ? `${l.kind}:${l.text}:${t.k}` : `${l.kind}:${l.text}`;
         if (seen.has(id)) continue;
         seen.add(id);
         const x = t.x + l.x * f, y = t.y + l.y * f;
@@ -259,16 +266,20 @@ export function GlMapView({ token, center, zoom, bearing = 0, pitch = 0, anchorY
         const n = TILE * 2 ** z;
         const lon = ((x + cx) / n) * 360 - 180;
         const lat = (Math.atan(Math.sinh(Math.PI * (1 - (2 * (y + cy)) / n))) * 180) / Math.PI;
-        const w = l.text.length * (l.kind === "ref" ? 8 : 7.5) + 12;
+        const w = l.text.length * (l.kind === "ref" ? 8 : l.kind === "street" ? 6.6 : 7.5) + 12;
         const node = l.kind === "ref"
           ? <g className="vl-ref"><rect x={-w / 2} y={-10} width={w} height={20} rx={4} /><text y={5}>{l.text}</text></g>
-          : <text className={`vl-place vl-${l.kind}`}>{l.text}</text>;
-        cand.push({ m: { key: `vl:${id}`, lat, lon, node }, rank: LABEL_RANK[l.kind], d });
+          : l.kind === "street"
+            ? <text className="vl-street" y={-4}>{l.text}</text>
+            : <text className={`vl-place vl-${l.kind}`}>{l.text}</text>;
+        const angle = l.angle;
+        const rotate = l.kind === "street" && angle !== undefined ? (b: number) => readable(angle - b) : undefined;
+        cand.push({ m: { key: `vl:${id}`, lat, lon, node, rotate, box: [w, l.kind === "ref" ? 22 : 18] }, rank: LABEL_RANK[l.kind], d });
       }
     }
     return cand.sort((a, b) => a.rank - b.rank || a.d - b.d).slice(0, LABELS_MAX).map((c) => c.m);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [vector?.theme, tileGen, tiles.map((t) => t.k).join(","), z, cx, cy]);
+  }, [vector?.theme, tileGen, tiles.map((t) => t.k).join(","), z, cx, cy, zoom >= STREETS_FROM_ZOOM]);
   const allMarkers = vector ? [...vlabels, ...markers] : markers;
   const markerPx = useMemo(() => allMarkers.map((m) => { const [x, y] = worldPx(m, z); return { m, x: x - cx, y: y - cy }; }), [allMarkers, z, cx, cy]);
 
@@ -495,14 +506,24 @@ export function GlMapView({ token, center, zoom, bearing = 0, pitch = 0, anchorY
         gl.drawArrays(gl.TRIANGLES, r.start, r.count);
       }
 
-      // Znaczniki: kilka elementów SVG w układzie ekranu.
+      // Znaczniki: kilka elementów SVG w układzie ekranu. Etykiety z prostokątem: nachodząca na wcześniejszą — chowana.
+      const placed: [number, number, number, number][] = [];
       for (const { m, x, y } of f.markerPx) {
         const el = markerEls.current.get(m.key);
         if (!el) continue;
         const pt = project(cam, x, y);
         if (!pt) { el.setAttribute("display", "none"); continue; }
+        const rot = m.rotate ? m.rotate(b) : 0;
+        if (m.box) {
+          // Obrócona etykieta: przybliżamy prostokąt osiowy (zamiana boków powyżej 45°).
+          const swap = Math.abs(rot) > 45;
+          const bw = swap ? m.box[1] : m.box[0], bh = swap ? m.box[0] : m.box[1];
+          const r: [number, number, number, number] = [pt[0] - bw / 2, pt[1] - bh, pt[0] + bw / 2, pt[1] + bh / 2];
+          if (r[2] < 0 || r[0] > f.size.w || r[3] < 0 || r[1] > f.size.h || placed.some((q) => r[0] < q[2] && r[2] > q[0] && r[1] < q[3] && r[3] > q[1])) { el.setAttribute("display", "none"); continue; }
+          placed.push(r);
+        }
         el.removeAttribute("display");
-        el.setAttribute("transform", `translate(${pt[0].toFixed(1)} ${pt[1].toFixed(1)})${m.rotate ? ` rotate(${m.rotate(b).toFixed(1)})` : ""}`);
+        el.setAttribute("transform", `translate(${pt[0].toFixed(1)} ${pt[1].toFixed(1)})${m.rotate ? ` rotate(${rot.toFixed(1)})` : ""}`);
       }
     };
     raf = requestAnimationFrame(tick);

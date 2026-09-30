@@ -46,7 +46,8 @@ export function SettingsView({ initialCategory, navAccess, state, now, onSetting
   const { settings, driver } = state;
   const set = (patch: Partial<Settings>) => onSettings({ ...settings, ...patch });
   const [confirmReset, setConfirmReset] = useState(false);
-  const [cat, setCat] = useState<Category | null>(initialCategory ?? null);
+  // Na szerokim ekranie lista jest obok treści, więc od razu otwieramy pierwszą kategorię zamiast pustej prawej strony.
+  const [cat, setCat] = useState<Category | null>(initialCategory ?? (window.matchMedia("(min-width: 760px)").matches ? "account" : null));
   const open = (c: Category | null) => {
     setCat(c);
     window.scrollTo({ top: 0 });
@@ -65,11 +66,13 @@ export function SettingsView({ initialCategory, navAccess, state, now, onSetting
     ...(account.user?.admin ? [{ id: "admin" as const, label: "Administracja", sub: "Premium, limity TomTom, dane do mapy", icon: "M12 2l3 6 6 .9-4.5 4.3 1 6.3L12 16.5 6.5 19.5l1-6.3L3 8.9 9 8l3-6Z" }] : []),
   ];
 
-  if (cat === null) {
-    return (
+  // Na telefonie: lista kategorii albo jedna kategoria (z „‹ Ustawienia”). Na szerokim ekranie (CSS, od 760 px)
+  // lista zostaje po lewej, a treść wybranej kategorii jest obok — bez wchodzenia i cofania.
+  return (
+    <div className={`settings-layout ${cat ? "open" : ""}`}>
       <nav className="settings-cats" aria-label="Kategorie ustawień">
         {categories.map((c) => (
-          <button key={c.id} className="settings-cat" onClick={() => open(c.id)}>
+          <button key={c.id} className={`settings-cat ${c.id === cat ? "active" : ""}`} onClick={() => open(c.id)} aria-current={c.id === cat ? "page" : undefined}>
             <svg viewBox="0 0 24 24" aria-hidden><path d={c.icon} /></svg>
             <span>
               <b>{c.label}</b>
@@ -79,11 +82,8 @@ export function SettingsView({ initialCategory, navAccess, state, now, onSetting
           </button>
         ))}
       </nav>
-    );
-  }
-
-  return (
-    <>
+      {cat && (
+      <div className="settings-body">
       <button className="settings-back" onClick={() => open(null)}>‹ Ustawienia</button>
       <h1 className="settings-title">{categories.find((c) => c.id === cat)!.label}</h1>
 
@@ -217,7 +217,9 @@ export function SettingsView({ initialCategory, navAccess, state, now, onSetting
         )}
       </section>
       )}
-    </>
+      </div>
+      )}
+    </div>
   );
 }
 

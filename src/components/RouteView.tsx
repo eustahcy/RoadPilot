@@ -98,8 +98,10 @@ export function RouteView({ trip, route, onChange, nav }: Props) {
     </>
   );
 
+  // Na szerokim ekranie dwie kolumny: nawigacja i odcinki | rozładunek i zapas — mniej przewijania.
   return (
-    <>
+    <div className="route-grid">
+      <div className="route-main">
       <NavCard {...nav} />
       {navRoute ? (
         <section className="card">
@@ -127,7 +129,9 @@ export function RouteView({ trip, route, onChange, nav }: Props) {
           {manual}
         </>
       )}
+      </div>
 
+      <div className="route-side">
       <UnloadSection trip={trip} set={set} />
 
       <section className="card form">
@@ -136,7 +140,8 @@ export function RouteView({ trip, route, onChange, nav }: Props) {
           Wydłuża czas każdego odcinka. Prędkości dla typów dróg zmienisz w Ustawieniach.
         </p>
       </section>
-    </>
+      </div>
+    </div>
   );
 }
 

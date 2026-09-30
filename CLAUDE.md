@@ -47,12 +47,17 @@ src/core/          RoadPilot Core — czyste, deterministyczne funkcje TS (bez R
   scenarios.ts     compareScenarios (now/rest9/rest11 + bestId), whatIfs, explain, driverStatus, fmtDuration
   deadline.ts      planForDeadline: najdłuższy odpoczynek / najpóźniejszy wyjazd pod awizację (wyszukiwanie binarne)
   reconstruct.ts   spóźniony start — liczniki z listy aktywności
-  gps.ts           licznik km z odczytów, luki, średnia z 10 min, creditDriving/creditStop
-  *.test.ts        testy Vitest (core.test.ts, gps.test.ts)
+  gps.ts           licznik km z odczytów, luki, średnia z 10 min, creditDriving/creditStop; nextLive (prędkość/kierunek do HUD)
+  stations.ts      parseOverpass, nearestStation (najbliższa przed nami, ±70° od kierunku)
+  service.ts       serviceStatus: dni i km do serwisu (km z licznika GPS AppState.odoKm)
+  weather.ts       kod WMO → opis/ikona, isHazard
+  *.test.ts        testy Vitest (core.test.ts, gps.test.ts, hud.test.ts)
 src/state.ts       AppState (version: 1) w localStorage pod kluczem "roadpilot:v1", useNow (tick 15 s)
-src/tracking.ts    Geolocation.watchPosition + Wake Lock → applyFix na stanie
-src/App.tsx        jedyne miejsce łączące stan z silnikiem (useMemo), 4 zakładki: Plan/Trasa/Tachograf/Ustawienia
-src/components/    widoki; fields.tsx = NumberField, DurationField, Toggle, Stepper
+src/tracking.ts    Geolocation.watchPosition + Wake Lock → applyFix na stanie; zwraca { status, live }
+src/nearby.ts      HUD: useStations (Overpass, z serwerem zapasowym) i useWeather (Open-Meteo)
+src/App.tsx        jedyne miejsce łączące stan z silnikiem (useMemo), 4 zakładki: Plan/Trasa/Tachograf/Ustawienia;
+                   gdy state.hud — renderuje tylko HudView
+src/components/    widoki; HudView.tsx = tryb HUD; fields.tsx = NumberField, OptionalNumberField, DurationField, Toggle, Stepper
 public/sw.js       service worker (cache "roadpilot-vN"): nawigacja network-first, assets cache-first
 ```
 
@@ -78,10 +83,16 @@ Widoki nie liczą reguł same — tylko formatują wyniki silnika.
    Ścieżki w SW i manifeście są względne — aplikacja działa z podkatalogu `/roadpilot/` (`vite.config.ts: base`).
    W kodzie używaj `import.meta.env.BASE_URL`, nie `/`.
 8. **Zastrzeżenie prawne** („asystent planowania, nie zastępuje tachografu”) musi zostać w UI i README.
-9. **Bez backendu, kont i zewnętrznych API** bez wyraźnej decyzji użytkownika (założenie MVP: zero kosztów serwera).
-   Nie dodawaj zależności npm bez potrzeby — obecnie tylko react/react-dom.
+9. **Bez backendu i kont.** Jedyne zewnętrzne API (decyzja użytkownika, v0.5): Overpass (stacje) i Open-Meteo
+   (pogoda) — darmowe, bez klucza, wołane **tylko w trybie HUD przy włączonym GPS**, z pozycją zaokrągloną do 0,01°.
+   Nowych serwisów nie dodawaj bez zgody; każdy musi mieć obsługę braku sieci. Opis prywatności jest w Ustawieniach
+   (sekcja „Dane”) — aktualizuj go przy zmianach. Nie dodawaj zależności npm bez potrzeby — obecnie tylko react/react-dom.
+10. **HUD** ma być czytelny z odległości: duże cyfry, mało tekstu, działa poziomo i pionowo (`@media (orientation: portrait)`),
+    także w odbiciu lustrzanym (`.hud.mirror`). Po zmianach sprawdź oba układy zrzutem ekranu.
 
-## Znane ograniczenia i dług techniczny (stan na v0.4.0, 2026-09-30)
+## Znane ograniczenia i dług techniczny (stan na v0.5.0, 2026-09-30)
+
+- HUD: odległość do stacji jest w linii prostej, nie po drodze; km do serwisu liczy tylko GPS przy otwartej aplikacji.
 
 - Liczniki tygodniowe w `DriverState` (`weekDrivenMin`, `prevWeekDrivenMin`, `extensionsLeft`) **nie przewijają się
   same po poniedziałku 00:00** — robi to tylko symulacja. Po zmianie tygodnia kierowca musi je poprawić ręcznie,

@@ -191,3 +191,50 @@ export function distanceM(a: { lat: number; lon: number }, b: { lat: number; lon
   const h = Math.sin(dLat / 2) ** 2 + Math.cos(a.lat * rad) * Math.cos(b.lat * rad) * Math.sin(dLon / 2) ** 2;
   return 2 * R * Math.asin(Math.min(1, Math.sqrt(h)));
 }
+
+/** Kierunek z punktu a do b (stopnie, 0 = północ, zgodnie z ruchem wskazówek zegara). */
+export function bearingDeg(a: { lat: number; lon: number }, b: { lat: number; lon: number }): number {
+  const rad = Math.PI / 180;
+  const y = Math.sin((b.lon - a.lon) * rad) * Math.cos(b.lat * rad);
+  const x = Math.cos(a.lat * rad) * Math.sin(b.lat * rad) - Math.sin(a.lat * rad) * Math.cos(b.lat * rad) * Math.cos((b.lon - a.lon) * rad);
+  return (Math.atan2(y, x) / rad + 360) % 360;
+}
+
+/** Bieżąca pozycja, prędkość i kierunek — do trybu HUD (nie zapisywane). */
+export interface Live {
+  t: number;
+  lat: number;
+  lon: number;
+  /** km/h — null, gdy jeszcze nie wiadomo. */
+  kmh: number | null;
+  /** Stopnie od północy — null, gdy nie wiadomo (np. stoimy od początku). */
+  heading: number | null;
+  /** Punkt, od którego liczymy prędkość i kierunek, gdy odbiornik ich nie podaje. */
+  base: { t: number; lat: number; lon: number };
+}
+
+/** Tyle danych (ms) potrzeba, żeby liczyć prędkość z przesunięcia — przy odczytach co 1 s szum byłby za duży. */
+const DERIVE_MS = 4_000;
+
+/**
+ * Prędkość i kierunek z kolejnego odczytu. Najpierw to, co podaje odbiornik;
+ * gdy nie podaje — z przesunięcia od punktu sprzed co najmniej kilku sekund.
+ */
+export function nextLive(prev: Live | null, fix: Fix, receiverHeading: number | null): Live {
+  const here = { t: fix.t, lat: fix.lat, lon: fix.lon };
+  let kmh = fix.speed !== null && Number.isFinite(fix.speed) && fix.speed >= 0 ? fix.speed * 3.6 : null;
+  let heading = receiverHeading !== null && Number.isFinite(receiverHeading) && (kmh ?? 0) >= GPS.movingKmh ? receiverHeading : null;
+  if (!prev) return { ...here, kmh, heading, base: here };
+
+  let base = prev.base;
+  if (fix.t - base.t >= DERIVE_MS) {
+    const d = distanceM(base, fix);
+    const moved = d >= Math.max(GPS.minMoveM, fix.accuracy);
+    if (kmh === null && fix.accuracy <= GPS.maxAccuracyM) kmh = moved ? Math.min(d / 1000 / ((fix.t - base.t) / 3_600_000), GPS.maxKmh) : 0;
+    if (heading === null && moved) heading = bearingDeg(base, fix);
+    base = here;
+  } else if (kmh === null) {
+    kmh = prev.kmh;
+  }
+  return { ...here, kmh, heading: heading ?? prev.heading, base };
+}

@@ -1,8 +1,9 @@
 import { useState } from "react";
 import { DEFAULT_SPEEDS, ROAD_LABELS, ROAD_TYPES } from "../core/route";
+import { SERVICE, ServiceInfo, serviceStatus } from "../core/service";
 import { fromLocalInput, toLocalInput } from "../format";
 import { AppState, floorMinute, Settings } from "../state";
-import { NumberField, Toggle } from "./fields";
+import { NumberField, OptionalNumberField, Toggle } from "./fields";
 
 interface Props {
   state: AppState;
@@ -74,9 +75,24 @@ export function SettingsView({ state, now, onSettings, onPlanTime, onReset }: Pr
         </div>
       </section>
 
+      <ServiceSection state={state} now={now} onChange={(service) => set({ service })} />
+
+      <section className="card">
+        <div className="eyebrow">Tryb HUD</div>
+        <Toggle
+          checked={settings.hudMirror}
+          onChange={(hudMirror) => set({ hudMirror })}
+          label="Odbicie na szybę"
+          hint="Lustrzany obraz — połóż telefon na desce, żeby odbijał się w przedniej szybie."
+        />
+      </section>
+
       <section className="card">
         <div className="eyebrow">Dane</div>
-        <p className="muted">Wszystko jest zapisane tylko w tym urządzeniu. RoadPilot nie wysyła danych na serwer.</p>
+        <p className="muted">
+          Wszystko jest zapisane tylko w tym urządzeniu, bez kont i własnego serwera. W trybie HUD przybliżona pozycja
+          (z dokładnością ~1 km) trafia do OpenStreetMap (Overpass) i Open-Meteo — po najbliższe stacje i pogodę.
+        </p>
         {confirmReset ? (
           <div className="row-buttons">
             <button className="danger" onClick={() => { onReset(); setConfirmReset(false); }}>Tak, wyczyść</button>
@@ -88,4 +104,54 @@ export function SettingsView({ state, now, onSettings, onPlanTime, onReset }: Pr
       </section>
     </>
   );
+}
+
+function ServiceSection({ state, now, onChange }: { state: AppState; now: number; onChange: (s: ServiceInfo) => void }) {
+  const service = state.settings.service;
+  const st = serviceStatus(service, state.odoKm, now);
+  const kmLeft = st.kmLeft === undefined ? null : Math.max(0, Math.round(st.kmLeft));
+  const set = (patch: Partial<ServiceInfo>) => onChange({ ...service, ...patch });
+  return (
+    <section className="card">
+      <div className="eyebrow">Serwis</div>
+      <h2>Przegląd pojazdu</h2>
+      <p className="muted">Pokazywany w trybie HUD. Ostrzeżenie na {SERVICE.soonDays} dni lub {SERVICE.soonKm} km przed serwisem.</p>
+      <div className="form">
+        <label className="field">
+          <span className="field-label">Data serwisu</span>
+          <input type="date" value={service.date === null ? "" : toDateInput(service.date)} onChange={(e) => set({ date: fromDateInput(e.target.value) })} />
+        </label>
+        <OptionalNumberField
+          label="Za ile km"
+          value={kmLeft}
+          unit="km"
+          placeholder="np. 25000"
+          max={1_000_000}
+          // Wpisanie km zapamiętuje stan licznika GPS — od niego odliczamy przejechane kilometry.
+          onChange={(km) => set({ km, odoAtSet: state.odoKm })}
+        />
+        <p className="field-hint wide">
+          {st.level === "overdue"
+            ? "Serwis po terminie."
+            : "Kilometry odliczane z GPS, gdy RoadPilot śledzi trasę — co jakiś czas popraw je według licznika pojazdu."}
+        </p>
+      </div>
+      {st.level !== "none" && (
+        <button className="text-btn" onClick={() => onChange({ date: null, km: null, odoAtSet: state.odoKm })}>Usuń przypomnienie o serwisie</button>
+      )}
+    </section>
+  );
+}
+
+const pad = (n: number) => String(n).padStart(2, "0");
+
+function toDateInput(t: number) {
+  const d = new Date(t);
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
+/** „2026-11-15” → północ tego dnia w czasie lokalnym; puste → null. */
+function fromDateInput(v: string): number | null {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(v);
+  return m ? new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3])).getTime() : null;
 }

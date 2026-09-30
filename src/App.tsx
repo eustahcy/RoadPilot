@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { DriverView } from "./components/DriverView";
 import { GpsCard } from "./components/GpsCard";
+import { enterFullscreen, exitFullscreen, HudView } from "./components/HudView";
 import { PlanView } from "./components/PlanView";
 import { RouteView } from "./components/RouteView";
 import { SettingsView } from "./components/SettingsView";
@@ -8,8 +9,10 @@ import { planForDeadline } from "./core/deadline";
 import { GPS, recentSpeed, uniformSpeeds } from "./core/gps";
 import { remainingSegments, Route, segmentsFromProfile } from "./core/route";
 import { compareScenarios, driverStatus, whatIfs } from "./core/scenarios";
+import { serviceStatus } from "./core/service";
 import { fmtClock, fmtTime } from "./format";
 import { defaultState, floorMinute, useNow, usePersistentState } from "./state";
+import { useStations, useWeather } from "./nearby";
 import { useGpsTracking } from "./tracking";
 
 type Tab = "plan" | "route" | "driver" | "settings";
@@ -28,7 +31,11 @@ function App() {
   const planNow = state.planTime ?? floorMinute(now);
   const { trip, driver, settings } = state;
 
-  const gpsStatus = useGpsTracking(settings.gps, setState);
+  const { status: gpsStatus, live } = useGpsTracking(settings.gps, setState);
+  // Stacje i pogoda tylko w HUD — poza nim pozycja nie wychodzi z telefonu.
+  const online = state.hud && settings.gps;
+  const stations = useStations(live, online, now);
+  const weather = useWeather(live, online, now);
   const recentKmh = settings.gps ? recentSpeed(state.track, now) : undefined;
   // Przyjazd z aktualnego tempa tylko wtedy, gdy auto faktycznie jedzie — na postoju i w korku zwykłe prędkości.
   const liveKmh = settings.liveEta && recentKmh !== undefined && recentKmh >= GPS.minLiveKmh ? Math.round(recentKmh) : undefined;
@@ -53,6 +60,42 @@ function App() {
     window.scrollTo({ top: 0 });
   };
 
+  const setGps = (on: boolean) => setState((s) => ({ ...s, settings: { ...s.settings, gps: on }, track: on ? s.track : null }));
+  // HUD pokazuje jazdę na żywo — zawsze od teraz, nie od godziny wybranej do planowania.
+  const enterHud = () => {
+    enterFullscreen();
+    setState((s) => ({ ...s, hud: true, planTime: null }));
+  };
+  const exitHud = () => {
+    exitFullscreen();
+    setState((s) => ({ ...s, hud: false }));
+  };
+
+  if (state.hud) {
+    const best = comparison.scenarios.find((s) => s.id === comparison.bestId);
+    return (
+      <HudView
+        destination={trip.destination}
+        route={route}
+        doneKm={trip.doneKm}
+        plan={deadline ? deadline.plan : best?.plan}
+        deadline={deadline}
+        status={status}
+        gpsOn={settings.gps}
+        gpsStatus={gpsStatus}
+        live={live}
+        stations={stations}
+        weather={weather}
+        service={serviceStatus(settings.service, state.odoKm, now)}
+        serviceDate={settings.service.date}
+        mirror={settings.hudMirror}
+        onMirror={(hudMirror) => setState((s) => ({ ...s, settings: { ...s.settings, hudMirror } }))}
+        onEnableGps={() => setGps(true)}
+        onExit={exitHud}
+      />
+    );
+  }
+
   return (
     <div className="app-shell">
       <header className="topbar">
@@ -60,6 +103,7 @@ function App() {
           <div className="brand">Road<span>Pilot</span></div>
           <div className="eyebrow">Asystent planowania jazdy</div>
         </div>
+        <button className="hud-btn" onClick={enterHud} title="Tryb HUD — widok do jazdy">HUD</button>
         <div className="clock" title={state.planTime ? "Planowanie na wybraną godzinę" : "Aktualna godzina"}>
           {state.planTime ? (
             <button className="clock-custom" onClick={() => setState((s) => ({ ...s, planTime: null }))}>
@@ -96,7 +140,7 @@ function App() {
                 liveEta={settings.liveEta}
                 liveUsed={liveKmh !== undefined}
                 // Wyłączenie zapomina ostatnią pozycję — po ponownym włączeniu nie doliczamy drogi z przerwy.
-                onToggle={(on) => setState((s) => ({ ...s, settings: { ...s.settings, gps: on }, track: on ? s.track : null }))}
+                onToggle={setGps}
                 onLiveEta={(liveEta) => setState((s) => ({ ...s, settings: { ...s.settings, liveEta } }))}
               />
             }

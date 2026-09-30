@@ -193,3 +193,78 @@ input[type="number"]::-webkit-inner-spin-button, input[type="number"]::-webkit-o
 .slot { display: inline-block; margin-left: 6px; padding: 2px 7px; border-radius: 99px; font-size: 10px; font-weight: 800; letter-spacing: .03em; text-transform: uppercase; vertical-align: 1px; }
 .slot.ok { background: rgba(66, 211, 146, .12); color: var(--green); }
 .slot.late { background: rgba(239, 106, 91, .12); color: var(--red); }
+
+/* Tryb HUD — widok do jazdy: duże cyfry, mało tekstu, poziomo lub pionowo */
+.hud-btn { margin-left: auto; border: 1px solid rgba(66, 211, 146, .4); background: rgba(66, 211, 146, .1); color: var(--green); border-radius: 10px; padding: 7px 11px; font-size: 12px; font-weight: 850; letter-spacing: .08em; }
+.hud { position: fixed; inset: 0; z-index: 50; display: grid; grid-template-rows: auto 1fr auto; gap: clamp(8px, 2vh, 18px); padding: calc(12px + env(safe-area-inset-top)) calc(14px + env(safe-area-inset-right)) calc(12px + env(safe-area-inset-bottom)) calc(14px + env(safe-area-inset-left)); overflow: hidden; background: radial-gradient(ellipse at 50% -10%, #173a44 0, #0c2029 38%, #070d12 80%); color: #eef3f6; user-select: none; }
+.hud.mirror { transform: scaleX(-1); }
+.hud-top { display: grid; grid-template-columns: 1fr auto 1fr; align-items: start; gap: 12px; }
+.hud-group { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+.hud-group.right { justify-content: flex-end; }
+.hud-pill { display: flex; align-items: center; gap: 10px; min-height: 52px; padding: 8px 16px; border-radius: 18px; background: rgba(12, 22, 30, .72); border: 1px solid rgba(120, 160, 180, .16); backdrop-filter: blur(8px); }
+.hud-pill-text { display: grid; line-height: 1.1; }
+.hud-pill small { color: #8fa3b2; font-size: 12px; font-weight: 650; max-width: 16ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hud-pill b { font-size: clamp(18px, 2.6vw, 26px); font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.hud-pill.warn { border-color: rgba(232, 180, 76, .55); }
+.hud-pill.warn b { color: var(--amber); }
+.hud-pill.bad { border-color: rgba(239, 106, 91, .6); }
+.hud-pill.bad b { color: var(--red); }
+.hud-ico { width: 24px; height: 24px; flex: none; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.hud-icon-btn { justify-content: center; width: 52px; padding: 0; color: inherit; }
+.hud-icon-btn .hud-ico { stroke-width: 3.2; }
+.hud-menu-wrap { position: relative; }
+.hud-menu { position: absolute; right: 0; top: calc(100% + 8px); display: grid; min-width: 210px; padding: 6px; border-radius: 16px; background: #0d1820; border: 1px solid rgba(120, 160, 180, .22); box-shadow: 0 16px 40px rgba(0, 0, 0, .45); z-index: 2; }
+.hud-menu button { text-align: left; background: none; border: 0; padding: 13px 12px; border-radius: 10px; font-size: 15px; font-weight: 650; }
+.hud-menu button:hover, .hud-menu button:focus-visible { background: rgba(66, 211, 146, .1); }
+
+.hud-speed { display: grid; justify-items: center; line-height: .82; }
+.hud-speed strong { font-family: Bahnschrift, "DIN Alternate", "Roboto Condensed", "Arial Narrow", ui-sans-serif, sans-serif; font-size: clamp(110px, 40vh, 340px); font-weight: 800; letter-spacing: -.03em; font-variant-numeric: tabular-nums; background: linear-gradient(180deg, #7dfc8a, #42d392); -webkit-background-clip: text; background-clip: text; color: transparent; filter: drop-shadow(0 0 28px rgba(66, 211, 146, .28)); }
+.hud-speed strong.none { background: none; color: #3d4c57; filter: none; }
+.hud-speed span { margin-top: 10px; color: #8fa3b2; font-size: 14px; font-weight: 750; letter-spacing: .18em; text-transform: uppercase; }
+
+.hud-mid { display: grid; align-content: center; }
+.hud-route { display: grid; gap: 10px; }
+.hud-route-labels { display: grid; grid-template-columns: 1fr auto 1fr; gap: 12px; color: #a9b8c3; font-size: 15px; font-weight: 650; }
+.hud-route-labels span:nth-child(2) { color: var(--amber); text-align: center; }
+.hud-route-labels span:last-child { text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hud-progress { position: relative; height: 8px; border-radius: 99px; background: rgba(120, 160, 180, .14); }
+.hud-progress i { position: absolute; top: -5px; width: 4px; height: 18px; margin-left: -2px; border-radius: 2px; background: var(--amber); }
+.hud-progress span { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, #42d392, #7dfc8a); transition: width .6s; }
+.hud-notice { display: flex; align-items: center; justify-content: center; gap: 16px; flex-wrap: wrap; text-align: center; color: #b7c4ce; font-size: 16px; }
+.hud-notice.warn { color: var(--amber); }
+
+.hud-tiles { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+.hud-tile { display: grid; gap: 4px; align-content: start; min-width: 0; padding: 14px 16px; border-radius: 20px; background: rgba(12, 22, 30, .72); border: 1px solid rgba(120, 160, 180, .16); }
+.hud-tile-label { display: flex; align-items: center; gap: 8px; color: #8fa3b2; font-size: 12px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; }
+.hud-tile-label .hud-ico { width: 18px; height: 18px; }
+.hud-tile strong { font-size: clamp(22px, 3.4vw, 34px); font-weight: 800; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
+.hud-tile strong.dim { color: #3d4c57; }
+.hud-tile > span:last-child { color: #a9b8c3; font-size: 13.5px; }
+.hud-tile.warn { border-color: rgba(232, 180, 76, .5); }
+.hud-tile.warn strong { color: var(--amber); }
+.hud-tile.bad { border-color: rgba(239, 106, 91, .55); }
+.hud-tile.bad strong { color: var(--red); }
+.ellipsis { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hud-badge { margin-left: 8px; padding: 2px 7px; border-radius: 6px; background: rgba(78, 161, 255, .18); color: var(--blue); font-size: 12px; font-style: normal; font-weight: 850; letter-spacing: .06em; vertical-align: 5px; }
+
+/* HUD pionowo (telefon w uchwycie pionowym): pigułki w siatce, prędkość pod nimi, kafelki 2 × 2 */
+@media (orientation: portrait) {
+  .hud-top { grid-template-columns: 1fr 1fr auto; grid-template-areas: "clock weather menu" "dest stop stop" "speed speed speed"; gap: 8px; }
+  .hud-group, .hud-group.right { display: contents; }
+  .p-clock { grid-area: clock; }
+  .p-dest { grid-area: dest; min-width: 0; }
+  .p-stop { grid-area: stop; }
+  .p-weather { grid-area: weather; }
+  .hud-menu-wrap { grid-area: menu; }
+  .hud-speed { grid-area: speed; margin-top: 3vh; }
+  .hud-speed strong { font-size: clamp(110px, 42vw, 240px); }
+  .hud-pill { min-height: 48px; padding: 6px 12px; }
+  .hud-route-labels { grid-template-columns: 1fr 1fr; font-size: 13px; }
+  .hud-route-labels span:nth-child(2) { grid-column: 1 / -1; grid-row: 2; }
+  .hud-tiles { grid-template-columns: 1fr 1fr; }
+}
+@media (max-height: 420px) and (orientation: landscape) {
+  .hud-pill { min-height: 44px; padding: 5px 12px; }
+  .hud-tile { padding: 9px 12px; }
+  .hud-tile > span:last-child { font-size: 12px; }
+}

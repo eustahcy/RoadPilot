@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { GpsTrack } from "./core/gps";
 import { DriverState } from "./core/plan";
 import { DEFAULT_SPEEDS, ProfileId, Segment, Speeds } from "./core/route";
+import { ServiceInfo } from "./core/service";
 
 export interface Trip {
   destination: string;
@@ -30,6 +31,10 @@ export interface Settings {
   gps: boolean;
   /** Przyjazd liczony z prędkości z ostatnich 10 min zamiast z prędkości typów dróg. */
   liveEta: boolean;
+  /** Termin i kilometry do serwisu pojazdu. */
+  service: ServiceInfo;
+  /** HUD: obraz w lustrzanym odbiciu — do odbicia w szybie (telefon leży na desce). */
+  hudMirror: boolean;
 }
 
 export interface AppState {
@@ -41,6 +46,10 @@ export interface AppState {
   planTime: number | null;
   /** Stan licznika GPS (zapisany, żeby po ponownym otwarciu doliczyć, co działo się w międzyczasie). */
   track: GpsTrack | null;
+  /** Wszystkie km policzone przez GPS (nie zeruje się ze zmianą trasy) — do odliczania km do serwisu. */
+  odoKm: number;
+  /** Otwarty tryb HUD — po ponownym uruchomieniu aplikacja wraca do niego. */
+  hud: boolean;
 }
 
 const KEY = "roadpilot:v1";
@@ -59,9 +68,11 @@ export function defaultState(now = Date.now()): AppState {
       weekDrivenMin: 0,
       prevWeekDrivenMin: 0,
     },
-    settings: { speeds: { ...DEFAULT_SPEEDS }, parkingBufferMin: 45, allowExtension: false, allowReducedRest: false, gps: false, liveEta: false },
+    settings: { speeds: { ...DEFAULT_SPEEDS }, parkingBufferMin: 45, allowExtension: false, allowReducedRest: false, gps: false, liveEta: false, service: { date: null, km: null, odoAtSet: 0 }, hudMirror: false },
     planTime: null,
     track: null,
+    odoKm: 0,
+    hud: false,
   };
 }
 
@@ -77,7 +88,7 @@ function load(): AppState {
       ...s,
       trip: { ...base.trip, ...s.trip },
       driver: { ...base.driver, ...s.driver },
-      settings: { ...base.settings, ...s.settings, speeds: { ...base.settings.speeds, ...s.settings?.speeds } },
+      settings: { ...base.settings, ...s.settings, speeds: { ...base.settings.speeds, ...s.settings?.speeds }, service: { ...base.settings.service, ...s.settings?.service } },
     };
   } catch {
     return base;

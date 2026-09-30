@@ -33,6 +33,33 @@ export function NumberField(props: {
   );
 }
 
+/** Pole liczbowe, które można zostawić puste (null = „nie ustawiono”). */
+export function OptionalNumberField(props: { label: ReactNode; value: number | null; onChange: (v: number | null) => void; unit?: string; placeholder?: string; hint?: ReactNode; max?: number }) {
+  const { label, value, onChange, unit, placeholder, hint, max } = props;
+  const [text, setText] = useState(value === null ? "" : String(value));
+  useEffect(() => {
+    const n = text.trim() === "" ? null : Number(text.replace(/\s/g, "").replace(",", "."));
+    if (n !== value) setText(value === null ? "" : String(value));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [value]);
+  const commit = (raw: string) => {
+    setText(raw);
+    if (raw.trim() === "") return onChange(null);
+    const n = Number(raw.replace(/\s/g, "").replace(",", "."));
+    if (Number.isFinite(n)) onChange(clamp(n, 0, max));
+  };
+  return (
+    <label className="field">
+      <span className="field-label">{label}</span>
+      <span className="input-row">
+        <input type="text" inputMode="numeric" value={text} placeholder={placeholder} onChange={(e) => commit(e.target.value)} />
+        {unit && <span className="unit">{unit}</span>}
+      </span>
+      {hint && <span className="field-hint">{hint}</span>}
+    </label>
+  );
+}
+
 /** Czas w godzinach i minutach, jak na wyświetlaczu tachografu. Wartość w minutach. */
 export function DurationField(props: { label: ReactNode; value: number; onChange: (min: number) => void; maxHours?: number; hint?: ReactNode }) {
   const { label, value, onChange, maxHours = 99, hint } = props;

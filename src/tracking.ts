@@ -1,7 +1,7 @@
 // Śledzenie GPS w przeglądarce: odczyty z Geolocation API → licznik km i liczniki kierowcy.
 
 import { Dispatch, SetStateAction, useEffect, useState } from "react";
-import { addFix, creditDriving, creditStop, Fix, GPS, startTrack } from "./core/gps";
+import { addFix, creditDriving, creditStop, Fix, GPS, Live, nextLive, startTrack } from "./core/gps";
 import { AppState } from "./state";
 
 export type GpsStatus = "off" | "waiting" | "ok" | "weak" | "denied" | "unavailable";
@@ -22,15 +22,17 @@ export function applyFix(s: AppState, fix: Fix): AppState {
   if (r.stopEnded) driver = creditStop(driver, r.stopEnded.start, r.stopEnded.end);
   driver = creditDriving(driver, r.driveMin);
   const doneKm = Math.min(tripTotalKm(s), s.trip.doneKm + r.km);
-  return { ...s, track: r.track, driver, trip: doneKm === s.trip.doneKm ? s.trip : { ...s.trip, doneKm } };
+  return { ...s, track: r.track, driver, odoKm: s.odoKm + r.km, trip: doneKm === s.trip.doneKm ? s.trip : { ...s.trip, doneKm } };
 }
 
-export function useGpsTracking(enabled: boolean, setState: Dispatch<SetStateAction<AppState>>): GpsStatus {
+export function useGpsTracking(enabled: boolean, setState: Dispatch<SetStateAction<AppState>>): { status: GpsStatus; live: Live | null } {
   const [status, setStatus] = useState<GpsStatus>("off");
+  const [live, setLive] = useState<Live | null>(null);
 
   useEffect(() => {
     if (!enabled) {
       setStatus("off");
+      setLive(null);
       return;
     }
     if (!("geolocation" in navigator) || !window.isSecureContext) {
@@ -49,6 +51,8 @@ export function useGpsTracking(enabled: boolean, setState: Dispatch<SetStateActi
           speed: pos.coords.speed,
         };
         setStatus(fix.accuracy <= GPS.maxAccuracyM ? "ok" : "weak");
+        // Prędkość do HUD — z każdego odczytu; liczniki trasy rzadziej.
+        setLive((prev) => nextLive(prev, fix, pos.coords.heading));
         if (fix.t - last < MIN_FIX_INTERVAL_MS) return;
         last = fix.t;
         setState((s) => applyFix(s, fix));
@@ -60,11 +64,11 @@ export function useGpsTracking(enabled: boolean, setState: Dispatch<SetStateActi
   }, [enabled, setState]);
 
   useWakeLock(enabled);
-  return status;
+  return { status, live };
 }
 
 /** Przy wygaszonym ekranie przeglądarka nie podaje pozycji — trzymamy ekran włączony, gdy się da. */
-function useWakeLock(enabled: boolean) {
+export function useWakeLock(enabled: boolean) {
   useEffect(() => {
     if (!enabled || !("wakeLock" in navigator)) return;
     let lock: WakeLockSentinel | null = null;

@@ -227,7 +227,7 @@ Kierowca nie powinien analizować tabel i wzorów. Powinien dostać jasny komuni
 
 Dopiero po kliknięciu „Pokaż szczegóły” użytkownik zobaczy pełne wyliczenie.
 
-## Co jest zrobione (v0.4)
+## Co jest zrobione (v0.5)
 
 | Moduł z README | Stan |
 |---|---|
@@ -241,6 +241,7 @@ Dopiero po kliknięciu „Pokaż szczegóły” użytkownik zobaczy pełne wylic
 | Zapis lokalny | ✅ localStorage, bez serwera i kont |
 | PWA | ✅ manifest, ikony, praca offline, przypomnienia — **wymaga HTTPS** (patrz niżej) |
 | GPS (V0.4) | ✅ odlicza przejechane km od trasy, dolicza jazdę i przerwy do liczników, opcjonalnie przyjazd z prędkości z ostatnich 10 min |
+| Tryb HUD (V0.5) | ✅ widok do jazdy: prędkość, do celu, najbliższy postój, pogoda, przyjazd, jazda — zostało, najbliższa stacja paliw, serwis (data / km z Ustawień), odbicie na szybę |
 
 ## RoadPilot Core — co liczy silnik
 
@@ -271,6 +272,20 @@ Gdy aplikacja była zamknięta, dystans z luki = linia prosta × 1,2, a czas jaz
 Opcja „przyjazd z prędkości z ostatnich 10 min” zastępuje prędkości typów dróg średnią z GPS (min. 5 min danych,
 poniżej 10 km/h — postój, korek — wraca do zwykłego wyliczenia). Ręczna zmiana dystansu zeruje licznik.
 
+**Tryb HUD** (`HudView.tsx`, przycisk „HUD” w nagłówku): pełnoekranowy widok do jazdy, poziomo lub pionowo.
+Pokazuje prędkość z GPS, godzinę, km do celu, czas do najbliższej przerwy/odpoczynku, pogodę, pasek postępu trasy
+z miejscem postoju, przyjazd, pozostały czas jazdy, **najbliższą stację paliw** i **serwis**. Menu: odbicie lustrzane
+(na szybę), pełny ekran, wyjście. Ekran nie gaśnie (Wake Lock).
+
+- Najbliższa stacja (`stations.ts`, `nearby.ts`): stacje z OpenStreetMap (Overpass API) w promieniu 25 km, lista
+  odświeżana po 10 km; w trakcie jazdy wybierana najbliższa **przed Tobą** (±70° od kierunku jazdy), odległość w linii
+  prostej, oznaczenie „TIR” dla stacji z `hgv=yes`. Stacje z `hgv=no` są pomijane.
+- Pogoda: Open-Meteo, odświeżana co 20 min; ostrzeżenie przy ≤ 2 °C, mgle, śniegu, marznących opadach, burzy.
+- Serwis (`service.ts`, Ustawienia → Serwis): data i/lub „za ile km”. Kilometry odliczane licznikiem GPS
+  (`odoKm`, niezależnym od trasy), ostrzeżenie 14 dni / 1000 km przed terminem.
+- Prywatność: dane z internetu są pobierane tylko przy otwartym HUD i włączonym GPS, a pozycja wysyłana
+  do serwisów jest zaokrąglona do ~1 km. Bez sieci HUD działa dalej, bez stacji i pogody.
+
 **Czego silnik świadomie nie liczy (jeszcze):** odpoczynku tygodniowego po 6 okresach 24 h, zasad czasu pracy
 z dyrektywy 2002/15 (np. praca w nocy), promów/pociągów, jazdy w załodze, lokalnych zakazów ruchu ciężarówek.
 
@@ -291,11 +306,15 @@ RoadPilot/
     │   ├── scenarios.ts     # porównanie scenariuszy, „Co jeśli?”, stan kierowcy
     │   ├── deadline.ts      # plan pod godzinę rozładunku (awizację)
     │   ├── reconstruct.ts   # spóźniony start: odtworzenie dnia z aktywności
-    │   ├── gps.ts           # licznik km z GPS, jazda/postoje, średnia z 10 min
-    │   └── core.test.ts     # testy silnika
-    ├── components/          # ekrany: Plan, Trasa, Tachograf, Ustawienia
+    │   ├── gps.ts           # licznik km z GPS, jazda/postoje, średnia z 10 min, prędkość/kierunek do HUD
+    │   ├── stations.ts      # najbliższa stacja paliw (przed nami)
+    │   ├── service.ts       # serwis: dni i km do przeglądu
+    │   ├── weather.ts       # kody pogody → opis, ikona, ostrzeżenia
+    │   └── *.test.ts        # testy silnika
+    ├── components/          # ekrany: Plan, Trasa, Tachograf, Ustawienia, HUD
     ├── state.ts             # stan aplikacji i zapis lokalny
     ├── tracking.ts          # śledzenie GPS w przeglądarce (watchPosition, blokada wygaszania)
+    ├── nearby.ts            # HUD: stacje (Overpass) i pogoda (Open-Meteo) z internetu
     ├── format.ts            # formatowanie godzin i czasów
     ├── App.tsx, main.tsx, styles.css
 ```
@@ -326,5 +345,5 @@ Pełna PWA (offline, instalacja, powiadomienia, GPS) działa tylko przez HTTPS.
 
 ## Status
 
-**v0.4 — działające MVP z GPS.** Silnik liczy według przepisów opisanych wyżej, ale RoadPilot pozostaje asystentem
+**v0.5 — działające MVP z GPS i trybem HUD.** Silnik liczy według przepisów opisanych wyżej, ale RoadPilot pozostaje asystentem
 planowania: wyniki zawsze trzeba weryfikować z tachografem.

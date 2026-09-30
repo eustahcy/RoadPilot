@@ -5,6 +5,7 @@ import { GpsTrack } from "./core/gps";
 import { DriverState } from "./core/plan";
 import { DEFAULT_SPEEDS, ProfileId, Segment, Speeds } from "./core/route";
 import { ServiceInfo } from "./core/service";
+import { ActiveStop } from "./core/stop";
 
 export interface Trip {
   destination: string;
@@ -50,6 +51,8 @@ export interface AppState {
   odoKm: number;
   /** Otwarty tryb HUD — po ponownym uruchomieniu aplikacja wraca do niego. */
   hud: boolean;
+  /** Trwający postój oznaczony przez kierowcę („zaczynam przerwę”) — null, gdy jedzie. */
+  stop: ActiveStop | null;
 }
 
 const KEY = "roadpilot:v1";
@@ -73,6 +76,7 @@ export function defaultState(now = Date.now()): AppState {
     track: null,
     odoKm: 0,
     hud: false,
+    stop: null,
   };
 }
 

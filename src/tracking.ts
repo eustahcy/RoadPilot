@@ -2,6 +2,7 @@
 
 import { Dispatch, SetStateAction, useEffect, useState } from "react";
 import { addFix, creditDriving, creditStop, Fix, GPS, Live, nextLive, startTrack } from "./core/gps";
+import { ActiveStop, endStop } from "./core/stop";
 import { AppState } from "./state";
 
 export type GpsStatus = "off" | "waiting" | "ok" | "weak" | "denied" | "unavailable";
@@ -19,10 +20,36 @@ export function applyFix(s: AppState, fix: Fix): AppState {
   const r = addFix(s.track, fix);
   if (r.track === s.track) return s;
   let driver = s.driver;
-  if (r.stopEnded) driver = creditStop(driver, r.stopEnded.start, r.stopEnded.end);
+  let stop = s.stop;
+  if (stop && r.driveMin > 0) {
+    // Ruszyliśmy bez „Koniec przerwy” — postój kończy się tam, gdzie zaczęła się jazda. Postoju z GPS nie liczymy drugi raz.
+    driver = endStop(driver, stop, fix.t - r.driveMin * 60_000);
+    stop = null;
+  } else if (r.stopEnded && !stop) {
+    driver = creditStop(driver, r.stopEnded.start, r.stopEnded.end);
+  }
   driver = creditDriving(driver, r.driveMin);
   const doneKm = Math.min(tripTotalKm(s), s.trip.doneKm + r.km);
-  return { ...s, track: r.track, driver, odoKm: s.odoKm + r.km, trip: doneKm === s.trip.doneKm ? s.trip : { ...s.trip, doneKm } };
+  return { ...s, track: r.track, driver, stop, odoKm: s.odoKm + r.km, trip: doneKm === s.trip.doneKm ? s.trip : { ...s.trip, doneKm } };
+}
+
+/** Kierowca zaczyna postój. */
+export function startStop(s: AppState, start: number, targetMin: number): AppState {
+  return { ...s, stop: { start, targetMin } };
+}
+
+/**
+ * Kierowca kończy postój: zaliczamy faktyczny czas. Postój wykryty przez GPS zaczynamy liczyć od nowa od tej chwili,
+ * żeby po ruszeniu ten sam czas nie został zaliczony drugi raz.
+ */
+export function finishStop(s: AppState, end: number): AppState {
+  if (!s.stop) return s;
+  const track = s.track && s.track.stopSince !== null ? { ...s.track, stopSince: Math.max(s.track.stopSince, end) } : s.track;
+  return { ...s, driver: endStop(s.driver, s.stop, end), stop: null, track };
+}
+
+export function changeStop(s: AppState, patch: Partial<ActiveStop>): AppState {
+  return s.stop ? { ...s, stop: { ...s.stop, ...patch } } : s;
 }
 
 export function useGpsTracking(enabled: boolean, setState: Dispatch<SetStateAction<AppState>>): { status: GpsStatus; live: Live | null } {

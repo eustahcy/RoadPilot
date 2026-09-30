@@ -6,6 +6,7 @@ import { Comparison, DriverStatus, explain, Scenario, WhatIf } from "../core/sce
 import { fmtClock, fmtDuration, fmtKm } from "../format";
 import { AppState } from "../state";
 import { Reminders } from "./Reminders";
+import { StopCard, StopControlsProps } from "./StopControls";
 import { eventLabel, Timeline } from "./Timeline";
 
 interface Props {
@@ -19,12 +20,13 @@ interface Props {
   /** Prędkość z GPS, z której liczony jest przyjazd (km/h). */
   liveKmh?: number;
   gps: ReactNode;
+  stopControls: StopControlsProps;
   onOption: (option: WhatIf["option"], value: boolean) => void;
   onOptions: (options: PlanOptions) => void;
   goTo: (tab: "route" | "driver") => void;
 }
 
-export function PlanView({ state, route, comparison, hints, status, planNow, deadline, liveKmh, gps, onOption, onOptions, goTo }: Props) {
+export function PlanView({ state, route, comparison, hints, status, planNow, deadline, liveKmh, gps, stopControls, onOption, onOptions, goTo }: Props) {
   const best = comparison.scenarios.find((s) => s.id === comparison.bestId);
   const { trip, settings } = state;
   // Z awizacją liczy się plan dobrany pod rozładunek, bez niej — najwcześniejszy przyjazd.
@@ -63,6 +65,8 @@ export function PlanView({ state, route, comparison, hints, status, planNow, dea
           <div className="eta-block"><span className="muted">Brak wykonalnego scenariusza</span></div>
         )}
       </section>
+
+      <StopCard {...stopControls} />
 
       {gps}
 

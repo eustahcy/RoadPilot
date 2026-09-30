@@ -242,6 +242,7 @@ Dopiero po kliknięciu „Pokaż szczegóły” użytkownik zobaczy pełne wylic
 | PWA | ✅ manifest, ikony, praca offline, przypomnienia — **wymaga HTTPS** (patrz niżej) |
 | GPS (V0.4) | ✅ odlicza przejechane km od trasy, dolicza jazdę i przerwy do liczników, opcjonalnie przyjazd z prędkości z ostatnich 10 min |
 | Tryb HUD (V0.5) | ✅ widok do jazdy: prędkość, do celu, najbliższy postój, pogoda, przyjazd, jazda — zostało, najbliższa stacja paliw, serwis (data / km z Ustawień), odbicie na szybę |
+| Postój „teraz” | ✅ „Zaczynam przerwę” w Planie i w HUD: 15/30/45 min, 9/11 h lub start kilka minut wstecz; odliczanie, co już jest zaliczone; zalicza faktyczny czas (krótszy/dłuższy też), plan liczy od końca postoju; ruszenie z GPS kończy postój samo |
 
 ## RoadPilot Core — co liczy silnik
 

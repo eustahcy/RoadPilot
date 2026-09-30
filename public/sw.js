@@ -2,7 +2,7 @@
 // Strona: najpierw sieć (świeża wersja), w razie braku zasięgu — kopia z cache.
 // Pliki z hashem w nazwie (assets/*): z cache, bo się nie zmieniają.
 // Ścieżki są względne do sw.js — aplikacja działa z podkatalogu (/roadpilot/).
-const CACHE = "roadpilot-v2";
+const CACHE = "roadpilot-v3";
 const SHELL = ["./", "manifest.webmanifest", "icon.svg", "icon-192.png", "icon-512.png"];
 
 self.addEventListener("install", (event) => {

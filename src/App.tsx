@@ -10,10 +10,11 @@ import { GPS, recentSpeed, uniformSpeeds } from "./core/gps";
 import { remainingSegments, Route, segmentsFromProfile } from "./core/route";
 import { compareScenarios, driverStatus, whatIfs } from "./core/scenarios";
 import { serviceStatus } from "./core/service";
+import { planAfterStop } from "./core/stop";
 import { fmtClock, fmtTime } from "./format";
 import { defaultState, floorMinute, useNow, usePersistentState } from "./state";
 import { useStations, useWeather } from "./nearby";
-import { useGpsTracking } from "./tracking";
+import { changeStop, finishStop, startStop, useGpsTracking } from "./tracking";
 
 type Tab = "plan" | "route" | "driver" | "settings";
 
@@ -28,8 +29,12 @@ function App() {
   const [state, setState] = usePersistentState();
   const [tab, setTab] = useState<Tab>("plan");
   const now = useNow();
-  const planNow = state.planTime ?? floorMinute(now);
-  const { trip, driver, settings } = state;
+  const viewNow = state.planTime ?? floorMinute(now);
+  const { trip, settings } = state;
+  // W trakcie postoju plan liczymy od jego planowanego końca, ze stanem po zaliczeniu postoju.
+  const afterStop = useMemo(() => (state.stop ? planAfterStop(state.driver, state.stop, viewNow) : undefined), [state.driver, state.stop, viewNow]);
+  const driver = afterStop?.driver ?? state.driver;
+  const planNow = afterStop?.from ?? viewNow;
 
   const { status: gpsStatus, live } = useGpsTracking(settings.gps, setState);
   // Stacje i pogoda tylko w HUD — poza nim pozycja nie wychodzi z telefonu.
@@ -66,6 +71,15 @@ function App() {
     enterFullscreen();
     setState((s) => ({ ...s, hud: true, planTime: null }));
   };
+  const stopProps = {
+    stop: state.stop,
+    driver: state.driver,
+    now,
+    onStart: (start: number, targetMin: number) => setState((s) => startStop(s, start, targetMin)),
+    onEnd: (end: number) => setState((s) => finishStop(s, end)),
+    onCancel: () => setState((s) => ({ ...s, stop: null })),
+    onTarget: (targetMin: number) => setState((s) => changeStop(s, { targetMin })),
+  };
   const exitHud = () => {
     exitFullscreen();
     setState((s) => ({ ...s, hud: false }));
@@ -92,6 +106,7 @@ function App() {
         onMirror={(hudMirror) => setState((s) => ({ ...s, settings: { ...s.settings, hudMirror } }))}
         onEnableGps={() => setGps(true)}
         onExit={exitHud}
+        stopControls={stopProps}
       />
     );
   }
@@ -127,9 +142,10 @@ function App() {
             comparison={comparison}
             hints={hints}
             status={status}
-            planNow={planNow}
+            planNow={viewNow}
             deadline={deadline}
             liveKmh={liveKmh}
+            stopControls={stopProps}
             gps={
               <GpsCard
                 on={settings.gps}
@@ -150,7 +166,7 @@ function App() {
           />
         )}
         {tab === "route" && <RouteView trip={trip} route={route} onChange={(t) => setState((s) => ({ ...s, trip: t }))} />}
-        {tab === "driver" && <DriverView driver={driver} planNow={planNow} onChange={(d) => setState((s) => ({ ...s, driver: d }))} />}
+        {tab === "driver" && <DriverView driver={state.driver} planNow={viewNow} onChange={(d) => setState((s) => ({ ...s, driver: d }))} />}
         {tab === "settings" && (
           <SettingsView
             state={state}

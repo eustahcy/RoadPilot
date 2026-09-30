@@ -51,9 +51,11 @@ src/core/          RoadPilot Core — czyste, deterministyczne funkcje TS (bez R
   stations.ts      parseOverpass, nearestStation (najbliższa przed nami, ±70° od kierunku)
   service.ts       serviceStatus: dni i km do serwisu (km z licznika GPS AppState.odoKm)
   weather.ts       kod WMO → opis/ikona, isHazard
-  *.test.ts        testy Vitest (core.test.ts, gps.test.ts, hud.test.ts)
+  stop.ts          ręczny postój (AppState.stop): stopCredit, nextStopThreshold, endStop, planAfterStop
+  *.test.ts        testy Vitest (core, gps, hud, stop; src/tracking.test.ts — postój + GPS)
 src/state.ts       AppState (version: 1) w localStorage pod kluczem "roadpilot:v1", useNow (tick 15 s)
-src/tracking.ts    Geolocation.watchPosition + Wake Lock → applyFix na stanie; zwraca { status, live }
+src/tracking.ts    Geolocation.watchPosition + Wake Lock → applyFix na stanie; zwraca { status, live };
+                   startStop/finishStop — ręczny postój (ruszenie z GPS kończy go; GPS nie zalicza tego postoju drugi raz)
 src/nearby.ts      HUD: useStations (Overpass, z serwerem zapasowym) i useWeather (Open-Meteo)
 src/App.tsx        jedyne miejsce łączące stan z silnikiem (useMemo), 4 zakładki: Plan/Trasa/Tachograf/Ustawienia;
                    gdy state.hud — renderuje tylko HudView
@@ -92,6 +94,8 @@ Widoki nie liczą reguł same — tylko formatują wyniki silnika.
 
 ## Znane ograniczenia i dług techniczny (stan na v0.5.0, 2026-09-30)
 
+- Pełny ekran nie działa na iPhonie (Safari nie obsługuje Fullscreen API dla stron) — HUD pokazuje wtedy wskazówkę
+  „Do ekranu początkowego”.
 - HUD: odległość do stacji jest w linii prostej, nie po drodze; km do serwisu liczy tylko GPS przy otwartej aplikacji.
 
 - Liczniki tygodniowe w `DriverState` (`weekDrivenMin`, `prevWeekDrivenMin`, `extensionsLeft`) **nie przewijają się

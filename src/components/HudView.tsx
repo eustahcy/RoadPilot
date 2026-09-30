@@ -10,6 +10,7 @@ import { describeWeather, isHazard, Weather, WeatherIcon } from "../core/weather
 import { fmtClock, fmtDuration, fmtKm, fmtTime } from "../format";
 import { Remote } from "../nearby";
 import { GpsStatus, useWakeLock } from "../tracking";
+import { ActiveStopPanel, fmtTimer, StopControlsProps, StopPicker } from "./StopControls";
 
 interface Props {
   destination: string;
@@ -30,6 +31,7 @@ interface Props {
   onMirror: (on: boolean) => void;
   onEnableGps: () => void;
   onExit: () => void;
+  stopControls: StopControlsProps;
 }
 
 /** Po takim czasie bez odczytu prędkość jest nieaktualna. */
@@ -38,7 +40,10 @@ const STALE_MS = 10_000;
 export function HudView(p: Props) {
   const now = useTick(1000);
   const [menu, setMenu] = useState(false);
+  const [sheet, setSheet] = useState(false);
+  const fullscreen = useFullscreen();
   useWakeLock(true);
+  const sc = p.stopControls;
 
   const fresh = p.live && now - p.live.t <= STALE_MS ? p.live : null;
   const speed = fresh?.kmh != null ? Math.round(fresh.kmh) : null;
@@ -60,14 +65,19 @@ export function HudView(p: Props) {
         </div>
 
         <div className="hud-group right">
-          <Pill
-            className="p-stop"
-            icon="coffee"
-            label={stop ? (stop.kind === "break" ? "Przerwa" : "Odpoczynek") : "Do celu"}
-            value={stop ? (stopIn! <= 1 ? "teraz" : `za ${fmtDuration(stopIn!)}`) : "bez postoju"}
-            tone={stop && stopIn! <= 0 ? "bad" : stop && stopIn! <= 30 ? "warn" : undefined}
-          />
-          <WeatherPill weather={p.weather.data} />
+          <button className="hud-pill-btn p-stop" onClick={() => { setSheet(!sheet); setMenu(false); }} aria-label={sc.stop ? "Trwający postój" : "Zaczynam przerwę"}>
+            {sc.stop ? (
+              <Pill icon="coffee" label="Postój" value={fmtTimer(Math.max(0, (now - sc.stop.start) / 60_000))} tone="active" />
+            ) : (
+              <Pill
+                icon="coffee"
+                label={stop ? (stop.kind === "break" ? "Przerwa" : "Odpoczynek") : "Do celu"}
+                value={stop ? (stopIn! <= 1 ? "teraz" : `za ${fmtDuration(stopIn!)}`) : "bez postoju"}
+                tone={stop && stopIn! <= 0 ? "bad" : stop && stopIn! <= 30 ? "warn" : undefined}
+              />
+            )}
+          </button>
+          <WeatherPill weather={p.weather} gpsOn={p.gpsOn} located={p.live !== null} />
           <div className="hud-menu-wrap">
             <button className="hud-pill hud-icon-btn" aria-label="Menu HUD" aria-expanded={menu} onClick={() => setMenu(!menu)}>
               <Icon name="dots" />
@@ -77,7 +87,14 @@ export function HudView(p: Props) {
                 <button role="menuitemcheckbox" aria-checked={p.mirror} onClick={() => { p.onMirror(!p.mirror); setMenu(false); }}>
                   {p.mirror ? "✓ " : ""}Odbicie na szybę
                 </button>
-                <button role="menuitem" onClick={() => { toggleFullscreen(); setMenu(false); }}>Pełny ekran</button>
+                <button role="menuitem" onClick={() => { setSheet(true); setMenu(false); }}>{sc.stop ? "Trwający postój" : "Zaczynam przerwę"}</button>
+                {fullscreenSupported() ? (
+                  <button role="menuitemcheckbox" aria-checked={fullscreen} onClick={() => { toggleFullscreen(); setMenu(false); }}>
+                    {fullscreen ? "✓ " : ""}Pełny ekran
+                  </button>
+                ) : (
+                  <span className="hud-menu-note">Pełny ekran: ta przeglądarka go nie obsługuje. Na iPhonie dodaj RoadPilot do ekranu początkowego (Udostępnij → „Do ekranu początkowego”).</span>
+                )}
                 <button role="menuitem" onClick={p.onExit}>Wyjdź z HUD</button>
               </div>
             )}
@@ -108,6 +125,19 @@ export function HudView(p: Props) {
         )}
       </section>
 
+      {sheet && (
+        <div className="hud-sheet" onClick={(e) => e.target === e.currentTarget && setSheet(false)}>
+          <div className="hud-sheet-body">
+            <button className="hud-sheet-close" aria-label="Zwiń" onClick={() => setSheet(false)}>×</button>
+            {sc.stop ? (
+              <ActiveStopPanel stop={sc.stop} driver={sc.driver} onEnd={(t) => { sc.onEnd(t); setSheet(false); }} onCancel={() => { sc.onCancel(); setSheet(false); }} onTarget={sc.onTarget} />
+            ) : (
+              <StopPicker driver={sc.driver} now={now} onCancel={() => setSheet(false)} onStart={sc.onStart} />
+            )}
+          </div>
+        </div>
+      )}
+
       <footer className="hud-tiles">
         <ArrivalTile plan={p.plan} deadline={p.deadline} now={now} />
         <Tile icon="wheel" label="Jazda dziś — zostało" tone={p.status.driveLeftToday <= 30 ? "warn" : undefined}>
@@ -125,17 +155,23 @@ function ArrivalTile({ plan, deadline, now }: { plan?: Plan; deadline?: Deadline
   if (!plan) {
     return (
       <Tile icon="flag" label="Przyjazd" tone={deadline ? "bad" : undefined}>
-        <strong>{deadline?.earliest !== undefined ? fmtClock(deadline.earliest, now) : "—"}</strong>
+        <strong>{deadline?.earliest !== undefined ? <Clock t={deadline.earliest} now={now} /> : "—"}</strong>
         <span>{deadline ? `nie zdążysz na ${fmtClock(deadline.deadline, now)}` : "brak wykonalnego planu"}</span>
       </Tile>
     );
   }
   return (
     <Tile icon="flag" label="Przyjazd">
-      <strong>{fmtClock(plan.arrival, now)}</strong>
+      <strong><Clock t={plan.arrival} now={now} /></strong>
       <span>{deadline ? `rozładunek ${fmtClock(deadline.deadline, now)}` : `za ${fmtDuration(Math.max(0, plan.arrival - now) / 60_000)}`}</span>
     </Tile>
   );
+}
+
+/** „jutro 06:01” — dzień mniejszą czcionką, żeby godzina mieściła się w wąskim kafelku. */
+function Clock({ t, now }: { t: number; now: number }) {
+  const [day, time] = fmtClock(t, now).split(" ");
+  return time ? <><small className="hud-day">{day}</small>{time}</> : <>{day}</>;
 }
 
 function StationTile({ gpsOn, live, stations }: Props) {
@@ -183,13 +219,17 @@ function ServiceTile({ s, date, now }: { s: ServiceStatus; date: number | null; 
   );
 }
 
-function WeatherPill({ weather }: { weather?: Weather }) {
-  if (!weather) return <Pill className="p-weather" icon="cloud" value="—" />;
-  const d = describeWeather(weather.code, weather.isDay);
-  return <Pill className="p-weather" icon={d.icon} value={`${Math.round(weather.tempC)}°C`} label={d.text} tone={isHazard(weather) ? "warn" : undefined} />;
+function WeatherPill({ weather: { data, loading, error }, gpsOn, located }: { weather: Remote<Weather>; gpsOn: boolean; located: boolean }) {
+  if (!data) {
+    // Pogoda potrzebuje pozycji — mówimy, na co czekamy, zamiast gołej kreski.
+    const why = !gpsOn ? "włącz GPS" : !located ? "czekam na GPS" : loading ? "pobieram…" : error ? "brak sieci" : "pobieram…";
+    return <Pill className="p-weather" icon="cloud" label="Pogoda" value={why} />;
+  }
+  const d = describeWeather(data.code, data.isDay);
+  return <Pill className="p-weather" icon={d.icon} value={`${Math.round(data.tempC)}°C`} label={d.text} tone={isHazard(data) ? "warn" : undefined} />;
 }
 
-type Tone = "warn" | "bad" | undefined;
+type Tone = "warn" | "bad" | "active" | undefined;
 
 function Pill({ icon, label, value, tone, className = "" }: { icon: IconName; label?: string; value: string; tone?: Tone; className?: string }) {
   return (
@@ -254,17 +294,58 @@ const fmtNum = (n: number) => Math.round(n).toLocaleString("pl-PL");
 const fmtStationKm = (km: number) => (km < 10 ? `${km.toFixed(1).replace(".", ",")} km` : `${Math.round(km)} km`);
 const fmtDate = (t: number) => new Date(t).toLocaleDateString("pl-PL", { day: "2-digit", month: "2-digit" });
 
+// Safari (macOS, iPadOS) i starsze WebView mają tylko wersje z prefiksem webkit. iPhone nie ma pełnego ekranu dla stron wcale.
+type WebkitDocument = Document & { webkitFullscreenElement?: Element | null; webkitExitFullscreen?: () => Promise<void> | void };
+type WebkitElement = HTMLElement & { webkitRequestFullscreen?: () => Promise<void> | void };
+
+const fsElement = () => document.fullscreenElement ?? (document as WebkitDocument).webkitFullscreenElement ?? null;
+
+export function fullscreenSupported() {
+  const el = document.documentElement as WebkitElement;
+  return !!(el.requestFullscreen || el.webkitRequestFullscreen);
+}
+
 /** Pełny ekran i poziomy obrót — gdy przeglądarka pozwala (wymaga kliknięcia). */
 export function enterFullscreen() {
-  document.documentElement.requestFullscreen?.()?.catch(() => {});
-  (screen.orientation as unknown as { lock?: (o: string) => Promise<void> } | undefined)?.lock?.("landscape")?.catch(() => {});
+  const el = document.documentElement as WebkitElement;
+  const done = () => (screen.orientation as unknown as { lock?: (o: string) => Promise<void> } | undefined)?.lock?.("landscape")?.catch(() => {});
+  try {
+    // Obrót da się zablokować dopiero w pełnym ekranie — więc po nim, nie równolegle.
+    const r = el.requestFullscreen ? el.requestFullscreen() : el.webkitRequestFullscreen?.();
+    if (r instanceof Promise) r.then(done, () => {});
+    else done();
+  } catch {
+    /* brak zgody przeglądarki — HUD działa dalej w oknie */
+  }
 }
 
 export function exitFullscreen() {
-  if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+  if (!fsElement()) return;
+  const d = document as WebkitDocument;
+  try {
+    const r = d.exitFullscreen ? d.exitFullscreen() : d.webkitExitFullscreen?.();
+    if (r instanceof Promise) r.catch(() => {});
+  } catch {
+    /* już poza pełnym ekranem */
+  }
 }
 
 function toggleFullscreen() {
-  if (document.fullscreenElement) exitFullscreen();
+  if (fsElement()) exitFullscreen();
   else enterFullscreen();
+}
+
+/** Czy jesteśmy w pełnym ekranie — kierowca może z niego wyjść gestem, więc słuchamy zmian. */
+function useFullscreen() {
+  const [on, setOn] = useState(() => !!fsElement());
+  useEffect(() => {
+    const update = () => setOn(!!fsElement());
+    document.addEventListener("fullscreenchange", update);
+    document.addEventListener("webkitfullscreenchange", update);
+    return () => {
+      document.removeEventListener("fullscreenchange", update);
+      document.removeEventListener("webkitfullscreenchange", update);
+    };
+  }, []);
+  return on;
 }

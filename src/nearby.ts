@@ -72,7 +72,7 @@ async function fetchStations(p: LatLon): Promise<Station[]> {
   let error: unknown;
   for (const url of OVERPASS_URLS) {
     try {
-      const res = await fetch(url, { method: "POST", body: new URLSearchParams({ data: query }), signal: AbortSignal.timeout(25_000) });
+      const res = await fetchWithTimeout(url, { method: "POST", body: new URLSearchParams({ data: query }) }, 25_000);
       if (!res.ok) throw new Error(`Overpass ${res.status}`);
       return parseOverpass(await res.json());
     } catch (e) {
@@ -84,9 +84,20 @@ async function fetchStations(p: LatLon): Promise<Station[]> {
 
 async function fetchWeather(p: LatLon): Promise<Weather> {
   const url = `${WEATHER_URL}?latitude=${p.lat}&longitude=${p.lon}&current=temperature_2m,weather_code,is_day`;
-  const res = await fetch(url, { signal: AbortSignal.timeout(15_000) });
+  const res = await fetchWithTimeout(url, {}, 15_000);
   if (!res.ok) throw new Error(`Open-Meteo ${res.status}`);
   const c = (await res.json())?.current;
   if (typeof c?.temperature_2m !== "number") throw new Error("Open-Meteo: brak danych");
   return { tempC: c.temperature_2m, code: Number(c.weather_code) || 0, isDay: c.is_day !== 0 };
+}
+
+/** fetch z limitem czasu. Bez AbortSignal.timeout — nie ma go w starszych Safari i WebView (iOS < 16). */
+async function fetchWithTimeout(url: string, init: RequestInit, ms: number): Promise<Response> {
+  const ctrl = new AbortController();
+  const id = setTimeout(() => ctrl.abort(), ms);
+  try {
+    return await fetch(url, { ...init, signal: ctrl.signal });
+  } finally {
+    clearTimeout(id);
+  }
 }

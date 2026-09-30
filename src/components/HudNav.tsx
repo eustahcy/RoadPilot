@@ -174,7 +174,7 @@ export function HudNav({ nav, track, compact, card }: { nav: HudNavData; track: 
   const jam = route.traffic?.find((t) => jamMatters(t) && t.toKm > pos.km && t.km - pos.km <= TRAFFIC_AHEAD_KM);
 
   return (
-    <div className={`${cls} ${warn ? "with-warn" : ""}`}>
+    <div className={`${cls} ${warn ? "with-warn" : ""} ${jam ? "with-jam" : ""}`}>
       {arrived ? (
         <div className="hud-man">
           <ManeuverIcon ins={{ km: 0, maneuver: "ARRIVE", text: "" }} />
@@ -304,7 +304,8 @@ export function HudRouteMap({ nav, track, live, token, anchorY = 0.8, zoomOffset
               )}
               {jams.map((j) => <path key={j.t.km} className={`hud-map-jam ${j.tone}`} d={d(j.pts)} />)}
               {labels.map((j) => {
-                const [x, y] = px(pointAtKm(route!.points, Math.max(km, j.t.km))!);
+                // Gdy już jedziemy w korku, etykieta stoi kawałek przed strzałką, nie na niej (ale nie za końcem odcinka).
+                const [x, y] = px(pointAtKm(route!.points, Math.min(j.t.toKm - 0.05, Math.max(km + 0.35, j.t.km)))!);
                 const text = delayLabel(j.t);
                 const w = text.length * 9 + 16;
                 return (

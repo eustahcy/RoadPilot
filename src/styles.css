@@ -535,10 +535,11 @@ input[type="number"]::-webkit-inner-spin-button, input[type="number"]::-webkit-o
 .hud.minimal .hud-speed strong { font-size: calc(30 * var(--u)); }
 .hud.minimal .hud-speed-num span { font-size: calc(5 * var(--u)); }
 .hud.minimal .hud-where { background: none; }
-.hud-min-progress { position: relative; justify-self: stretch; width: auto; max-width: calc(120 * var(--u)); margin: 0 auto; width: 100%; height: calc(.8 * var(--u)); border-radius: 99px; background: rgba(120, 150, 170, .25); }
+/* Procent na końcu paska, w tej samej linii — pod paskiem wchodził na podpisy liczb, gdy panel nawigacji był wysoki */
+.hud-min-progress { position: relative; justify-self: stretch; width: auto; max-width: calc(120 * var(--u)); margin: 0 auto; width: 100%; height: calc(.8 * var(--u)); padding-right: calc(6 * var(--u)); border-radius: 99px; background: rgba(120, 150, 170, .25); background-clip: content-box; }
 .hud-min-progress span { display: block; height: 100%; border-radius: inherit; background: var(--hud-green); }
 .hud-min-progress i { position: absolute; top: 50%; width: calc(2.6 * var(--u)); height: calc(2.6 * var(--u)); margin: calc(-1.3 * var(--u)) 0 0 calc(-1.3 * var(--u)); border-radius: 50%; background: #f4f8fa; box-shadow: 0 0 calc(1.4 * var(--u)) rgba(68, 240, 124, .6); }
-.hud-min-progress b { position: absolute; right: 0; top: calc(1.6 * var(--u)); color: var(--hud-dim); font-size: calc(2 * var(--u)); font-weight: 700; }
+.hud-min-progress b { position: absolute; right: 0; top: 50%; transform: translateY(-50%); color: var(--hud-dim); font-size: calc(2 * var(--u)); font-weight: 700; line-height: 1; }
 .hud-min-foot { position: relative; z-index: 1; display: grid; gap: calc(2.4 * var(--u)); }
 .hud-min-stats { display: grid; grid-template-columns: repeat(var(--n), minmax(0, 1fr)); row-gap: calc(2.4 * var(--u)); }
 .hud-min-stat { display: grid; justify-items: center; align-content: start; min-width: 0; padding: 0 calc(1.4 * var(--u)); border: 0; background: none; color: inherit; font: inherit; text-align: center; line-height: 1.15; }
@@ -857,6 +858,20 @@ input[type="number"]::-webkit-inner-spin-button, input[type="number"]::-webkit-o
 .hud-traffic.jam b, .hud-traffic.closed b { color: #ff6a5a; }
 .hud-traffic.jam, .hud-traffic.closed { background: rgba(224, 52, 47, .16); border-color: rgba(224, 52, 47, .6); }
 .hud-traffic small { color: #dfe7ee; font-size: calc(2.2 * var(--u)); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* Korek w panelu nawigacji: w pionie osobny wiersz; w poziomie obok manewru w tym samym wierszu — inaczej pasek
+   na całą szerokość ściskał „820 m” do zera i pasy ruchu nachodziły na tekst */
+.hud-nav.with-jam { flex-wrap: wrap; }
+@media (orientation: landscape) {
+  .hud-nav.with-jam:not(.card) .hud-traffic { flex: 1 1 30%; min-width: 0; }
+  /* Ostrzeżenie i korek naraz: obok siebie w jednym wierszu — panel nie spycha kafelków poza ekran */
+  .hud-nav.with-warn:not(.card) .hud-man { flex-basis: 50%; }
+  .hud-nav.with-warn:not(.card) .hud-warn, .hud-nav.with-warn.with-jam:not(.card) .hud-traffic { flex: 1 1 40%; min-width: 0; }
+}
+/* Styl „Nawigacja” w pionie: kafelki na dole są węższe — mniejsze liczby i odstępy, żeby „jutro 14:03” się mieściło */
+@media (orientation: portrait) {
+  .hud.navmode .nm-info > * { padding: calc(1.6 * var(--u)) calc(1.8 * var(--u)); gap: calc(1.4 * var(--u)); }
+  .hud.navmode .nm-info b { font-size: calc(4.4 * var(--u)); }
+}
 .nm-notice { position: absolute; z-index: 3; left: 50%; top: 30%; transform: translateX(-50%); width: min(92%, 520px); padding: 12px; border-radius: 16px; background: rgba(12, 20, 28, .92); }
 .nm-bottom { position: absolute; z-index: 3; left: calc(2 * var(--u) + env(safe-area-inset-left)); right: calc(2 * var(--u) + env(safe-area-inset-right)); bottom: calc(1.6 * var(--u) + env(safe-area-inset-bottom)); display: grid; gap: calc(1.4 * var(--u)); }
 .nm-info { display: grid; grid-template-columns: 1fr 1fr; border-radius: calc(3 * var(--u)); background: rgba(12, 20, 28, .92); border: 1px solid rgba(140, 175, 195, .25); backdrop-filter: blur(10px); box-shadow: 0 10px 30px rgba(0, 0, 0, .35); overflow: hidden; }

@@ -44,8 +44,10 @@ export function PlanView({ state, route, comparison, hints, status, planNow, dea
   const { trip, settings } = state;
   const parking = active ? parkingHint(active, route, settings.parkingBufferMin) : undefined;
 
+  // Na szerokim ekranie (tablet, poziomo) dwie kolumny: stan i następny krok obok scenariuszy — mniej przewijania.
   return (
-    <>
+    <div className="plan-grid">
+      <div className="plan-main">
       <section className="card hero-card">
         <button className="dest" onClick={() => goTo("route")}>
           <span className="eyebrow">Cel</span>
@@ -122,7 +124,9 @@ export function PlanView({ state, route, comparison, hints, status, planNow, dea
           <Stat label="Tydzień — zostało" value={fmtDuration(status.weekLeft)} sub="limit 56 h / 90 h" warn={status.weekLeft <= 120} />
         </div>
       </section>
+      </div>
 
+      <div className="plan-side">
       <section className="card">
         <div className="eyebrow">Scenariusze</div>
         <h2>Co się bardziej opłaca?</h2>
@@ -150,7 +154,8 @@ export function PlanView({ state, route, comparison, hints, status, planNow, dea
       {active && <Reminders plan={active} parking={parking} />}
 
       <OngoingCard on={ongoing} onChange={onOngoing} />
-    </>
+      </div>
+    </div>
   );
 }
 

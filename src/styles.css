@@ -876,7 +876,7 @@ input[type="number"]::-webkit-inner-spin-button, input[type="number"]::-webkit-o
 .hud-map-delay rect { fill: #f2c230; stroke: rgba(0, 0, 0, .45); stroke-width: 1.5; }
 .hud-map-delay.jam rect { fill: #e8322c; }
 .hud-map-delay.closed rect { fill: #8a1010; }
-.hud-map-delay text { fill: #111; font: 850 16px system-ui, sans-serif; text-anchor: middle; }
+.hud-map-delay text { fill: #111; font: 850 13px system-ui, sans-serif; text-anchor: middle; }
 .hud-map-delay.jam text, .hud-map-delay.closed text { fill: #fff; }
 .hud-traffic { flex-basis: 100%; display: flex; align-items: baseline; gap: calc(1.4 * var(--u)); padding: calc(.6 * var(--u)) calc(1.4 * var(--u)); border-radius: calc(1.2 * var(--u)); background: rgba(255, 138, 42, .14); border: 1px solid rgba(255, 138, 42, .55); }
 .hud-traffic.slow { background: rgba(242, 194, 48, .13); border-color: rgba(242, 194, 48, .55); }
@@ -966,10 +966,10 @@ input[type="number"]::-webkit-inner-spin-button, input[type="number"]::-webkit-o
 .ghost.active { border-color: var(--green); color: var(--green); }
 .hud-info-tile.is-friend { border-color: rgba(78, 161, 255, .55); }
 .hud-avatar { display: grid; place-items: center; flex: none; width: calc(7 * var(--u)); height: calc(7 * var(--u)); border-radius: 50%; background: rgba(78, 161, 255, .22); color: #8ec3ff; font-size: calc(4 * var(--u)); font-weight: 900; line-height: 1; }
-.hud-map-friend path { fill: #4ea1ff; stroke: #08111a; stroke-width: 3; stroke-linejoin: round; }
-.hud-map-friend.stopped path { fill: #ef6a5b; }
+.hud-map-friend-arrow { fill: #4ea1ff; stroke: #08111a; stroke-width: 3; stroke-linejoin: round; }
+.hud-map-friend-arrow.stopped { fill: #ef6a5b; }
 .hud-map-friend rect { fill: rgba(8, 17, 26, .85); stroke: rgba(140, 175, 195, .4); stroke-width: 1; }
-.hud-map-friend text { fill: #eef3f6; font: 800 15px system-ui, sans-serif; text-anchor: middle; }
+.hud-map-friend text { fill: #eef3f6; font: 800 13px system-ui, sans-serif; text-anchor: middle; }
 
 /* Pion: przy zasięgu 1,6 krawędź warstwy mapy wypada niżej niż w poziomie — mgła zakrywa ją do ~30 % wysokości */
 @media (orientation: portrait) {
@@ -977,3 +977,8 @@ input[type="number"]::-webkit-inner-spin-button, input[type="number"]::-webkit-o
   .hud.navmode .nm-map::before { top: 20.5%; }
 }
 .hud-map .map-view { background: #0a1219; }
+
+/* Mapa HUD w WebGL */
+.gl-map { position: absolute; inset: 0; overflow: hidden; background: #0a1219; }
+.gl-canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+.gl-markers { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none; }

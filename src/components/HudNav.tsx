@@ -2,7 +2,7 @@ import { useEffect, useRef } from "react";
 import { Live } from "../core/gps";
 import { alongRoute, bearingAtKm, isOffRoute, lanesAhead, locate, NAV, NavInstruction, nextInstruction, pointAtKm, RoutePos, routeSlice, speedLimitAt } from "../core/navmatch";
 import { isAhead, jamMatters, jamTone, NavPlace, NavRoute, TrafficSection, warningText } from "../nav";
-import { MapView } from "./MapView";
+import { GlLine, GlMapView, GlMarker } from "./GlMap";
 import { Friend, STATUS_LABEL } from "../core/friends";
 import { fmtDuration } from "../core/scenarios";
 import { distanceM } from "../core/gps";
@@ -354,8 +354,6 @@ export function HudRouteMap({ nav, track, live, token, anchorY = 0.8, zoomOffset
     lastLabel = j.t.km;
     return true;
   });
-  // Etykieta stoi prosto: cofamy obrót mapy i jej pochylenie (rotateX ściska pion o cos(pitch)).
-  const upright = `rotate(${bearing}) scale(1 ${(1 / Math.cos((MAP_PITCH * Math.PI) / 180)).toFixed(3)})`;
   // Znajomi z sygnałem: punkt + imię i km od nas (bez limitu odległości — mapa i tak pokazuje tylko okolicę).
   // Km po trasie, gdy znajomy jest przy naszej trasie; inaczej w linii prostej.
   const mates = (friends ?? []).filter((f) => f.relation === "accepted" && f.presence).map((f) => {
@@ -363,71 +361,44 @@ export function HudRouteMap({ nav, track, live, token, anchorY = 0.8, zoomOffset
     return { f, p: f.presence!, km: along ? Math.abs(along.km) : live ? distanceM(live, f.presence!) / 1000 : undefined };
   });
 
+  // Linie rysuje WebGL; znaczniki to kilka elementów SVG w układzie ekranu (GlMapView przestawia je co klatkę).
+  const rgba = (hex: string, a = 1): [number, number, number, number] => [parseInt(hex.slice(1, 3), 16) / 255, parseInt(hex.slice(3, 5), 16) / 255, parseInt(hex.slice(5, 7), 16) / 255, a];
+  const JAM = { slow: "#f2c230", jam: "#e8322c", closed: "#8a1010" } as const;
+  const lines: GlLine[] = [
+    ...(behind.length > 1 ? [{ pts: behind, color: rgba("#5b6b78", 0.6), widthPx: 8 }] : []),
+    ...(ahead.length > 1 ? [{ pts: ahead, color: rgba("#0b3d80"), widthPx: 15 }, { pts: ahead, color: rgba("#3d8bff"), widthPx: 10 }] : []),
+    ...jams.map((j) => ({ pts: j.pts, color: rgba(JAM[j.tone]), widthPx: 9 })),
+  ];
+  const markers: GlMarker[] = [];
+  if (next && route) markers.push({ key: "next", ...pointAtKm(route.points, next.ins.km)!, node: <circle className="hud-map-next" r="8" strokeWidth="4" /> });
+  if (route) markers.push({ key: "end", lat: route.to.lat, lon: route.to.lon, node: <path className="hud-map-end" d="M0 0v-34h24l-6 7 6 7h-24" /> });
+  for (const j of labels) {
+    // Gdy już jedziemy w korku, etykieta stoi kawałek przed strzałką, nie na niej (ale nie za końcem odcinka).
+    const at = pointAtKm(route!.points, Math.min(j.t.toKm - 0.05, Math.max(km + 0.35, j.t.km)))!;
+    const text = delayLabel(j.t);
+    const w = text.length * 8 + 14;
+    markers.push({ key: `l${j.t.km}`, ...at, node: <g className={`hud-map-delay ${j.tone}`}><rect x={-w / 2} y={-34} width={w} height={22} rx={11} /><text x={0} y={-18}>{text}</text></g> });
+  }
+  for (const { f, p, km: fkm } of mates) {
+    const moving = p.status === "driving";
+    // Etykieta: imię · km od nas · prędkość (w ruchu) albo rodzaj postoju i ile trwa.
+    const extra = moving ? (p.kmh !== null ? `${p.kmh} km/h` : "") : `${STATUS_LABEL[p.status].toLowerCase()}${p.since !== null ? ` ${fmtDuration(Math.max(0, ((live?.t ?? Date.now()) - p.since) / 60_000))}` : ""}`;
+    const text = [f.name, fkm !== undefined ? `${fkm < 10 ? fkm.toFixed(1).replace(".", ",") : Math.round(fkm)} km` : "", extra].filter(Boolean).join(" · ");
+    const w = text.length * 7.6 + 16;
+    const heading = moving && p.heading !== null ? p.heading : null;
+    // Strzałka obrócona o kierunek znajomego względem kierunku mapy (u góry jest nasz kierunek jazdy); etykieta zawsze prosto.
+    markers.push({ key: `fa${f.id}`, lat: p.lat, lon: p.lon, rotate: heading === null ? undefined : (b) => heading - b, node: <path className={`hud-map-friend-arrow ${moving ? "" : "stopped"}`} d="M0 -24 L17 19 L0 10 L-17 19 Z" /> });
+    markers.push({ key: `f${f.id}`, lat: p.lat, lon: p.lon, node: <g className="hud-map-friend"><rect x={-w / 2} y={-48} width={w} height={22} rx={11} /><text x={0} y={-32}>{text}</text></g> });
+  }
+
   return (
     <div className="hud-map">
-      <MapView
-        token={token}
-        center={center}
-        zoom={zoom}
-        bearing={bearing}
-        pitch={MAP_PITCH}
-        anchorY={anchorY}
-        follow={predict}
-        overlay={(px) => {
-          const d = (pts: { lat: number; lon: number }[]) => pts.map((p, i) => `${i ? "L" : "M"}${px(p).map((v) => v.toFixed(1)).join(" ")}`).join("");
-          const np = next && route ? px(pointAtKm(route.points, next.ins.km)!) : null;
-          const end = route ? px({ lat: route.to.lat, lon: route.to.lon }) : null;
-          return (
-            <>
-              {behind.length > 1 && <path className="hud-map-done" d={d(behind)} />}
-              {ahead.length > 1 && (
-                <>
-                  <path className="hud-map-route-edge" d={d(ahead)} />
-                  <path className="hud-map-route" d={d(ahead)} />
-                </>
-              )}
-              {jams.map((j) => <path key={j.t.km} className={`hud-map-jam ${j.tone}`} d={d(j.pts)} />)}
-              {labels.map((j) => {
-                // Gdy już jedziemy w korku, etykieta stoi kawałek przed strzałką, nie na niej (ale nie za końcem odcinka).
-                const [x, y] = px(pointAtKm(route!.points, Math.min(j.t.toKm - 0.05, Math.max(km + 0.35, j.t.km)))!);
-                const text = delayLabel(j.t);
-                const w = text.length * 9 + 16;
-                return (
-                  <g key={`l${j.t.km}`} className={`hud-map-delay ${j.tone}`} transform={`translate(${x.toFixed(1)} ${y.toFixed(1)}) ${upright}`}>
-                    <rect x={-w / 2} y={-40} width={w} height={26} rx={13} />
-                    <text x={0} y={-22}>{text}</text>
-                  </g>
-                );
-              })}
-              {mates.map(({ f, p, km }) => {
-                const [x, y] = px(p);
-                const moving = p.status === "driving";
-                // Etykieta: imię · km od nas · prędkość (w ruchu) albo rodzaj postoju i ile trwa.
-                const extra = moving ? (p.kmh !== null ? `${p.kmh} km/h` : "") : `${STATUS_LABEL[p.status].toLowerCase()}${p.since !== null ? ` ${fmtDuration(Math.max(0, ((live?.t ?? Date.now()) - p.since) / 60_000))}` : ""}`;
-                const text = [f.name, km !== undefined ? `${km < 10 ? km.toFixed(1).replace(".", ",") : Math.round(km)} km` : "", extra].filter(Boolean).join(" · ");
-                const w = text.length * 9.5 + 18;
-                return (
-                  <g key={`f${f.id}`} className={`hud-map-friend ${moving ? "" : "stopped"}`} transform={`translate(${x.toFixed(1)} ${y.toFixed(1)})`}>
-                    {/* Strzałka jak nasza (prosto, bez spłaszczenia pochyleniem): obrót o kierunek znajomego względem kierunku mapy */}
-                    <path transform={`${upright} rotate(${moving && p.heading !== null ? p.heading - bearing : 0})`} d="M0 -24 L17 19 L0 10 L-17 19 Z" />
-                    <g transform={upright}>
-                      <rect x={-w / 2} y={-56} width={w} height={26} rx={13} />
-                      <text x={0} y={-38}>{text}</text>
-                    </g>
-                  </g>
-                );
-              })}
-              {np && <circle className="hud-map-next" cx={np[0]} cy={np[1]} r="9" strokeWidth="4" />}
-              {end && <path className="hud-map-end" transform={`translate(${end[0]} ${end[1]}) rotate(${bearing})`} d="M0 0v-34h24l-6 7 6 7h-24" />}
-            </>
-          );
-        }}
-      >
+      <GlMapView token={token} center={center} zoom={zoom} bearing={bearing} pitch={MAP_PITCH} anchorY={anchorY} lines={lines} markers={markers} follow={predict}>
         <svg className="hud-map-me-wrap" style={{ left: "50%", top: `${anchorY * 100}%` }} viewBox="-30 -34 60 64" aria-hidden>
           <path className="hud-map-me-halo" transform={`rotate(${arrowTurn})`} d="M0 -30 L22 24 L0 12 L-22 24 Z" />
           <path className="hud-map-me" transform={`rotate(${arrowTurn})`} d="M0 -30 L22 24 L0 12 L-22 24 Z" />
         </svg>
-      </MapView>
+      </GlMapView>
     </div>
   );
 }

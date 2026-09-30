@@ -68,12 +68,14 @@ src/ongoing.ts     stałe powiadomienie: cicha pętla audio (WAV generowany w pa
 src/core/navmatch.ts  prowadzenie: pointAtKm, bearingAtKm, routeSlice, locate (rzut GPS na trasę, okno wokół podpowiedzi), nextInstruction, lanesAhead, speedLimitAt, isOffRoute; NAV = progi;
                    alongRoute / nearestOnRoute — km po trasie do punktu przy niej (MOP, znajomy; ON_ROUTE_M = 300);
                    speedLimitAt trzyma ostatni limit do NAV.limitCarryKm za końcem odcinka (luki w danych TomTom); speedTone ok/warn/over (NAV.overWarnKmh = 5)
-src/components/MapView.tsx  mapa bez bibliotek: kafelki TomTom 512 px (noc) przez /api/tiles z tokenem (fetch → blob), Web Mercator,
-                   obrót (bearing) i pochylenie (pitch) warstwy, nakładki SVG w układzie mapy; follow() = pozycja w każdej klatce zapisywana
-                   wprost w style.transform warstwy (kafelki względem stałego punktu odniesienia, przenoszonego gdy odjedziemy o ćwierć zasięgu);
-                   AdminMap.tsx = podgląd danych (warstwy OSM, zgłoszenia, ślady)
+src/components/MapView.tsx  mapa DOM bez bibliotek (podgląd admina, „Gdzie jest” znajomego — bez pochylenia): kafelki TomTom 512 px (noc) przez /api/tiles
+                   z tokenem (fetch → blob, wspólny cache loadTile/cachedTile), Web Mercator, nakładki SVG; AdminMap.tsx = podgląd danych
+src/components/GlMap.tsx  mapa HUD w WebGL (GlMapView): kafelki jako tekstury (LRU 160), linie (trasa, korki) jako trójkąty, kamera = ta sama
+                   macierz co dawniej w CSS (translate·perspective·rotateX·rotateZ), follow() = pozycja co klatkę (rAF); znaczniki = kilka
+                   elementów SVG w układzie ekranu przestawianych atrybutem transform. Zastąpiła pochylanie warstwy HTML (CSS 3D), której
+                   Chrome na Androidzie nie nadążał rasteryzować (migotanie, niedomalowane karty), a Safari na iOS wyczerpywało pamięć
 src/components/HudNav.tsx  useNavTrack (pozycja na trasie, poza trasą → onReroute po 15 s; brak trasy w urządzeniu, a jest cel → od razu; max 1/min),
-                   HudNav (manewr + pasy + ograniczenie), HudRouteMap (styl HUD „nav”: mapa TomTom pochylona MAP_PITCH 62° z horyzontem (gradient .nm-map::after/::before),
+                   HudNav (manewr + pasy + ograniczenie), HudRouteMap (styl HUD „nav”: GlMapView pochylona MAP_PITCH 62° z horyzontem (gradient .nm-map::after/::before),
                    kierunek jazdy w górę, trasa, zielona strzałka = my na 70% wysokości; zoom od prędkości)
                    useSmoothPosition — jak w nawigacjach: między odczytami GPS przewidujemy ruch z ostatniej prędkości (po trasie / wzdłuż kierunku),
                    nowy odczyt koryguje płynnie przez 1 s (SMOOTH). Zwraca funkcję predict() → MapView.follow woła ją w każdej klatce (rAF) i zapisuje
@@ -170,10 +172,8 @@ Widoki nie liczą reguł same — tylko formatują wyniki silnika.
 
 - Pełny ekran nie działa na iPhonie (Safari nie obsługuje Fullscreen API dla stron) — HUD pokazuje wtedy wskazówkę
   „Do ekranu początkowego”.
-- HUD styl „Nawigacja” na Androidzie: nad warstwą 3D mapy nie używać `backdrop-filter` ani SVG `filter: drop-shadow` — wymuszały
-  ponowną rasteryzację w każdej klatce (migotanie, znikająca strzałka); karty mają kryjące tło, strzałka obrys zamiast cienia.
-  Warstwa mapy (`.map-layer`) ma `will-change: transform` (zmiana transform co klatkę = złożenie na GPU), a jej zasięg to 1,6 przekątnej
-  (większy = ~10 000 px na telefonie → niedomalowane karty); daleki pas u góry zakrywa „niebo” i mgła (w pionie do ~30 %).
+- HUD styl „Nawigacja”: mapa w WebGL (GlMap.tsx) — nie wracać do CSS 3D (pochylona warstwa HTML z <img> migotała na Androidzie i wysypywała
+  Safari). Nad mapą bez `backdrop-filter` i SVG `filter` (drogie na telefonie). Daleki pas u góry zakrywa „niebo” i mgła z CSS (w pionie do ~30 %).
 - HUD: odległość do MOP-u i znajomych po trasie tylko z trasą z nawigacji (Premium) i tylko dla punktów ≤ 300 m od niej
   (`navmatch.alongRoute`); bez trasy — w linii prostej. Km do serwisu liczy tylko GPS przy otwartej aplikacji.
 

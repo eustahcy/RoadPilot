@@ -30,7 +30,7 @@ export function fromWorldPx(x: number, y: number, zoom: number): LatLon {
 const blobs = new Map<string, string | Promise<string | null>>();
 const BLOBS_MAX = 400;
 
-function loadTile(key: string, token: string): Promise<string | null> | string | null {
+export function loadTile(key: string, token: string): Promise<string | null> | string | null {
   const hit = blobs.get(key);
   if (hit !== undefined) return hit;
   const p = fetch(apiUrl(`/tiles/${key}.png`), { headers: { Authorization: `Bearer ${token}` } })
@@ -229,4 +229,10 @@ export function MapView({ token, center, zoom, bearing = 0, pitch = 0, anchorY =
       <span className="map-credit">© TomTom</span>
     </div>
   );
+}
+
+/** Adres blob kafelka, jeśli już pobrany (do rysowania w WebGL i podkładu z sąsiednich poziomów). */
+export function cachedTile(key: string): string | undefined {
+  const v = blobs.get(key);
+  return typeof v === "string" ? v : undefined;
 }

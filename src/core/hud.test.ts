@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { bearingDeg, distanceM, Fix, nextLive } from "./gps";
 import { serviceStatus } from "./service";
-import { nearestStation, parseOverpass, Station } from "./stations";
+import { nearestStation, parseOverpass, parseParkings, Station } from "./stations";
 import { describeWeather, isHazard } from "./weather";
 
 const NOW = Date.UTC(2026, 8, 30, 12, 0);
@@ -98,5 +98,18 @@ describe("HUD — pogoda", () => {
     expect(isHazard({ tempC: 12, code: 3, isDay: true })).toBe(false);
     expect(isHazard({ tempC: 1, code: 3, isDay: true })).toBe(true);
     expect(isHazard({ tempC: 8, code: 45, isDay: true })).toBe(true);
+  });
+});
+
+describe("parkingi i MOP-y", () => {
+  it("rozpoznaje MOP, MOP z obsługą i parking TIR; pomija zamknięte dla ciężarówek", () => {
+    const p = parseParkings({ elements: [
+      { type: "way", id: 1, center: { lat: 52, lon: 21 }, tags: { highway: "rest_area", name: "MOP Wiskitki" } },
+      { type: "way", id: 2, center: { lat: 52.1, lon: 21 }, tags: { highway: "services" } },
+      { type: "node", id: 3, lat: 52.2, lon: 21, tags: { amenity: "parking", hgv: "designated" } },
+      { type: "node", id: 4, lat: 52.3, lon: 21, tags: { highway: "rest_area", hgv: "no" } },
+    ] });
+    expect(p.map((x) => [x.kind, x.name])).toEqual([["mop", "MOP Wiskitki"], ["services", "MOP"], ["truck", "Parking TIR"]]);
+    expect(nearestStation(p, { lat: 52.15, lon: 21 }, 0)?.station.id).toBe("node/3");
   });
 });

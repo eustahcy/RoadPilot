@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { distanceM, Fix } from "./core/gps";
 import { defaultState } from "./state";
-import { applyFix, finishStop, startStop } from "./tracking";
+import { applyFix, endDay, finishStop, startDay, startStop } from "./tracking";
 
 const MIN = 60_000;
 const NOW = Date.UTC(2026, 8, 30, 12, 0);
@@ -33,6 +33,14 @@ describe("ręczny postój + GPS", () => {
     expect(s.driver.splitBreakTaken).toBe(false);
   });
 
+  it("pojedynczy fałszywy odczyt ruchu nie kończy przerwy (nie zaczyna jej od nowa)", () => {
+    let s = startStop(parked(0), NOW, 45);
+    for (let m = 0.25; m <= 20; m += 0.25) s = applyFix(s, fix(m, 0));
+    s = applyFix(s, { ...fix(20.25, 0.04), speed: 6 }); // 40 m, 22 km/h — szum w kabinie
+    for (let m = 20.5; m <= 30; m += 0.25) s = applyFix(s, fix(m, 0));
+    expect(s.stop).toEqual({ start: NOW, targetMin: 45 });
+  });
+
   it("po ręcznym końcu GPS nie zalicza tego samego postoju drugi raz", () => {
     // 10 h postoju oznaczone ręcznie: skrócony odpoczynek zużyty tylko raz
     let s = startStop(parked(0), NOW, 600);
@@ -42,5 +50,40 @@ describe("ręczny postój + GPS", () => {
     s = driveOff(s, 600);
     expect(s.driver.reducedRestsLeft).toBe(2);
     expect(s.driver.shiftStart).toBe(NOW + 600 * MIN);
+  });
+});
+
+describe("historia z GPS", () => {
+  it("postój zakończony ruszeniem trafia do historii razem z jazdą", () => {
+    let s = startStop(parked(0), NOW, 45, true);
+    for (let m = 0.25; m <= 50; m += 0.25) s = applyFix(s, fix(m, 0));
+    s = driveOff(s, 50);
+    const day = s.history[0];
+    expect(day.stops).toHaveLength(1);
+    expect(day.stops[0].start).toBe(NOW);
+    expect(day.driveMin).toBeCloseTo(1);
+    expect(day.km).toBeCloseTo(1, 1);
+  });
+});
+
+describe("dzień pracy", () => {
+  it("„Zakończ dzień” → odpoczynek; „Rozpocznij dzień” zalicza go i zeruje liczniki", () => {
+    let s = endDay(parked(0), NOW);
+    expect(s.stop).toEqual({ start: NOW, targetMin: 660, dayEnd: true });
+    s = startDay(s, NOW + 11 * 60 * MIN);
+    expect(s.stop).toBeNull();
+    expect(s.driver).toMatchObject({ shiftStart: NOW + 11 * 60 * MIN, drivenTodayMin: 0, sinceBreakMin: 0, reducedRestsLeft: 3 });
+    expect(s.history[0].stops).toHaveLength(1);
+  });
+
+  it("trwający postój staje się odpoczynkiem od swojego początku; ruszenie kończy odpoczynek", () => {
+    let s = startStop(parked(0), NOW, null, true);
+    s = endDay(s, NOW + 10 * MIN);
+    expect(s.stop?.start).toBe(NOW);
+    for (let m = 0.25; m <= 600; m += 0.25) s = applyFix(s, fix(m, 0));
+    s = driveOff(s, 600);
+    expect(s.stop).toBeNull();
+    expect(s.driver.reducedRestsLeft).toBe(2);
+    expect(s.driver.drivenTodayMin).toBeLessThanOrEqual(1);
   });
 });

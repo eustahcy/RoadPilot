@@ -30,6 +30,8 @@ export interface GpsTrack {
   samples: { t: number; km: number }[];
   /** Początek bieżącego postoju — null, gdy jedziemy. */
   stopSince: number | null;
+  /** Na postoju: od kiedy odczyty pokazują ruch, jeszcze niepotwierdzony odległością (null/brak = nie ma). */
+  moveSince?: number | null;
 }
 
 export const GPS = {
@@ -53,6 +55,15 @@ export const GPS = {
   /** Poniżej tej średniej (km/h) nie liczymy przyjazdu z prędkości — to postój lub korek. */
   minLiveKmh: 10,
   sampleEveryMs: 15_000,
+  /** Poniżej tej prędkości (km/h) auto stoi (0–5 km/h) — to samo co próg jazdy `movingKmh`. */
+  stillKmh: 5,
+  /** Tyle ms stania włącza postój automatycznie. */
+  autoStopMs: 5_000,
+  /**
+   * Ruszenie z postoju liczymy dopiero po oddaleniu się o tyle metrów od miejsca postoju. Stojący telefon potrafi
+   * zgłosić chwilową prędkość albo skok pozycji — bez tego jeden taki odczyt kończył przerwę i zaczynał ją od nowa.
+   */
+  confirmMoveM: 200,
 } as const;
 
 export function startTrack(fix: Fix): GpsTrack {
@@ -87,12 +98,25 @@ export function addFix(track: GpsTrack, fix: Fix): FixResult {
   if (km / (dt / 60) > GPS.maxKmh) km = 0; // skok pozycji
 
   let driveMin: number;
+  let moveSince: number | null = null;
   if (gap) {
     // Nie wiemy, co działo się między odczytami: jazdę szacujemy z dystansu, resztę uznajemy za postój.
     driveMin = Math.min(dt, (km / GPS.gapAvgKmh) * 60);
   } else {
     const kmh = Math.max(km / (dt / 60), (fix.speed ?? 0) * 3.6);
     driveMin = kmh >= GPS.movingKmh ? dt : 0;
+    if (driveMin > 0 && track.stopSince !== null) {
+      // Na postoju ruch musi się potwierdzić odległością od miejsca postoju (kotwica stoi w miejscu, dopóki czekamy).
+      const since = track.moveSince ?? track.lastT;
+      // Za szybko jak na drogę od początku ruchu → to skok pozycji, nie ruszenie.
+      const plausible = straight / 1000 / ((fix.t - since) / 60 / MIN) <= GPS.maxKmh;
+      if (straight < GPS.confirmMoveM || !plausible) {
+        return { track: { ...track, lastT: fix.t, moveSince: since }, km: 0, driveMin: 0 };
+      }
+      // Potwierdzone: jedziemy od pierwszego odczytu z ruchem, droga — od miejsca postoju.
+      driveMin = (fix.t - since) / MIN;
+      km = straight / 1000;
+    }
   }
 
   let stopSince = track.stopSince;
@@ -123,6 +147,7 @@ export function addFix(track: GpsTrack, fix: Fix): FixResult {
       odoKm,
       samples: kept,
       stopSince,
+      moveSince,
     },
     km,
     driveMin,
@@ -237,4 +262,25 @@ export function nextLive(prev: Live | null, fix: Fix, receiverHeading: number | 
     kmh = prev.kmh;
   }
   return { ...here, kmh, heading: heading ?? prev.heading, base };
+}
+
+/**
+ * Automatyczny postój: po `GPS.autoStopMs` stania (prędkość < `GPS.stillKmh`) zaczynamy postój od chwili zatrzymania.
+ * Uzbraja się dopiero po jeździe — po włączeniu GPS na parkingu albo po ręcznym „Koniec postoju” nie włączy się od razu.
+ */
+export interface AutoStop {
+  armed: boolean;
+  stillSince: number | null;
+}
+
+export const AUTO_STOP_IDLE: AutoStop = { armed: false, stillSince: null };
+
+export function nextAutoStop(a: AutoStop, kmh: number | null, t: number, stopActive: boolean): { auto: AutoStop; startAt?: number } {
+  if (stopActive) return { auto: AUTO_STOP_IDLE };
+  if (kmh === null) return { auto: a };
+  if (kmh >= GPS.movingKmh) return { auto: { armed: true, stillSince: null } };
+  if (!a.armed || kmh >= GPS.stillKmh) return { auto: { ...a, stillSince: null } };
+  const stillSince = a.stillSince ?? t;
+  if (t - stillSince >= GPS.autoStopMs) return { auto: AUTO_STOP_IDLE, startAt: stillSince };
+  return { auto: { armed: true, stillSince } };
 }

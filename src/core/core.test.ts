@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { DriverState, parkingHint, simulate } from "./plan";
-import { reconstruct } from "./reconstruct";
+import { reconstruct, reconstructTimed } from "./reconstruct";
 import { DEFAULT_SPEEDS, Route, Segment, segmentsFromProfile, Speeds } from "./route";
-import { compareScenarios, explain, whatIfs } from "./scenarios";
+import { betterOption, compareScenarios, explain, whatIfs } from "./scenarios";
 
 const MIN = 60_000;
 // Środa 30.09.2026 12:00 UTC (testy uruchamiane z TZ=UTC)
@@ -131,6 +131,24 @@ describe("scenariusze", () => {
     expect(w[0].savedMin).toBe(660 - 45);
   });
 
+  it("lepszy scenariusz: szybszy start niż wybrany przez kierowcę", () => {
+    const c = compareScenarios(flat(660), tired, NOW, OFF);
+    const now = c.scenarios.find((s) => s.id === "now")!.plan;
+    // jedź teraz 2025 min, odpocznij 9 h 1905 min → 2 h wcześniej
+    expect(betterOption(c, now, [])).toEqual({ kind: "scenario", id: "rest9", savedMin: 120, arrival: at(1905) });
+    expect(betterOption(c, c.scenarios.find((s) => s.id === "rest9")!.plan, [])).toBeUndefined();
+  });
+
+  it("lepszy scenariusz: opcja z „co jeśli”, gdy jedziemy już najszybszym startem", () => {
+    const d = fresh({ extensionsLeft: 1 });
+    const c = compareScenarios(flat(600), d, NOW, OFF);
+    const best = c.scenarios.find((s) => s.id === c.bestId)!.plan;
+    const b = betterOption(c, best, whatIfs(flat(600), d, NOW, OFF));
+    expect(b).toMatchObject({ kind: "option", option: "allowExtension", savedMin: 660 - 45 });
+    // zysk poniżej progu nie jest pokazywany
+    expect(betterOption(c, best, [{ option: "allowExtension", label: "x", savedMin: 10, arrival: NOW }])).toBeUndefined();
+  });
+
   it("parking: szukaj z wyprzedzeniem przed pierwszym postojem", () => {
     const r = flat(300);
     const p = simulate(r, fresh(), NOW, OFF, { kind: "now" });
@@ -191,5 +209,22 @@ describe("plan pod rozładunek", () => {
     expect(d.lateByMin).toBe(270 + 45 + 270 + 660 + 60 - 720);
     expect(d.fixes[0]?.label).toMatch(/wydłużenie/);
     expect(d.fixes[0]?.arrival).toBe(at(690));
+  });
+});
+
+describe("odtworzenie dnia z godzinami", () => {
+  const H = 60 * 60_000;
+  it("luka między jazdami liczy się jako postój, nakładki tylko raz", () => {
+    const r = reconstructTimed(NOW, [
+      { kind: "drive", from: NOW, to: NOW + 3 * H },
+      // luka 45 min → przerwa
+      { kind: "drive", from: NOW + 3.75 * H, to: NOW + 5 * H },
+      // nakłada się na poprzednią o 15 min
+      { kind: "work", from: NOW + 4.75 * H, to: NOW + 5.5 * H },
+    ]);
+    expect(r.drivenTodayMin).toBe(255);
+    expect(r.sinceBreakMin).toBe(75);
+    expect(r.gapMin).toBe(45);
+    expect(r.end).toBe(NOW + 5.5 * H);
   });
 });

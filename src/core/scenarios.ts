@@ -58,6 +58,29 @@ export function whatIfs(route: Route, driver: DriverState, now: number, options:
   return out;
 }
 
+/** Wariant szybszy od planu, według którego jedziemy — do kafelka „Lepszy scenariusz” w HUD. */
+export type Better =
+  | { kind: "scenario"; id: ScenarioId; savedMin: number; arrival: number }
+  | { kind: "option"; option: keyof PlanOptions; label: string; savedMin: number; arrival: number };
+
+/** Od takiego zysku (min) warto pokazać kierowcy inny wariant. */
+export const BETTER_MIN_SAVED = 15;
+
+/**
+ * Szybszy wariant niż `active`: najpierw inny scenariusz startu (gdy kierowca wybrał wolniejszy),
+ * potem opcja z „Co jeśli?”. Tylko informacja — silnik niczego nie przełącza sam.
+ */
+export function betterOption(c: Comparison, active: Plan | undefined, hints: WhatIf[]): Better | undefined {
+  if (!active?.feasible) return undefined;
+  const best = c.scenarios.find((s) => s.id === c.bestId);
+  if (best && best.plan !== active) {
+    const savedMin = (active.arrival - best.plan.arrival) / MIN;
+    return savedMin >= BETTER_MIN_SAVED ? { kind: "scenario", id: best.id, savedMin, arrival: best.plan.arrival } : undefined;
+  }
+  const hint = [...hints].sort((a, b) => b.savedMin - a.savedMin)[0];
+  return hint && hint.savedMin >= BETTER_MIN_SAVED ? { kind: "option", option: hint.option, label: hint.label, savedMin: hint.savedMin, arrival: hint.arrival } : undefined;
+}
+
 function bestArrival(c: Comparison) {
   return c.scenarios.find((s) => s.id === c.bestId)?.plan.arrival;
 }

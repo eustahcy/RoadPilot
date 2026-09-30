@@ -2,7 +2,7 @@
 // Strona: najpierw sieć (świeża wersja), w razie braku zasięgu — kopia z cache.
 // Pliki z hashem w nazwie (assets/*): z cache, bo się nie zmieniają.
 // Ścieżki są względne do sw.js — aplikacja działa z podkatalogu (/roadpilot/).
-const CACHE = "roadpilot-v3";
+const CACHE = "roadpilot-v4";
 const SHELL = ["./", "manifest.webmanifest", "icon.svg", "icon-192.png", "icon-512.png"];
 
 self.addEventListener("install", (event) => {
@@ -21,6 +21,8 @@ self.addEventListener("fetch", (event) => {
   const req = event.request;
   const url = new URL(req.url);
   if (req.method !== "GET" || url.origin !== self.location.origin) return;
+  // API (konta, synchronizacja) zawsze z sieci — nigdy z cache.
+  if (url.pathname.startsWith(new URL("api/", self.registration.scope).pathname)) return;
 
   if (req.mode === "navigate") {
     event.respondWith(

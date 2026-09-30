@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { DriverState } from "./plan";
-import { endStop, nextStopThreshold, planAfterStop, stopCredit, suggestedStop } from "./stop";
+import { endStop, nextStopThreshold, planAfterStop, stopCredit, stopEnd, suggestedStop } from "./stop";
 
 const MIN = 60_000;
 const NOW = Date.UTC(2026, 8, 30, 12, 0);
@@ -62,5 +62,20 @@ describe("ręczny postój", () => {
     expect(a.driver.sinceBreakMin).toBe(0);
     const b = planAfterStop(driver(), stop, NOW + 60 * MIN);
     expect(b.from).toBe(NOW + 60 * MIN);
+  });
+});
+
+describe("postój bez limitu", () => {
+  const T0 = Date.UTC(2026, 8, 30, 12, 0);
+  const drv = { shiftStart: T0 - 300 * MIN, drivenTodayMin: 270, sinceBreakMin: 270, splitBreakTaken: false, extensionsLeft: 2, reducedRestsLeft: 3, weekDrivenMin: 270, prevWeekDrivenMin: 0 };
+
+  it("plan liczy od teraz z zaliczonym czasem postoju", () => {
+    const stop = { start: T0, targetMin: null };
+    expect(stopEnd(stop)).toBeUndefined();
+    const short = planAfterStop(drv, stop, T0 + 20 * MIN);
+    expect(short.from).toBe(T0 + 20 * MIN);
+    expect(short.driver.splitBreakTaken).toBe(true);
+    const long = planAfterStop(drv, stop, T0 + 50 * MIN);
+    expect(long.driver.sinceBreakMin).toBe(0);
   });
 });

@@ -1,14 +1,15 @@
 {
   "name": "roadpilot",
   "private": true,
-  "version": "0.5.0",
+  "version": "0.6.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
     "test": "TZ=UTC vitest run",
-    "deploy": "npm run build && rsync -a --delete dist/ /var/www/roadpilot/"
+    "deploy": "npm run build && rsync -a --delete --exclude .htaccess dist/ /var/www/roadpilot/",
+    "deploy:tuike": "tsc -b && scripts/deploy-ftp.sh"
   },
   "dependencies": {
     "react": "^19.1.1",

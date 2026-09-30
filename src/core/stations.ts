@@ -12,8 +12,8 @@ export interface Station {
   truck: boolean;
 }
 
-export interface NearestStation {
-  station: Station;
+export interface NearestStation<T = Station> {
+  station: T;
   /** W linii prostej. */
   km: number;
   /** Przed nami (w kierunku jazdy) — null, gdy kierunek nieznany. */
@@ -51,10 +51,42 @@ export function parseOverpass(json: unknown): Station[] {
   return out;
 }
 
-/** Najbliższa stacja — gdy znamy kierunek jazdy, najpierw spośród tych przed nami. */
-export function nearestStation(stations: Station[], pos: { lat: number; lon: number }, heading: number | null): NearestStation | undefined {
-  let best: NearestStation | undefined;
-  let bestAhead: NearestStation | undefined;
+/** Parking dla ciężarówek / MOP (OpenStreetMap: highway=rest_area|services, amenity=parking z hgv). */
+export interface Parking {
+  id: string;
+  lat: number;
+  lon: number;
+  name: string;
+  /** mop = miejsce odpoczynku, services = MOP z obsługą (stacja, bar), truck = parking dla ciężarówek. */
+  kind: "mop" | "services" | "truck";
+}
+
+/** Zapytanie Overpass: MOP-y i parkingi dla ciężarówek w promieniu jak dla stacji. */
+export function parkingsQuery(p: { lat: number; lon: number }): string {
+  const around = `(around:${STATIONS.radiusM},${p.lat},${p.lon})`;
+  return `[out:json][timeout:20];(nwr["highway"~"^(rest_area|services)$"]${around};nwr["amenity"="parking"]["hgv"~"^(yes|designated)$"]${around};);out center tags 300;`;
+}
+
+export function parseParkings(json: unknown): Parking[] {
+  const elements = (json as { elements?: unknown[] } | null)?.elements;
+  if (!Array.isArray(elements)) return [];
+  const out: Parking[] = [];
+  for (const raw of elements) {
+    const e = raw as { type?: string; id?: number; lat?: number; lon?: number; center?: { lat: number; lon: number }; tags?: Record<string, string> };
+    const lat = e.lat ?? e.center?.lat;
+    const lon = e.lon ?? e.center?.lon;
+    const tags = e.tags ?? {};
+    if (typeof lat !== "number" || typeof lon !== "number" || tags.hgv === "no" || tags.access === "private") continue;
+    const kind = tags.highway === "services" ? "services" : tags.highway === "rest_area" ? "mop" : "truck";
+    out.push({ id: `${e.type}/${e.id}`, lat, lon, kind, name: tags.name || (kind === "truck" ? "Parking TIR" : "MOP") });
+  }
+  return out;
+}
+
+/** Najbliższe miejsce — gdy znamy kierunek jazdy, najpierw spośród tych przed nami. */
+export function nearestStation<T extends { lat: number; lon: number } = Station>(stations: T[], pos: { lat: number; lon: number }, heading: number | null): NearestStation<T> | undefined {
+  let best: NearestStation<T> | undefined;
+  let bestAhead: NearestStation<T> | undefined;
   for (const s of stations) {
     const km = distanceM(pos, s) / 1000;
     const ahead = heading === null ? null : angleDiff(bearingDeg(pos, s), heading) <= STATIONS.aheadDeg;

@@ -44,3 +44,32 @@ export function reconstruct(shiftStart: number, activities: Activity[]): Reconst
   }
   return { drivenTodayMin: driven, sinceBreakMin: cont, splitBreakTaken: split, end: t };
 }
+
+/** Aktywność z godzinami (ms) — jak na wydruku z tachografu. */
+export interface TimedActivity {
+  kind: ActivityKind;
+  from: number;
+  to: number;
+}
+
+/**
+ * Odtworzenie z godzinami od–do. Aktywności sortujemy po początku; czas niewpisany (luki między nimi i od początku
+ * dnia do pierwszej) liczymy jako postój, nakładające się fragmenty — tylko raz.
+ */
+export function reconstructTimed(shiftStart: number, items: TimedActivity[]): Reconstructed & { gapMin: number } {
+  const list: Activity[] = [];
+  let t = shiftStart;
+  let gapMin = 0;
+  for (const a of [...items].sort((x, y) => x.from - y.from)) {
+    const from = Math.max(a.from, t);
+    if (a.to <= from) continue;
+    if (from > t) {
+      const gap = (from - t) / 60_000;
+      gapMin += gap;
+      list.push({ kind: "break", minutes: gap });
+    }
+    list.push({ kind: a.kind, minutes: (a.to - from) / 60_000 });
+    t = a.to;
+  }
+  return { ...reconstruct(shiftStart, list), gapMin };
+}

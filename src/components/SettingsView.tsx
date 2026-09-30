@@ -1,97 +1,211 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { AdminUser, api, ApiError, User } from "../api";
 import { DEFAULT_SPEEDS, ROAD_LABELS, ROAD_TYPES } from "../core/route";
 import { SERVICE, ServiceInfo, serviceStatus } from "../core/service";
-import { fromLocalInput, toLocalInput } from "../format";
+import { fmtHm, fromLocalInput, toLocalInput } from "../format";
 import { AppState, floorMinute, Settings } from "../state";
-import { NumberField, OptionalNumberField, Toggle } from "./fields";
+import { SyncStatus } from "../sync";
+import { DurationField, NumberField, OptionalNumberField, Toggle } from "./fields";
+import { askNotifications, notificationsState } from "./Reminders";
+import { EXTENDED_WORK_MIN, WorkSettings } from "../core/workday";
+import { MUSIC_APPS, MusicApp } from "../core/apps";
+import { DEFAULT_HUD_ITEMS, HUD_ITEMS, HUD_STYLES, HudItems } from "../hudConfig";
+import { floatingSupported } from "../floating";
+import { DEFAULT_VEHICLE, NavAccess, Vehicle } from "../nav";
+import { MapDataSection } from "./MapConsent";
+import { AdminMap } from "./AdminMap";
+import { REPORT_KINDS } from "../collect";
 
 interface Props {
+  navAccess: NavAccess;
+  /** Kategoria otwarta od razu (np. z karty nawigacji w Trasie). */
+  initialCategory?: SettingsCategory | null;
   state: AppState;
   now: number;
   onSettings: (s: Settings) => void;
   onPlanTime: (t: number | null) => void;
   onReset: () => void;
+  account: AccountProps;
 }
 
-export function SettingsView({ state, now, onSettings, onPlanTime, onReset }: Props) {
+interface AccountProps {
+  user: User | null;
+  token: string | null;
+  onConsent: (on: boolean) => void;
+  sync: SyncStatus;
+  onLogin: () => void;
+  onLogout: () => Promise<void>;
+  onSyncNow: () => Promise<void>;
+  onDelete: (password: string) => Promise<void>;
+}
+
+export type SettingsCategory = "account" | "planning" | "work" | "service" | "vehicle" | "gps" | "hud" | "apps" | "data" | "admin";
+type Category = SettingsCategory;
+
+export function SettingsView({ initialCategory, navAccess, state, now, onSettings, onPlanTime, onReset, account }: Props) {
   const { settings, driver } = state;
   const set = (patch: Partial<Settings>) => onSettings({ ...settings, ...patch });
   const [confirmReset, setConfirmReset] = useState(false);
+  const [cat, setCat] = useState<Category | null>(initialCategory ?? null);
+  const open = (c: Category | null) => {
+    setCat(c);
+    window.scrollTo({ top: 0 });
+  };
+
+  const categories: { id: Category; label: string; sub: string; icon: string }[] = [
+    { id: "account", label: "Konto", sub: account.user ? `${account.user.email}${account.user.premium ? " · Premium" : ""}` : "Bez konta — dane tylko w tym telefonie", icon: "M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8ZM4 21a8 8 0 0 1 16 0" },
+    { id: "planning", label: "Planowanie", sub: "Wydłużenia, godzina planowania, prędkości", icon: "M4 12h4l3-8 4 16 3-8h2" },
+    { id: "work", label: "Czas pracy", sub: `Limit ${fmtHm(settings.work.limitMin)} · przypomnienia ${settings.work.remind ? "włączone" : "wyłączone"}`, icon: "M12 7v5l3 2M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18Z" },
+    { id: "service", label: "Serwis pojazdu", sub: "Termin i kilometry do przeglądu", icon: "M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.8-3.8a6 6 0 0 1-7.9 7.9l-6.9 6.9a2.1 2.1 0 0 1-3-3l6.9-6.9a6 6 0 0 1 7.9-7.9l-3.8 3.8Z" },
+    { id: "vehicle", label: "Pojazd i nawigacja", sub: navAccess === "premium" ? `Nawigacja włączona · ${fmtT(settings.vehicle.weightKg)} t · ${String(settings.vehicle.heightM).replace(".", ",")} m` : "Dane pojazdu · nawigacja dla ciężarówek (beta)", icon: "M2 6h12v10H2zM14 9h4l3 3.5V16h-7M6.5 19a1.8 1.8 0 1 0 0-3.6 1.8 1.8 0 0 0 0 3.6ZM17.5 19a1.8 1.8 0 1 0 0-3.6 1.8 1.8 0 0 0 0 3.6Z" },
+    { id: "gps", label: "GPS", sub: settings.autoStop ? "Postój włącza się sam" : "Postój ręcznie", icon: "M12 21s-7-6.2-7-11a7 7 0 0 1 14 0c0 4.8-7 11-7 11ZM12 12.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Z" },
+    { id: "hud", label: "HUD", sub: `Styl: ${HUD_STYLES.find((h) => h.id === settings.hudStyle)!.label.toLowerCase()} · elementy, okienko`, icon: "M3 5h18v14H3zM7 15h4M7 11h10" },
+    { id: "apps", label: "Muzyka", sub: MUSIC_APPS.find((a) => a.id === settings.musicApp)!.label, icon: "M9 18V5l11-2v13M9 18a3 3 0 1 1-6 0 3 3 0 0 1 6 0ZM20 16a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z" },
+    { id: "data", label: "Dane i prywatność", sub: "Co wysyłamy, czyszczenie danych", icon: "M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6l8-3Z" },
+    ...(account.user?.admin ? [{ id: "admin" as const, label: "Administracja", sub: "Premium, limity TomTom, dane do mapy", icon: "M12 2l3 6 6 .9-4.5 4.3 1 6.3L12 16.5 6.5 19.5l1-6.3L3 8.9 9 8l3-6Z" }] : []),
+  ];
+
+  if (cat === null) {
+    return (
+      <nav className="settings-cats" aria-label="Kategorie ustawień">
+        {categories.map((c) => (
+          <button key={c.id} className="settings-cat" onClick={() => open(c.id)}>
+            <svg viewBox="0 0 24 24" aria-hidden><path d={c.icon} /></svg>
+            <span>
+              <b>{c.label}</b>
+              <small>{c.sub}</small>
+            </span>
+            <i aria-hidden>›</i>
+          </button>
+        ))}
+      </nav>
+    );
+  }
 
   return (
     <>
-      <section className="card">
-        <div className="eyebrow">Planowanie</div>
-        <h2>Co może użyć silnik</h2>
-        <Toggle
-          checked={settings.allowExtension}
-          disabled={driver.extensionsLeft <= 0}
-          onChange={(allowExtension) => set({ allowExtension })}
-          label="Wydłużenie jazdy do 10 h"
-          hint={driver.extensionsLeft > 0 ? `Zostało w tym tygodniu: ${driver.extensionsLeft}` : "Wykorzystane w tym tygodniu"}
-        />
-        <Toggle
-          checked={settings.allowReducedRest}
-          disabled={driver.reducedRestsLeft <= 0}
-          onChange={(allowReducedRest) => set({ allowReducedRest })}
-          label="Skrócony odpoczynek 9 h po drodze"
-          hint={driver.reducedRestsLeft > 0 ? `Zostało: ${driver.reducedRestsLeft}` : "Wykorzystane do odpoczynku tygodniowego"}
-        />
-        <div className="form">
-          <NumberField label="Szukaj parkingu z wyprzedzeniem" value={settings.parkingBufferMin} unit="min" min={0} max={240} onChange={(parkingBufferMin) => set({ parkingBufferMin })} wide />
-        </div>
-      </section>
+      <button className="settings-back" onClick={() => open(null)}>‹ Ustawienia</button>
+      <h1 className="settings-title">{categories.find((c) => c.id === cat)!.label}</h1>
 
+      {cat === "account" && <AccountSection {...account} />}
+
+      {cat === "planning" && (
+        <>
       <section className="card">
-        <div className="eyebrow">Godzina planowania</div>
-        <h2>{state.planTime === null ? "Liczę od teraz" : "Planuję na inną godzinę"}</h2>
+            <div className="eyebrow">Planowanie</div>
+            <h2>Co może użyć silnik</h2>
+            <Toggle
+              checked={settings.allowExtension}
+              disabled={driver.extensionsLeft <= 0}
+              onChange={(allowExtension) => set({ allowExtension })}
+              label="Wydłużenie jazdy do 10 h"
+              hint={driver.extensionsLeft > 0 ? `Zostało w tym tygodniu: ${driver.extensionsLeft}` : "Wykorzystane w tym tygodniu"}
+            />
+            <Toggle
+              checked={settings.allowReducedRest}
+              disabled={driver.reducedRestsLeft <= 0}
+              onChange={(allowReducedRest) => set({ allowReducedRest })}
+              label="Skrócony odpoczynek 9 h po drodze"
+              hint={driver.reducedRestsLeft > 0 ? `Zostało: ${driver.reducedRestsLeft}` : "Wykorzystane do odpoczynku tygodniowego"}
+            />
+            <div className="form">
+              <NumberField label="Szukaj parkingu z wyprzedzeniem" value={settings.parkingBufferMin} unit="min" min={0} max={240} onChange={(parkingBufferMin) => set({ parkingBufferMin })} wide />
+            </div>
+          </section>
+
+          <section className="card">
+            <div className="eyebrow">Godzina planowania</div>
+            <h2>{state.planTime === null ? "Liczę od teraz" : "Planuję na inną godzinę"}</h2>
+            <Toggle
+              checked={state.planTime !== null}
+              onChange={(v) => onPlanTime(v ? floorMinute(now) : null)}
+              label="Ustaw inną godzinę"
+              hint="Np. żeby sprawdzić plan na jutrzejszy wyjazd."
+            />
+            {state.planTime !== null && (
+              <label className="field">
+                <span className="field-label">Planuj od</span>
+                <input type="datetime-local" value={toLocalInput(state.planTime)} onChange={(e) => { const t = fromLocalInput(e.target.value); if (t) onPlanTime(t); }} />
+              </label>
+            )}
+          </section>
+
+          <section className="card">
+            <div className="section-head static">
+              <span>
+                <div className="eyebrow">Prędkości</div>
+                <h2>Średnie na typ drogi</h2>
+              </span>
+              <button className="ghost" onClick={() => set({ speeds: { ...DEFAULT_SPEEDS } })}>Domyślne</button>
+            </div>
+            <p className="muted">Realna średnia Twojego zestawu z uwzględnieniem ruchu — nie limit prędkości.</p>
+            <div className="form">
+              {ROAD_TYPES.map((t) => (
+                <NumberField key={t} label={ROAD_LABELS[t]} value={settings.speeds[t]} unit="km/h" min={5} max={90} onChange={(v) => set({ speeds: { ...settings.speeds, [t]: v } })} />
+              ))}
+            </div>
+          </section>
+        </>
+      )}
+
+      {cat === "service" && <ServiceSection state={state} now={now} onChange={(service) => set({ service })} />}
+
+      {cat === "work" && <WorkSection w={settings.work} reducedRestsLeft={driver.reducedRestsLeft} onChange={(work) => set({ work })} />}
+
+      {cat === "gps" && (
+      <section className="card">
+        <div className="eyebrow">GPS</div>
         <Toggle
-          checked={state.planTime !== null}
-          onChange={(v) => onPlanTime(v ? floorMinute(now) : null)}
-          label="Ustaw inną godzinę"
-          hint="Np. żeby sprawdzić plan na jutrzejszy wyjazd."
+          checked={settings.autoStop}
+          onChange={(autoStop) => set({ autoStop })}
+          label="Postój włącza się sam"
+          hint="Po 5 s jazdy 0–5 km/h RoadPilot zaczyna odliczać przerwę od chwili zatrzymania, a po ruszeniu ją kończy. Działa przy włączonym GPS."
         />
-        {state.planTime !== null && (
+      </section>
+      )}
+
+      {cat === "hud" && <HudSection settings={settings} onChange={set} />}
+
+      {cat === "vehicle" && <VehicleSection settings={settings} navAccess={navAccess} onChange={set} />}
+
+      {cat === "admin" && account.user?.admin && account.token && (
+        <>
+          <AdminStatsCard token={account.token} />
+          <AdminMap token={account.token} />
+          <AdminSection token={account.token} me={account.user.id} />
+        </>
+      )}
+
+      {cat === "apps" && (
+        <section className="card">
+          <div className="eyebrow">Skróty w HUD</div>
+        <div className="form">
           <label className="field">
-            <span className="field-label">Planuj od</span>
-            <input type="datetime-local" value={toLocalInput(state.planTime)} onChange={(e) => { const t = fromLocalInput(e.target.value); if (t) onPlanTime(t); }} />
+            <span className="field-label">Muzyka</span>
+            <select value={settings.musicApp} onChange={(e) => set({ musicApp: e.target.value as MusicApp })}>
+              {MUSIC_APPS.map((a) => <option key={a.id} value={a.id}>{a.label}</option>)}
+            </select>
           </label>
-        )}
-      </section>
-
-      <section className="card">
-        <div className="section-head static">
-          <span>
-            <div className="eyebrow">Prędkości</div>
-            <h2>Średnie na typ drogi</h2>
-          </span>
-          <button className="ghost" onClick={() => set({ speeds: { ...DEFAULT_SPEEDS } })}>Domyślne</button>
         </div>
-        <p className="muted">Realna średnia Twojego zestawu z uwzględnieniem ruchu — nie limit prędkości.</p>
-        <div className="form">
-          {ROAD_TYPES.map((t) => (
-            <NumberField key={t} label={ROAD_LABELS[t]} value={settings.speeds[t]} unit="km/h" min={5} max={90} onChange={(v) => set({ speeds: { ...settings.speeds, [t]: v } })} />
-          ))}
-        </div>
-      </section>
+        <p className="muted small">
+          Przycisk w HUD otwiera wybraną aplikację muzyki. RoadPilot nie steruje muzyką; aplikacja musi być zainstalowana
+          (inaczej otworzy się jej strona). Nawigacja jest wbudowana w RoadPilot (Premium).
+        </p>
+        </section>
+      )}
 
-      <ServiceSection state={state} now={now} onChange={(service) => set({ service })} />
+      {cat === "data" && <MapDataSection token={account.token} consent={!!account.user?.dataConsent} onChange={account.onConsent} />}
 
-      <section className="card">
-        <div className="eyebrow">Tryb HUD</div>
-        <Toggle
-          checked={settings.hudMirror}
-          onChange={(hudMirror) => set({ hudMirror })}
-          label="Odbicie na szybę"
-          hint="Lustrzany obraz — połóż telefon na desce, żeby odbijał się w przedniej szybie."
-        />
-      </section>
-
+      {cat === "data" && (
       <section className="card">
         <div className="eyebrow">Dane</div>
         <p className="muted">
-          Wszystko jest zapisane tylko w tym urządzeniu, bez kont i własnego serwera. W trybie HUD przybliżona pozycja
-          (z dokładnością ~1 km) trafia do OpenStreetMap (Overpass) i Open-Meteo — po najbliższe stacje i pogodę.
+          {account.user
+            ? "Dane są w tym urządzeniu i na Twoim koncie RoadPilot (serwer RoadPilot, baza MariaDB) — trasa, stan tachografu, ustawienia i historia z GPS. Bieżąca pozycja GPS nie jest wysyłana."
+            : "Bez konta wszystko jest zapisane tylko w tym urządzeniu."}{" "}
+          W trybie HUD przybliżona pozycja (z dokładnością ~1 km) trafia do OpenStreetMap (Overpass) i Open-Meteo — po
+          najbliższe MOP-y i parkingi, nazwy dróg i miejscowości oraz pogodę. Przy włączonej nawigacji wpisywany cel,
+          punkt startu (pozycja GPS) i dane pojazdu idą przez serwer RoadPilot do TomTom; trasa zostaje tylko w telefonie. Kafelki mapy w HUD pobiera serwer RoadPilot — TomTom nie widzi Twojego telefonu.
         </p>
         {confirmReset ? (
           <div className="row-buttons">
@@ -102,8 +216,421 @@ export function SettingsView({ state, now, onSettings, onPlanTime, onReset }: Pr
           <button className="ghost" onClick={() => setConfirmReset(true)}>Wyczyść wszystkie dane</button>
         )}
       </section>
+      )}
     </>
   );
+}
+
+const fmtT = (kg: number) => String(Math.round(kg / 100) / 10).replace(".", ",");
+
+const ADR_OPTIONS: { id: Vehicle["adr"]; label: string }[] = [
+  { id: "none", label: "Brak (bez ADR)" },
+  { id: "B", label: "B" },
+  { id: "C", label: "C" },
+  { id: "D", label: "D" },
+  { id: "E", label: "E" },
+];
+
+/** Dane pojazdu do nawigacji dla ciężarówek — nawigacja jest zawsze włączona dla Premium. */
+function VehicleSection({ settings, navAccess, onChange }: { settings: Settings; navAccess: NavAccess; onChange: (patch: Partial<Settings>) => void }) {
+  const v = settings.vehicle;
+  const setV = (patch: Partial<Vehicle>) => onChange({ vehicle: { ...v, ...patch } });
+  return (
+    <>
+      <section className="card">
+        <div className="eyebrow">Nawigacja · Premium · beta</div>
+        <h3>Nawigacja RoadPilot dla ciężarówek{navAccess === "premium" ? " — włączona" : ""}</h3>
+        <p className="muted small">
+          {navAccess === "premium"
+            ? "W zakładce Trasa wyszukasz cel, a trasa uwzględni wymiary, masę i ADR; w HUD zobaczysz manewry i pasy. Cel, punkt startu i dane pojazdu idą przez serwer RoadPilot do TomTom."
+            : navAccess === "guest"
+              ? "Dostępne w RoadPilot Premium — zaloguj się na konto."
+              : "Dostępne w RoadPilot Premium — wkrótce do kupienia."}
+        </p>
+      </section>
+      {navAccess === "premium" && (
+        <section className="card">
+          <div className="eyebrow">Silnik tras</div>
+          <div className="hud-style-pick engines">
+            {([
+              ["tomtom", "TomTom", "Pełne dane w Europie, korki na żywo, pasy ruchu i ograniczenia prędkości."],
+              ["roadpilot", "RoadPilot (beta)", "Własny silnik na OpenStreetMap — tylko Polska, bez korków i pasów, bez limitów TomTom."],
+            ] as const).map(([id, label, hint]) => (
+              <button key={id} className={`hud-style-opt ${settings.navEngine === id ? "active" : ""}`} aria-pressed={settings.navEngine === id} onClick={() => onChange({ navEngine: id })}>
+                <strong>{label}</strong>
+                <small>{hint}</small>
+              </button>
+            ))}
+          </div>
+          <p className="muted small">Gdy limit TomTom się wyczerpie, trasy w Polsce liczy automatycznie silnik RoadPilot.</p>
+        </section>
+      )}
+      <section className="card">
+        <div className="section-head static">
+          <span>
+            <div className="eyebrow">Pojazd</div>
+            <h2>Wymiary i masa zestawu</h2>
+          </span>
+          <button className="ghost" onClick={() => onChange({ vehicle: { ...DEFAULT_VEHICLE } })}>Domyślne</button>
+        </div>
+        <p className="muted small">Cały zestaw (ciągnik z naczepą). Domyślnie typowy zestaw 40 t w UE.</p>
+        <div className="form">
+          <NumberField label="Wysokość" value={v.heightM} unit="m" min={1} max={5} step={0.05} onChange={(heightM) => setV({ heightM })} />
+          <NumberField label="Szerokość" value={v.widthM} unit="m" min={1} max={3.5} step={0.05} onChange={(widthM) => setV({ widthM })} />
+          <NumberField label="Długość" value={v.lengthM} unit="m" min={2} max={30} step={0.1} onChange={(lengthM) => setV({ lengthM })} />
+          <NumberField label="Masa całkowita" value={v.weightKg / 1000} unit="t" min={1} max={80} step={0.5} onChange={(t) => setV({ weightKg: Math.round(t * 1000) })} />
+          <NumberField label="Nacisk na oś" value={v.axleWeightKg / 1000} unit="t" min={1} max={20} step={0.5} onChange={(t) => setV({ axleWeightKg: Math.round(t * 1000) })} />
+          <NumberField label="Liczba osi" value={v.axles} min={2} max={12} onChange={(axles) => setV({ axles: Math.round(axles) })} />
+          <NumberField label="Prędkość maks." value={v.maxKmh} unit="km/h" min={30} max={130} onChange={(maxKmh) => setV({ maxKmh: Math.round(maxKmh) })} />
+          <label className="field">
+            <span className="field-label">ADR — kategoria tunelowa</span>
+            <select value={v.adr} onChange={(e) => setV({ adr: e.target.value as Vehicle["adr"] })}>
+              {ADR_OPTIONS.map((o) => <option key={o.id} value={o.id}>{o.label}</option>)}
+            </select>
+          </label>
+        </div>
+      </section>
+    </>
+  );
+}
+
+/** Styl HUD i widoczne elementy — osobno dla stylu zwykłego i minimalistycznego. */
+function HudSection({ settings, onChange }: { settings: Settings; onChange: (patch: Partial<Settings>) => void }) {
+  const style = settings.hudStyle;
+  const items = settings.hudItems[style];
+  const setItems = (next: HudItems) => onChange({ hudItems: { ...settings.hudItems, [style]: next } });
+  const pip = floatingSupported();
+  return (
+    <>
+      <section className="card">
+        <div className="eyebrow">Styl</div>
+        <div className="hud-style-pick">
+          {HUD_STYLES.map((h) => (
+            <button key={h.id} className={`hud-style-opt ${style === h.id ? "active" : ""}`} aria-pressed={style === h.id} onClick={() => onChange({ hudStyle: h.id })}>
+              <span className={`hud-style-preview ${h.id}`} aria-hidden>
+                <b>78</b>
+                {h.id === "full" ? <><i /><i /><i /></> : h.id === "nav" ? (
+                  <svg viewBox="0 0 100 34" aria-hidden><path d="M50 34 Q52 18 70 4" stroke="#3d8bff" strokeWidth="6" fill="none" strokeLinecap="round" /><path d="M50 22 l6 12 l-6 -3 l-6 3 Z" fill="#44f07c" /></svg>
+                ) : <em>213 km · 15:12 · 1 h 52</em>}
+              </span>
+              <strong>{h.label}</strong>
+              <small>{h.hint}</small>
+            </button>
+          ))}
+        </div>
+        <p className="muted small">Styl zmienisz też w HUD: menu ⋮ → „Styl”.</p>
+      </section>
+
+      <section className="card">
+        <div className="section-head static">
+          <span>
+            <div className="eyebrow">Co pokazywać</div>
+            <h2>Styl {HUD_STYLES.find((h) => h.id === style)!.label.toLowerCase()}</h2>
+          </span>
+          <button className="ghost" onClick={() => setItems({ ...DEFAULT_HUD_ITEMS[style] })}>Domyślne</button>
+        </div>
+        <p className="muted small">Prędkość jest zawsze widoczna. Każdy styl ma własny zestaw.</p>
+        <div className="hud-items">
+          {HUD_ITEMS.map((i) => (
+            <label key={i.id} className={`hud-item ${items[i.id] ? "on" : ""}`}>
+              <input type="checkbox" checked={items[i.id]} onChange={(e) => setItems({ ...items, [i.id]: e.target.checked })} />
+              <span>
+                {i.label}
+                {i.hint && <small>{i.hint}</small>}
+              </span>
+            </label>
+          ))}
+        </div>
+      </section>
+
+      <section className="card">
+        <div className="eyebrow">Wygląd</div>
+        <Toggle
+          checked={settings.hudMirror}
+          onChange={(hudMirror) => onChange({ hudMirror })}
+          label="Odbicie na szybę"
+          hint="Lustrzany obraz — połóż telefon na desce, żeby odbijał się w przedniej szybie."
+        />
+        <Toggle
+          checked={settings.hudAnimation}
+          onChange={(hudAnimation) => onChange({ hudAnimation })}
+          label="Animacja drogi"
+          hint="Przerywane pasy ruchu po bokach prędkości — przesuwają się tym szybciej, im szybciej jedziesz."
+        />
+      </section>
+
+      <section className="card">
+        <div className="eyebrow">Pływające okienko</div>
+        <h2>Prędkość i przyjazd nad innymi aplikacjami</h2>
+        <p className="muted">
+          W HUD stuknij „Okienko” (albo menu ⋮ → „Pływające okienko”), potem przejdź do nawigacji. Okienko pokazuje prędkość,
+          godzinę przyjazdu i na zmianę: czas do przerwy, do odpoczynku i koniec pracy. Stuknięcie okienka wraca do RoadPilot.
+        </p>
+        <p className={`small ${pip ? "muted" : "warn-text"}`}>
+          {pip
+            ? "Eksperymentalne: gdy RoadPilot jest w tle, telefon może spowolnić lub zatrzymać odświeżanie — wtedy prędkość pokazuje „—”. Na iPhonie liczby najczęściej stają."
+            : "Ta przeglądarka nie obsługuje pływającego okienka."}
+        </p>
+      </section>
+    </>
+  );
+}
+
+function WorkSection({ w, reducedRestsLeft, onChange }: { w: WorkSettings; reducedRestsLeft: number; onChange: (w: WorkSettings) => void }) {
+  const [perm, setPerm] = useState(notificationsState);
+  const set = (patch: Partial<WorkSettings>) => onChange({ ...w, ...patch });
+  return (
+    <section className="card">
+      <div className="eyebrow">Czas pracy</div>
+      <h2>Przypomnienia o końcu dnia pracy</h2>
+      <p className="muted">Liczony od początku dnia pracy (koniec ostatniego odpoczynku). Nie zatrzymuje się w przerwach — osobno od czasu jazdy.</p>
+      <div className="form">
+        <DurationField label="Czas pracy" value={w.limitMin} maxHours={15} onChange={(limitMin) => set({ limitMin: Math.max(60, Math.min(limitMin, EXTENDED_WORK_MIN)) })} hint="domyślnie 13 h (24 h − 11 h odpoczynku)" />
+        <NumberField label="Przypomnij przed końcem" value={w.leadMin} unit="min" min={5} max={180} onChange={(leadMin) => set({ leadMin })} />
+      </div>
+      <Toggle checked={w.remind} onChange={(remind) => set({ remind })} label="Przypominaj przed końcem czasu pracy" hint={`Powiadomienie ${w.leadMin} min przed końcem i na koniec.`} />
+      <Toggle
+        checked={w.extension}
+        onChange={(extension) => set({ extension })}
+        label="Wydłużenie czasu pracy do 15 h"
+        hint={reducedRestsLeft > 0 ? `Wymaga skróconego odpoczynku 9 h (zostało: ${reducedRestsLeft}). Przypomnę też przed końcem 15 h.` : "Skrócone odpoczynki wykorzystane — wydłużenie niedostępne do odpoczynku tygodniowego."}
+      />
+      {w.remind && perm !== "granted" && (
+        perm === "unsupported" ? (
+          <p className="warn-text small">Powiadomienia wymagają HTTPS — na tym adresie są niedostępne.</p>
+        ) : perm === "denied" ? (
+          <p className="warn-text small">Powiadomienia są zablokowane — zezwól na nie w ustawieniach przeglądarki.</p>
+        ) : (
+          <button className="primary" onClick={async () => { await askNotifications(); setPerm(notificationsState()); }}>Zezwól na powiadomienia</button>
+        )
+      )}
+    </section>
+  );
+}
+
+function AccountSection({ user, sync, onLogin, onLogout, onSyncNow, onDelete }: AccountProps) {
+  const [confirmOut, setConfirmOut] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState<string | null>(null);
+
+  if (!user) {
+    return (
+      <section className="card">
+        <div className="eyebrow">Konto</div>
+        <h2>Bez konta</h2>
+        <p className="muted">Dane są tylko w tym telefonie. Z kontem zapiszesz je na serwerze i odtworzysz na innym urządzeniu.</p>
+        <button className="primary" onClick={onLogin}>Zaloguj się lub załóż konto</button>
+      </section>
+    );
+  }
+
+  const del = async () => {
+    setError(null);
+    try {
+      await onDelete(password);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Nie udało się usunąć konta.");
+    }
+  };
+
+  return (
+    <section className="card">
+      <div className="eyebrow">Konto</div>
+      <h2>{user.name || user.email}</h2>
+      {user.name && <p className="muted">{user.email}</p>}
+      <p className={`premium-line ${user.premium ? "on" : ""}`}>
+        {user.admin ? "Administrator · Premium" : user.premium ? `Premium ${premiumText(user.premiumUntil ?? null)}` : "Bez Premium — wkrótce do kupienia"}
+      </p>
+      <p className={`sync-line ${sync.kind}`}>
+        <span className="sync-dot" aria-hidden />
+        {syncText(sync)}
+        {(sync.kind === "offline" || sync.kind === "error" || sync.kind === "ok") && <button className="text-btn" onClick={() => onSyncNow()}>Synchronizuj teraz</button>}
+      </p>
+      {confirmOut ? (
+        <div className="row-buttons">
+          <button className="danger" onClick={() => { setConfirmOut(false); onLogout(); }}>Wyloguj i wyczyść telefon</button>
+          <button className="ghost" onClick={() => setConfirmOut(false)}>Anuluj</button>
+        </div>
+      ) : (
+        <button className="ghost" onClick={() => setConfirmOut(true)}>Wyloguj</button>
+      )}
+      {confirmOut && <p className="muted small">Dane zostaną na koncie, z tego telefonu znikną.</p>}
+      {deleting ? (
+        <div className="delete-account">
+          <p className="muted small">Konto i wszystkie dane na serwerze zostaną trwale usunięte. Dane w tym telefonie zostają.</p>
+          <label className="field">
+            <span className="field-label">Hasło</span>
+            <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" />
+          </label>
+          {error && <p className="auth-error">{error}</p>}
+          <div className="row-buttons">
+            <button className="danger" disabled={!password} onClick={del}>Usuń konto</button>
+            <button className="ghost" onClick={() => { setDeleting(false); setPassword(""); setError(null); }}>Anuluj</button>
+          </div>
+        </div>
+      ) : (
+        <button className="text-btn danger-text" onClick={() => setDeleting(true)}>Usuń konto</button>
+      )}
+    </section>
+  );
+}
+
+/** „bez terminu” (rok 9999) albo „do 30.10.2026”. */
+function premiumText(until: number | null) {
+  if (until === null || new Date(until).getFullYear() >= 9999) return "bez terminu";
+  return `do ${new Date(until).toLocaleDateString("pl-PL")}`;
+}
+
+/** Administracja: wyszukanie konta i nadanie / odebranie Premium. Zakup Premium jeszcze nie działa. */
+interface AdminStats {
+  period: string;
+  periodKind: "month" | "day";
+  share: number;
+  apis: { api: string; used: number; limit: number; cap: number }[];
+  points: number;
+  pointUsers: number;
+  consents: number;
+  reports: Record<string, number>;
+  osm?: Record<string, number>;
+  recent: { kind: string; lat: number; lon: number; value: number | null; note: string; at: number; email: string }[];
+}
+
+const API_LABELS: Record<string, string> = { search: "TomTom — wyszukiwanie", route: "TomTom — trasy", tiles: "TomTom — mapa (kafelki)" };
+
+/** Zużycie limitów TomTom (próg 80%) i dane zebrane do mapy. */
+function AdminStatsCard({ token }: { token: string }) {
+  const [stats, setStats] = useState<AdminStats | null>(null);
+  useEffect(() => {
+    api<AdminStats>("GET", "/admin/stats", undefined, token).then(setStats).catch(() => {});
+  }, [token]);
+  if (!stats) return null;
+  const kindLabel = (k: string) => REPORT_KINDS.find((x) => x.id === k)?.label ?? k;
+  return (
+    <>
+      <section className="card">
+        <div className="eyebrow">Limity TomTom · {stats.periodKind === "day" ? `dzień ${stats.period}` : `miesiąc ${stats.period}`}</div>
+        <p className="muted small">Serwer przestaje pytać TomTom przy {Math.round(stats.share * 100)}% limitu — nawigacja pokaże wtedy komunikat do końca okresu.</p>
+        <div className="admin-usage">
+          {stats.apis.map((a) => (
+            <div key={a.api}>
+              <span>{API_LABELS[a.api] ?? a.api}: <b>{a.used}</b> / {a.cap} (limit {a.limit})</span>
+              <div className={`hud-bar ${a.used >= a.cap ? "bad" : a.used >= a.cap * 0.8 ? "warn" : ""}`}><span style={{ width: `${Math.min(100, (a.used / a.cap) * 100)}%` }} /></div>
+            </div>
+          ))}
+        </div>
+      </section>
+      <section className="card">
+        <div className="eyebrow">Mapa RoadPilot</div>
+        <p className="muted small">
+          Zgody: <b>{stats.consents}</b> · punkty śladu: <b>{stats.points.toLocaleString("pl-PL")}</b> (od {stats.pointUsers} kierowców) · zgłoszenia:{" "}
+          <b>{Object.values(stats.reports).reduce((a, b) => a + b, 0)}</b>
+        </p>
+        {stats.osm && (
+          <p className="muted small">
+            Ograniczenia z OpenStreetMap (Polska): <b>{Object.values(stats.osm).reduce((a, b) => a + b, 0).toLocaleString("pl-PL")}</b> — wysokość {stats.osm.height ?? 0}, masa {stats.osm.weight ?? 0},
+            nacisk osi {stats.osm.axle ?? 0}, zakazy TIR {stats.osm.hgv ?? 0}, prędkość TIR {stats.osm.speed_hgv ?? 0}.
+          </p>
+        )}
+        {stats.recent.length > 0 && (
+          <ul className="admin-reports">
+            {stats.recent.map((r, i) => (
+              <li key={i}>
+                <b>{kindLabel(r.kind)}</b>{r.value !== null ? ` ${String(r.value).replace(".", ",")}` : ""} · {r.lat.toFixed(4)}, {r.lon.toFixed(4)} · {new Date(r.at).toLocaleString("pl-PL")} · {r.email}
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+    </>
+  );
+}
+
+function AdminSection({ token, me }: { token: string; me: number }) {
+  const [q, setQ] = useState("");
+  const [users, setUsers] = useState<AdminUser[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState<number | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    const id = setTimeout(() => {
+      api<{ users: AdminUser[] }>("GET", `/admin/users?q=${encodeURIComponent(q.trim())}`, undefined, token)
+        .then((r) => alive && (setUsers(r.users), setError(null)))
+        .catch((e) => alive && setError(e instanceof ApiError ? e.message : "Nie udało się pobrać kont."));
+    }, 300);
+    return () => {
+      alive = false;
+      clearTimeout(id);
+    };
+  }, [q, token]);
+
+  const grant = async (u: AdminUser, days: number | null) => {
+    setBusy(u.id);
+    try {
+      const r = await api<{ user: AdminUser }>("POST", "/admin/premium", { userId: u.id, days }, token);
+      setUsers((list) => list?.map((x) => (x.id === u.id ? r.user : x)) ?? null);
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : "Nie udało się zmienić Premium.");
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  return (
+    <section className="card">
+      <div className="eyebrow">Premium</div>
+      <h2>Nadaj dostęp</h2>
+      <p className="muted small">Premium odblokowuje nawigację dla ciężarówek. Zmiana działa od razu — kierowca zobaczy ją po powrocie do aplikacji.</p>
+      <label className="field wide">
+        <span className="field-label">Szukaj konta (e-mail lub imię)</span>
+        <input type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="np. jan@firma.pl" autoCapitalize="off" />
+      </label>
+      {error && <p className="auth-error">{error}</p>}
+      {users === null ? (
+        <p className="muted small">Wczytuję…</p>
+      ) : users.length === 0 ? (
+        <p className="muted small">Brak kont.</p>
+      ) : (
+        <ul className="admin-users">
+          {users.map((u) => (
+            <li key={u.id}>
+              <div>
+                <strong>{u.name || u.email}</strong>
+                <small>{u.name ? u.email : ""} · od {new Date(u.createdAt).toLocaleDateString("pl-PL")}</small>
+                <span className={`premium-line ${u.premium ? "on" : ""}`}>
+                  {u.admin ? "Administrator · Premium" : u.premium ? `Premium ${premiumText(u.premiumUntil ?? null)}` : "Bez Premium"}
+                </span>
+              </div>
+              {!u.admin && u.id !== me && (
+                <div className="admin-actions">
+                  <button className="ghost" disabled={busy === u.id} onClick={() => grant(u, 30)}>30 dni</button>
+                  <button className="ghost" disabled={busy === u.id} onClick={() => grant(u, 365)}>Rok</button>
+                  <button className="ghost" disabled={busy === u.id} onClick={() => grant(u, null)}>Bez terminu</button>
+                  {u.premium && <button className="ghost danger-text" disabled={busy === u.id} onClick={() => confirm(`Odebrać Premium kontu ${u.email}?`) && grant(u, 0)}>Odbierz</button>}
+                </div>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
+
+function syncText(s: SyncStatus) {
+  switch (s.kind) {
+    case "syncing":
+      return "Synchronizuję…";
+    case "ok":
+      return `Zsynchronizowano ${new Date(s.at).toLocaleTimeString("pl-PL", { hour: "2-digit", minute: "2-digit" })}`;
+    case "offline":
+      return "Brak sieci — zmiany wyślę, gdy wróci zasięg";
+    case "error":
+      return s.message;
+    default:
+      return "Synchronizacja wyłączona";
+  }
 }
 
 function ServiceSection({ state, now, onChange }: { state: AppState; now: number; onChange: (s: ServiceInfo) => void }) {
@@ -115,7 +642,7 @@ function ServiceSection({ state, now, onChange }: { state: AppState; now: number
     <section className="card">
       <div className="eyebrow">Serwis</div>
       <h2>Przegląd pojazdu</h2>
-      <p className="muted">Pokazywany w trybie HUD. Ostrzeżenie na {SERVICE.soonDays} dni lub {SERVICE.soonKm} km przed serwisem.</p>
+      <p className="muted">Ostrzeżenie w Planie na {SERVICE.soonDays} dni lub {SERVICE.soonKm} km przed serwisem.</p>
       <div className="form">
         <label className="field">
           <span className="field-label">Data serwisu</span>

@@ -1,0 +1,19 @@
+# RoadPilot na hostingu Apache (np. simply.com, folder /roadpilot/). Nginx na VPS ten plik pomija.
+DirectoryIndex index.html
+AddType application/manifest+json .webmanifest
+
+<IfModule mod_headers.c>
+  # Strona, service worker i manifest — zawsze świeże; pliki z hashem w nazwie — na zawsze w cache.
+  <FilesMatch "^(index\.html|sw\.js|manifest\.webmanifest)$">
+    Header set Cache-Control "no-cache"
+  </FilesMatch>
+  <If "%{REQUEST_URI} =~ m#/assets/#">
+    Header set Cache-Control "public, max-age=31536000, immutable"
+  </If>
+  Header always set X-Content-Type-Options "nosniff"
+</IfModule>
+
+# Po włączeniu certyfikatu dla domeny (panel simply.com) można wymusić HTTPS — odkomentuj:
+# RewriteEngine On
+# RewriteCond %{HTTPS} !=on
+# RewriteRule ^ https://%{HTTP_HOST}%{REQUEST_URI} [L,R=301]

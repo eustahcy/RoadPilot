@@ -5,6 +5,8 @@ import { Route } from "../core/route";
 import { Comparison, DriverStatus, explain, Scenario, ScenarioId, WhatIf } from "../core/scenarios";
 import { fmtClock, fmtDuration, fmtKm } from "../format";
 import { AppState } from "../state";
+import { WorkStatus } from "../core/workday";
+import { ServiceStatus } from "../core/service";
 import { OngoingCard, Reminders } from "./Reminders";
 import { StopCard, StopControlsProps } from "./StopControls";
 import { eventLabel, Timeline } from "./Timeline";
@@ -24,6 +26,10 @@ interface Props {
   onChoose: (id: ScenarioId | null) => void;
   ongoing: boolean;
   onOngoing: (on: boolean) => void;
+  /** Czas pracy od początku dnia (nie zatrzymuje się w przerwach); undefined po „Zakończ dzień”. */
+  work?: WorkStatus;
+  /** Serwis pojazdu — karta tylko, gdy termin blisko albo minął. */
+  service: ServiceStatus;
   /** Prędkość z GPS, z której liczony jest przyjazd (km/h). */
   liveKmh?: number;
   gps: ReactNode;
@@ -33,7 +39,7 @@ interface Props {
   goTo: (tab: "route" | "driver") => void;
 }
 
-export function PlanView({ state, route, comparison, hints, status, planNow, deadline, chosen, activePlan: active, onChoose, ongoing, onOngoing, liveKmh, gps, stopControls, onOption, onOptions, goTo }: Props) {
+export function PlanView({ state, route, comparison, hints, status, planNow, deadline, chosen, activePlan: active, onChoose, ongoing, onOngoing, work, service, liveKmh, gps, stopControls, onOption, onOptions, goTo }: Props) {
   const best = comparison.scenarios.find((s) => s.id === comparison.bestId);
   const { trip, settings } = state;
   const parking = active ? parkingHint(active, route, settings.parkingBufferMin) : undefined;
@@ -79,6 +85,18 @@ export function PlanView({ state, route, comparison, hints, status, planNow, dea
 
       <StopCard {...stopControls} />
 
+      {(service.level === "soon" || service.level === "overdue") && (
+        <section className={`card service-note ${service.level}`}>
+          <div className="eyebrow">{service.level === "overdue" ? "Serwis po terminie" : "Zbliża się serwis"}</div>
+          <p>
+            {[
+              service.kmLeft !== undefined && (service.kmLeft > 0 ? `za ${Math.round(service.kmLeft)} km` : `${Math.round(-service.kmLeft)} km po terminie`),
+              service.daysLeft !== undefined && (service.daysLeft > 1 ? `za ${service.daysLeft} dni` : service.daysLeft === 1 ? "jutro" : service.daysLeft === 0 ? "dziś" : `${-service.daysLeft} dni po terminie`),
+            ].filter(Boolean).join(" · ")}
+          </p>
+        </section>
+      )}
+
       {gps}
 
       {chosen ? (
@@ -100,7 +118,7 @@ export function PlanView({ state, route, comparison, hints, status, planNow, dea
         <div className="stats">
           <Stat label="Jazda dziś — zostało" value={fmtDuration(status.driveLeftToday)} sub={status.driveLeftTodayExtended > status.driveLeftToday ? `z wydłużeniem ${fmtDuration(status.driveLeftTodayExtended)}` : undefined} warn={status.driveLeftToday <= 30} />
           <Stat label="Do przerwy" value={fmtDuration(Math.min(status.untilBreak, status.driveLeftToday))} sub={`przerwa ${status.breakNeeded} min`} warn={status.untilBreak <= 30} />
-          <Stat label="Czas pracy — zostało" value={fmtDuration(Math.max(0, (status.restDeadline - planNow) / 60_000))} sub={`odpoczynek do ${fmtClock(status.restDeadline, planNow)}`} warn={status.restDeadline - planNow <= 60 * 60_000} />
+          <WorkStat work={work} planNow={planNow} />
           <Stat label="Tydzień — zostało" value={fmtDuration(status.weekLeft)} sub="limit 56 h / 90 h" warn={status.weekLeft <= 120} />
         </div>
       </section>
@@ -286,6 +304,22 @@ function ScenarioCard({ s, best, planNow, deadline, chosen, onChoose }: { s: Sce
         </div>
       )}
     </article>
+  );
+}
+
+function WorkStat({ work, planNow }: { work?: WorkStatus; planNow: number }) {
+  if (!work) return <Stat label="Czas pracy" value="odpoczynek" sub="dzień zakończony" />;
+  const ext = work.extendedEnd;
+  if (work.phase === "extended" && ext !== undefined) {
+    return <Stat label="Czas pracy — wydłużenie" value={fmtDuration((ext - planNow) / 60_000)} sub={`do 15 h · odpoczynek min. 9 h od ${fmtClock(ext, planNow)}`} warn />;
+  }
+  return (
+    <Stat
+      label="Czas pracy — zostało"
+      value={fmtDuration(Math.max(0, work.leftMin))}
+      sub={work.leftMin > 0 ? `koniec ${fmtClock(work.end, planNow)}${ext !== undefined ? ` · do 15 h: ${fmtClock(ext, planNow)}` : ""} · przerwy go nie zatrzymują` : "limit minął — czas na odpoczynek"}
+      warn={work.phase !== "ok"}
+    />
   );
 }
 

@@ -2,14 +2,16 @@ import { PROFILES, ProfileId, ROAD_LABELS, ROAD_TYPES, RoadType, Route, Segment,
 import { fmtDuration, fmtKm, fromLocalInput, toLocalInput } from "../format";
 import { floorMinute, Trip } from "../state";
 import { NumberField, Toggle } from "./fields";
+import { NavCard, NavProps } from "./NavCard";
 
 interface Props {
   trip: Trip;
   route: Route;
   onChange: (trip: Trip) => void;
+  nav: NavProps;
 }
 
-export function RouteView({ trip, route, onChange }: Props) {
+export function RouteView({ trip, route, onChange, nav }: Props) {
   const set = (patch: Partial<Trip>) => onChange({ ...trip, ...patch });
 
   const chooseProfile = (profile: ProfileId) => {
@@ -26,9 +28,16 @@ export function RouteView({ trip, route, onChange }: Props) {
     set({ segments, distance, doneKm: 0 });
   };
 
-  return (
+  // Trasa z nawigacji RoadPilot: kilometry i rodzaje dróg są z niej (tripFromRoute) — nic nie wpisujemy ręcznie.
+  const navRoute = nav.access === "premium" ? nav.route : null;
+
+  const manual = (
     <>
       <section className="card form">
+        <label className="field wide">
+          <span className="field-label">Start</span>
+          <input type="text" value={trip.origin} placeholder="np. Łódź" onChange={(e) => set({ origin: e.target.value })} />
+        </label>
         <label className="field wide">
           <span className="field-label">Cel podróży</span>
           <input type="text" value={trip.destination} placeholder="np. Poznań, magazyn DC2" onChange={(e) => set({ destination: e.target.value })} />
@@ -49,8 +58,6 @@ export function RouteView({ trip, route, onChange }: Props) {
           </p>
         )}
       </section>
-
-      <UnloadSection trip={trip} set={set} />
 
       <section className="card">
         <div className="eyebrow">Charakter trasy</div>
@@ -88,6 +95,40 @@ export function RouteView({ trip, route, onChange }: Props) {
 
         <SegmentBar route={route} />
       </section>
+    </>
+  );
+
+  return (
+    <>
+      <NavCard {...nav} />
+      {navRoute ? (
+        <section className="card">
+          <div className="eyebrow">Obliczenia trasy · z nawigacji</div>
+          <h2>{navRoute.to.label}</h2>
+          <div className="nav-trip">
+            <span><small>Do celu</small><b>{fmtKm(route.totalKm)}</b></span>
+            <span><small>Cała trasa</small><b>{fmtKm(navRoute.lengthKm)}</b></span>
+            <span><small>Korki teraz</small><b className={navRoute.trafficMin >= 1 ? "warn-text" : ""}>{navRoute.trafficMin >= 1 ? `+${fmtDuration(navRoute.trafficMin)}` : navRoute.engine === "roadpilot" ? "—" : "brak"}</b></span>
+          </div>
+          {trip.doneKm > 0 && (
+            <p className="field-hint">
+              GPS: przejechane {fmtKm(trip.doneKm)}. <button className="text-btn" onClick={() => set({ doneKm: 0 })}>Wyzeruj</button>
+            </p>
+          )}
+          <SegmentBar route={route} />
+          <p className="muted small">
+            Kilometry i rodzaje dróg (autostrada, ekspresowa, poza miastem, miasto) są z wyznaczonej trasy — zmienią się same
+            po nowej trasie lub wyborze alternatywy. Czas jazdy liczymy z Twoich prędkości (Ustawienia), żeby przerwy wypadały realnie.
+          </p>
+        </section>
+      ) : (
+        <>
+          {nav.access === "premium" && <p className="muted small route-hint">Wyznacz trasę powyżej — kilometry i rodzaje dróg uzupełnią się same. Bez nawigacji możesz je wpisać ręcznie:</p>}
+          {manual}
+        </>
+      )}
+
+      <UnloadSection trip={trip} set={set} />
 
       <section className="card form">
         <NumberField label="Zapas na ruch, roboty, granice" value={trip.trafficPct} unit="%" min={0} max={100} onChange={(trafficPct) => set({ trafficPct })} wide />

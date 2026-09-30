@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { DriverState } from "../core/plan";
-import { Activity, ActivityKind, reconstruct } from "../core/reconstruct";
+import { ActivityKind, reconstructTimed, TimedActivity } from "../core/reconstruct";
 import { RULES } from "../core/rules";
 import { fmtClock, fmtDuration, fromLocalInput, toLocalInput } from "../format";
 import { floorMinute } from "../state";
@@ -62,65 +62,112 @@ export function DriverView({ driver, planNow, onChange }: Props) {
 }
 
 const KIND_LABEL: Record<ActivityKind, string> = { drive: "Jazda", break: "Przerwa", work: "Inna praca" };
+const DEFAULT_MIN: Record<ActivityKind, number> = { drive: 60, break: 45, work: 30 };
+
+/** Wiersz odtwarzanego dnia — godziny jak na wydruku z tachografu („06:15”). */
+interface Row {
+  kind: ActivityKind;
+  from: string;
+  to: string;
+}
+
+const pad = (n: number) => String(n).padStart(2, "0");
+const hhmm = (t: number) => { const d = new Date(t); return `${pad(d.getHours())}:${pad(d.getMinutes())}`; };
+
+/** Godzina „HH:MM” najbliższa po `ref` (z tolerancją 6 h wstecz na drobne nakładki) — obsługuje przejście przez północ. */
+function timeAfter(ref: number, v: string): number {
+  const [h, m] = v.split(":").map(Number);
+  const d = new Date(ref);
+  d.setHours(h || 0, m || 0, 0, 0);
+  let t = d.getTime();
+  while (t < ref - 6 * 3_600_000) t += 86_400_000;
+  return t;
+}
+
+/** Wiersze → aktywności z pełnymi datami, po kolei od początku dnia. */
+function toTimed(start: number, rows: Row[]): TimedActivity[] {
+  let ref = start;
+  return rows.map((r) => {
+    const from = timeAfter(ref, r.from);
+    const to = timeAfter(from, r.to);
+    ref = to;
+    return { kind: r.kind, from, to: to < from ? to + 86_400_000 : to };
+  });
+}
 
 function LateStart({ driver, planNow, onApply }: { driver: DriverState; planNow: number; onApply: (p: Partial<DriverState>) => void }) {
   const [open, setOpen] = useState(false);
   const [start, setStart] = useState(driver.shiftStart);
-  const [items, setItems] = useState<Activity[]>([{ kind: "drive", minutes: 120 }]);
-  const r = reconstruct(start, items);
-  const gap = (planNow - r.end) / 60_000;
+  const [rows, setRows] = useState<Row[]>([]);
+  const timed = toTimed(start, rows);
+  const r = reconstructTimed(start, timed);
+  const end = timed.length ? Math.max(...timed.map((a) => a.to)) : start;
+  const gap = (planNow - end) / 60_000;
+
+  const begin = () => {
+    setStart(driver.shiftStart);
+    setRows([{ kind: "drive", from: hhmm(driver.shiftStart), to: hhmm(driver.shiftStart + 120 * 60_000) }]);
+    setOpen(true);
+  };
 
   if (!open) {
     return (
       <section className="card late">
         <div>
           <div className="eyebrow">Spóźniony start</div>
-          <p className="muted">Zapomniałeś uruchomić aplikację? Odtwórz dzień z listy aktywności — RoadPilot policzy jazdę i przerwy.</p>
+          <p className="muted">Zapomniałeś uruchomić aplikację? Odtwórz dzień z godzin jazdy i przerw — RoadPilot policzy liczniki.</p>
         </div>
-        <button className="ghost" onClick={() => { setStart(driver.shiftStart); setOpen(true); }}>Odtwórz dzień</button>
+        <button className="ghost" onClick={begin}>Odtwórz dzień</button>
       </section>
     );
   }
 
-  const update = (i: number, patch: Partial<Activity>) => setItems(items.map((a, j) => (j === i ? { ...a, ...patch } : a)));
+  const update = (i: number, patch: Partial<Row>) => setRows(rows.map((a, j) => (j === i ? { ...a, ...patch } : a)));
+  const add = (kind: ActivityKind) => {
+    const from = timed.length ? timed[timed.length - 1].to : start;
+    setRows([...rows, { kind, from: hhmm(from), to: hhmm(from + DEFAULT_MIN[kind] * 60_000) }]);
+  };
 
   return (
     <section className="card">
       <div className="eyebrow">Spóźniony start</div>
       <h2>Odtwórz dzień</h2>
-      <p className="muted">Wpisz rzeczywistą godzinę rozpoczęcia i kolejne aktywności tak, jak widzisz je na tachografie.</p>
+      <p className="muted">Wpisz początek dnia pracy i kolejne aktywności z godzinami od–do, tak jak na tachografie. Czas niewpisany między nimi liczy się jako postój.</p>
       <label className="field">
         <span className="field-label">Rzeczywisty początek dnia pracy</span>
         <input type="datetime-local" value={toLocalInput(start)} onChange={(e) => { const t = fromLocalInput(e.target.value); if (t) setStart(t); }} />
       </label>
-      <ol className="activities">
-        {items.map((a, i) => (
+      <ol className="activities timed">
+        <li className="activities-head" aria-hidden>
+          <span>Aktywność</span><span>Od</span><span>Do</span><span />
+        </li>
+        {rows.map((a, i) => (
           <li key={i}>
-            <select value={a.kind} onChange={(e) => update(i, { kind: e.target.value as ActivityKind })}>
+            <select value={a.kind} onChange={(e) => update(i, { kind: e.target.value as ActivityKind })} aria-label="Aktywność">
               {(Object.keys(KIND_LABEL) as ActivityKind[]).map((k) => <option key={k} value={k}>{KIND_LABEL[k]}</option>)}
             </select>
-            <span className="input-row">
-              <input type="number" inputMode="numeric" min={0} value={a.minutes} onChange={(e) => update(i, { minutes: Math.max(0, Number(e.target.value) || 0) })} />
-              <span className="unit">min</span>
-            </span>
-            <button className="icon-btn" aria-label="Usuń" onClick={() => setItems(items.filter((_, j) => j !== i))}>×</button>
+            <input type="time" value={a.from} onChange={(e) => update(i, { from: e.target.value })} aria-label="Od" />
+            <input type="time" value={a.to} onChange={(e) => update(i, { to: e.target.value })} aria-label="Do" />
+            <button className="icon-btn" aria-label="Usuń" onClick={() => setRows(rows.filter((_, j) => j !== i))}>×</button>
+            <span className="activity-len">{fmtDuration((timed[i].to - timed[i].from) / 60_000)}</span>
           </li>
         ))}
       </ol>
       <div className="row-buttons">
-        <button className="ghost" onClick={() => setItems([...items, { kind: "break", minutes: 45 }])}>+ Przerwa</button>
-        <button className="ghost" onClick={() => setItems([...items, { kind: "drive", minutes: 60 }])}>+ Jazda</button>
-        <button className="ghost" onClick={() => setItems([...items, { kind: "work", minutes: 30 }])}>+ Inna praca</button>
+        <button className="ghost" onClick={() => add("drive")}>+ Jazda</button>
+        <button className="ghost" onClick={() => add("break")}>+ Przerwa</button>
+        <button className="ghost" onClick={() => add("work")}>+ Inna praca</button>
       </div>
       <div className="recon">
         <span>Jazda od początku dnia: <strong>{fmtDuration(r.drivenTodayMin)}</strong></span>
         <span>Od ostatniej przerwy: <strong>{fmtDuration(r.sinceBreakMin)}</strong>{r.splitBreakTaken ? " (odbyte 15 min przerwy)" : ""}</span>
-        <span>Ostatnia aktywność kończy się: <strong>{fmtClock(r.end, planNow)}</strong></span>
+        {r.gapMin >= 1 && <span>Niewpisany czas (liczony jako postój): <strong>{fmtDuration(r.gapMin)}</strong></span>}
+        <span>Ostatnia aktywność kończy się: <strong>{fmtClock(end, planNow)}</strong></span>
         {Math.abs(gap) > 15 && (
           <span className="warn-text">
             {gap > 0
-              ? `Brakuje ${fmtDuration(gap)} do teraz — dopisz, co się działo (np. przerwę lub pracę).`
-              : `Aktywności wychodzą ${fmtDuration(-gap)} poza aktualną godzinę — sprawdź czasy.`}
+              ? `Od ${fmtClock(end, planNow)} do teraz minęło ${fmtDuration(gap)} — jeśli to nie był postój, dopisz aktywność.`
+              : `Aktywności wychodzą ${fmtDuration(-gap)} poza aktualną godzinę — sprawdź godziny.`}
           </span>
         )}
       </div>

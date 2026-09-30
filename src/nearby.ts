@@ -1,10 +1,11 @@
-// Dane z internetu dla trybu HUD: stacje paliw (OpenStreetMap / Overpass API) i pogoda (Open-Meteo).
+// Dane z internetu dla trybu HUD: stacje paliw, drogi i miejscowości (OpenStreetMap / Overpass API) i pogoda (Open-Meteo).
 // Oba serwisy są darmowe i bez klucza. Pozycję zaokrąglamy do ~1 km, zanim wyjdzie z urządzenia;
 // odległości do stacji liczymy lokalnie z dokładnej pozycji. Bez sieci HUD działa dalej, tylko bez tych danych.
 
 import { useEffect, useRef, useState } from "react";
 import { distanceM } from "./core/gps";
-import { parseOverpass, Station, STATIONS } from "./core/stations";
+import { parseRoads, RoadData, ROADS, roadsQuery } from "./core/roads";
+import { Parking, parkingsQuery, parseParkings, STATIONS } from "./core/stations";
 import { Weather } from "./core/weather";
 
 type LatLon = { lat: number; lon: number };
@@ -59,22 +60,27 @@ function useRemote<T>(pos: LatLon | null, enabled: boolean, now: number, refetch
   return state;
 }
 
-export function useStations(pos: LatLon | null, enabled: boolean, now: number): Remote<Station[]> {
-  return useRemote(pos, enabled, now, STATIONS.refetchM, Infinity, fetchStations);
-}
-
 export function useWeather(pos: LatLon | null, enabled: boolean, now: number): Remote<Weather> {
   return useRemote(pos, enabled, now, WEATHER_REFETCH_M, WEATHER_REFRESH_MS, fetchWeather);
 }
 
-async function fetchStations(p: LatLon): Promise<Station[]> {
-  const query = `[out:json][timeout:20];nwr["amenity"="fuel"](around:${STATIONS.radiusM},${p.lat},${p.lon});out center tags 300;`;
+/** MOP-y i parkingi dla ciężarówek w promieniu STATIONS.radiusM. */
+export function useParkings(pos: LatLon | null, enabled: boolean, now: number): Remote<Parking[]> {
+  return useRemote(pos, enabled, now, STATIONS.refetchM, Infinity, (p) => overpass(parkingsQuery(p)).then(parseParkings));
+}
+
+/** Drogi i miejscowości wokół przybliżonej pozycji — którą drogą jedziemy, liczy HUD z dokładnej pozycji. */
+export function useRoads(pos: LatLon | null, enabled: boolean, now: number): Remote<RoadData> {
+  return useRemote(pos, enabled, now, ROADS.refetchM, Infinity, (p) => overpass(roadsQuery(p)).then(parseRoads));
+}
+
+async function overpass(query: string): Promise<unknown> {
   let error: unknown;
   for (const url of OVERPASS_URLS) {
     try {
       const res = await fetchWithTimeout(url, { method: "POST", body: new URLSearchParams({ data: query }) }, 25_000);
       if (!res.ok) throw new Error(`Overpass ${res.status}`);
-      return parseOverpass(await res.json());
+      return await res.json();
     } catch (e) {
       error = e;
     }

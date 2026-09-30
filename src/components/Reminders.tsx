@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { ParkingHint, Plan } from "../core/plan";
-import { fmtTime } from "../format";
+import { fmtDuration, fmtTime } from "../format";
+import { EXTENDED_WORK_MIN, WorkReminderKind, workReminders, WorkSettings } from "../core/workday";
 import { ongoingSupported, startOngoing } from "../ongoing";
 import { eventLabel } from "./Timeline";
 
@@ -95,10 +96,51 @@ export function OngoingCard({ on, onChange }: { on: boolean; onChange: (on: bool
   );
 }
 
+/**
+ * Przypomnienia o końcu czasu pracy — niezależne od przypomnień o przerwach, działają w całej aplikacji (także w HUD).
+ * Wymagają zgody na powiadomienia; nie przypominamy w trakcie odpoczynku po „Zakończ dzień”.
+ */
+export function useWorkReminders(w: WorkSettings, shiftStart: number, reducedRestsLeft: number, dayOff: boolean) {
+  const list = supported && !dayOff ? workReminders(shiftStart, w, reducedRestsLeft) : [];
+  const key = list.map((r) => `${r.kind}@${r.at}`).join(",");
+  useEffect(() => {
+    if (!list.length) return;
+    const now = Date.now();
+    const timers = list
+      .filter((r) => r.at > now && r.at - now < 2 ** 31 - 1)
+      .map((r) => setTimeout(() => Notification.permission === "granted" && notify(workText(r.kind, r.at, w, shiftStart, list.some((x) => x.kind === "extEnd"))), r.at - now));
+    return () => timers.forEach(clearTimeout);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key]);
+}
+
+function workText(kind: WorkReminderKind, at: number, w: WorkSettings, shiftStart: number, extension: boolean): Reminder {
+  const limit = fmtDuration(w.limitMin);
+  const extEnd = fmtTime(shiftStart + EXTENDED_WORK_MIN * 60_000);
+  const end = fmtTime(shiftStart + w.limitMin * 60_000);
+  switch (kind) {
+    case "soon":
+      return { at, title: `Za ${fmtDuration(w.leadMin)} koniec czasu pracy`, body: `Limit ${limit} mija o ${end}. ${extension ? "Możesz wydłużyć do 15 h — wtedy odpoczynek min. 9 h." : "Zaplanuj odpoczynek dzienny."}` };
+    case "end":
+      return { at, title: `Koniec czasu pracy (${limit})`, body: extension ? `Jedziesz na wydłużeniu do 15 h — koniec o ${extEnd}, potem odpoczynek min. 9 h.` : "Czas na odpoczynek dzienny." };
+    case "extSoon":
+      return { at, title: `Za ${fmtDuration(w.leadMin)} koniec wydłużonego czasu pracy (15 h)`, body: `Zacznij odpoczynek dzienny (min. 9 h) najpóźniej o ${extEnd}.` };
+    case "extEnd":
+      return { at, title: "Koniec wydłużonego czasu pracy (15 h)", body: "Musisz zacząć odpoczynek dzienny." };
+  }
+}
+
+/** Prośba o zgodę na powiadomienia (z kliknięcia). */
+export async function askNotifications() {
+  return supported ? (await Notification.requestPermission()) === "granted" : false;
+}
+
+export const notificationsState = () => (supported ? Notification.permission : "unsupported");
+
 async function notify(r: Reminder) {
   try {
     const reg = await navigator.serviceWorker?.getRegistration();
-    if (reg) await reg.showNotification(r.title, { body: r.body, icon: ICON, tag: `rp-${r.at}` });
+    if (reg) await reg.showNotification(r.title, { body: r.body, icon: ICON, tag: `rp-${r.at}-${r.title}` });
     else new Notification(r.title, { body: r.body, icon: ICON });
   } catch {
     /* ignoruj — przypomnienia są pomocnicze */

@@ -135,3 +135,42 @@ describe("remainingSegments", () => {
     expect(remainingSegments(segs, 500)).toEqual([]);
   });
 });
+
+describe("postój a fałszywy ruch z GPS", () => {
+  /** 10 min stania w miejscu (odczyt co 15 s) — postój od NOW. */
+  function standing() {
+    let t = startTrack(fix(0, 0));
+    for (let m = 0.25; m <= 10; m += 0.25) t = addFix(t, fix(m, 0)).track;
+    return t;
+  }
+
+  it("chwilowa prędkość z odbiornika na postoju nie kończy postoju", () => {
+    let t = standing();
+    expect(t.stopSince).toBe(NOW);
+    const r = addFix(t, fix(10.25, 0.03, { speed: 8 })); // 30 m i 29 km/h — szum
+    expect(r.driveMin).toBe(0);
+    expect(r.stopEnded).toBeUndefined();
+    t = addFix(r.track, fix(10.5, 0)).track; // i znów stoi
+    expect(t.stopSince).toBe(NOW);
+    expect(t.moveSince).toBeNull();
+  });
+
+  it("skok pozycji o kilka km na postoju nie jest ruszeniem", () => {
+    const r = addFix(standing(), fix(10.25, 5));
+    expect(r.driveMin).toBe(0);
+    expect(r.track.stopSince).toBe(NOW);
+  });
+
+  it("prawdziwe ruszenie: potwierdzone po 200 m, postój kończy się przy pierwszym ruchu", () => {
+    let t = standing();
+    // 30 km/h: 125 m co 15 s — pierwszy odczyt czeka na potwierdzenie, drugi (250 m) potwierdza.
+    let r = addFix(t, fix(10.25, 0.125));
+    expect(r.driveMin).toBe(0);
+    t = r.track;
+    r = addFix(t, fix(10.5, 0.25));
+    expect(r.stopEnded).toEqual({ start: NOW, end: NOW + 10 * MIN });
+    expect(r.driveMin).toBeCloseTo(0.5, 6);
+    expect(r.km).toBeCloseTo(0.25, 3);
+  });
+});
+

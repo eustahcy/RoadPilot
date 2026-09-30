@@ -41,3 +41,16 @@ export function fromLocalInput(v: string): number | null {
   const t = new Date(v).getTime();
   return Number.isFinite(t) ? t : null;
 }
+
+/** „4:07” — czas jak na tachografie (godziny:minuty). */
+export function fmtHm(min: number) {
+  const m = Math.max(0, Math.round(min));
+  return `${Math.floor(m / 60)}:${pad(m % 60)}`;
+}
+
+/** „Wt, 30.09”. */
+export function fmtDay(t: number) {
+  const d = new Date(t);
+  const day = DAYS[d.getDay()];
+  return `${day.charAt(0).toUpperCase()}${day.slice(1)}, ${pad(d.getDate())}.${pad(d.getMonth() + 1)}`;
+}

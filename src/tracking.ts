@@ -1,7 +1,9 @@
 // Śledzenie GPS w przeglądarce: odczyty z Geolocation API → licznik km i liczniki kierowcy.
 
-import { Dispatch, SetStateAction, useEffect, useState } from "react";
-import { addFix, creditDriving, creditStop, Fix, GPS, Live, nextLive, startTrack } from "./core/gps";
+import { Dispatch, SetStateAction, useEffect, useRef, useState } from "react";
+import { addFix, AUTO_STOP_IDLE, creditDriving, creditStop, Fix, GPS, Live, nextAutoStop, nextLive, startTrack } from "./core/gps";
+import { recordDrive, recordStop } from "./core/history";
+import { RULES } from "./core/rules";
 import { ActiveStop, endStop } from "./core/stop";
 import { AppState } from "./state";
 
@@ -21,21 +23,26 @@ export function applyFix(s: AppState, fix: Fix): AppState {
   if (r.track === s.track) return s;
   let driver = s.driver;
   let stop = s.stop;
+  let history = s.history;
   if (stop && r.driveMin > 0) {
     // Ruszyliśmy bez „Koniec przerwy” — postój kończy się tam, gdzie zaczęła się jazda. Postoju z GPS nie liczymy drugi raz.
-    driver = endStop(driver, stop, fix.t - r.driveMin * 60_000);
+    const end = fix.t - r.driveMin * 60_000;
+    driver = endStop(driver, stop, end);
+    history = recordStop(history, stop.start, end);
     stop = null;
   } else if (r.stopEnded && !stop) {
     driver = creditStop(driver, r.stopEnded.start, r.stopEnded.end);
+    history = recordStop(history, r.stopEnded.start, r.stopEnded.end);
   }
   driver = creditDriving(driver, r.driveMin);
+  history = recordDrive(history, fix.t, r.driveMin, r.km);
   const doneKm = Math.min(tripTotalKm(s), s.trip.doneKm + r.km);
-  return { ...s, track: r.track, driver, stop, odoKm: s.odoKm + r.km, trip: doneKm === s.trip.doneKm ? s.trip : { ...s.trip, doneKm } };
+  return { ...s, track: r.track, driver, stop, history, odoKm: s.odoKm + r.km, trip: doneKm === s.trip.doneKm ? s.trip : { ...s.trip, doneKm } };
 }
 
 /** Kierowca zaczyna postój. */
-export function startStop(s: AppState, start: number, targetMin: number): AppState {
-  return { ...s, stop: { start, targetMin } };
+export function startStop(s: AppState, start: number, targetMin: number | null, auto = false): AppState {
+  return { ...s, stop: auto ? { start, targetMin, auto } : { start, targetMin } };
 }
 
 /**
@@ -45,7 +52,21 @@ export function startStop(s: AppState, start: number, targetMin: number): AppSta
 export function finishStop(s: AppState, end: number): AppState {
   if (!s.stop) return s;
   const track = s.track && s.track.stopSince !== null ? { ...s.track, stopSince: Math.max(s.track.stopSince, end) } : s.track;
-  return { ...s, driver: endStop(s.driver, s.stop, end), stop: null, track };
+  return { ...s, driver: endStop(s.driver, s.stop, end), stop: null, track, history: end > s.stop.start ? recordStop(s.history, s.stop.start, end) : s.history };
+}
+
+/** „Zakończ dzień”: odpoczynek dzienny od teraz — trwający postój (np. włączony po zatrzymaniu) staje się odpoczynkiem od swojego początku. */
+export function endDay(s: AppState, now: number): AppState {
+  return { ...s, stop: { start: s.stop?.start ?? now, targetMin: RULES.regularDailyRest, dayEnd: true } };
+}
+
+/**
+ * „Rozpocznij dzień”: kończy trwający odpoczynek (zalicza faktyczny czas) i zaczyna nowy dzień pracy od teraz —
+ * także gdy odpoczynek był krótszy niż 9 h (decyzja kierowcy; UI o tym ostrzega).
+ */
+export function startDay(s: AppState, now: number): AppState {
+  const after = finishStop(s, now);
+  return { ...after, driver: { ...after.driver, shiftStart: now, drivenTodayMin: 0, sinceBreakMin: 0, splitBreakTaken: false } };
 }
 
 export function changeStop(s: AppState, patch: Partial<ActiveStop>): AppState {
@@ -92,6 +113,32 @@ export function useGpsTracking(enabled: boolean, setState: Dispatch<SetStateActi
 
   useWakeLock(enabled);
   return { status, live };
+}
+
+/**
+ * Postój „sam”: po 5 s stania włącza postój bez limitu od chwili zatrzymania.
+ * Kończy go ruszenie (applyFix). Sprawdzamy też co sekundę, bo na postoju odbiornik potrafi przestać podawać odczyty.
+ */
+export function useAutoStop(enabled: boolean, live: Live | null, stopActive: boolean, setState: Dispatch<SetStateAction<AppState>>) {
+  const auto = useRef(AUTO_STOP_IDLE);
+  const kmh = live?.kmh ?? null;
+
+  useEffect(() => {
+    if (!enabled) {
+      auto.current = AUTO_STOP_IDLE;
+      return;
+    }
+    const step = (t: number) => {
+      const r = nextAutoStop(auto.current, kmh, t, stopActive);
+      auto.current = r.auto;
+      const startAt = r.startAt;
+      // Nie wiemy, jak długo będziemy stać — postój bez limitu, kończy go ruszenie.
+      if (startAt !== undefined) setState((s) => (s.stop ? s : startStop(s, startAt, null, true)));
+    };
+    step(live?.t ?? Date.now());
+    const id = setInterval(() => step(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, [enabled, kmh, live?.t, stopActive, setState]);
 }
 
 /** Przy wygaszonym ekranie przeglądarka nie podaje pozycji — trzymamy ekran włączony, gdy się da. */

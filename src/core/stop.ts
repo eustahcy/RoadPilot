@@ -10,8 +10,12 @@ const MIN = 60_000;
 export interface ActiveStop {
   /** Początek postoju (ms). */
   start: number;
-  /** Planowana długość (min) — do odliczania; zaliczany jest czas faktyczny. */
-  targetMin: number;
+  /** Planowana długość (min) — do odliczania; zaliczany jest czas faktyczny. null = bez limitu (np. załadunek, „łóżko”) — do ruszenia. */
+  targetMin: number | null;
+  /** Włączony automatycznie po zatrzymaniu (GPS), a nie przyciskiem. */
+  auto?: boolean;
+  /** Koniec dnia pracy — odpoczynek dzienny; kończy go „Rozpocznij dzień” albo ruszenie. */
+  dayEnd?: boolean;
 }
 
 export type StopCredit = "none" | "splitFirst" | "break" | "reducedRest" | "dailyRest";
@@ -49,11 +53,16 @@ export function endStop(driver: DriverState, stop: ActiveStop, end: number): Dri
   return end > stop.start ? creditStop(driver, stop.start, end) : driver;
 }
 
+/** Planowany koniec postoju (ms) — undefined dla postoju bez limitu. */
+export function stopEnd(stop: ActiveStop): number | undefined {
+  return stop.targetMin === null ? undefined : stop.start + stop.targetMin * MIN;
+}
+
 /**
- * Plan w trakcie postoju: zakładamy, że kierowca postoi do planowanej długości (albo do teraz, jeśli już dłużej),
- * i liczymy od tej chwili ze stanem po zaliczeniu postoju.
+ * Plan w trakcie postoju: zakładamy, że kierowca postoi do planowanej długości (albo do teraz, jeśli już dłużej;
+ * bez limitu — rusza teraz), i liczymy od tej chwili ze stanem po zaliczeniu postoju.
  */
 export function planAfterStop(driver: DriverState, stop: ActiveStop, now: number): { driver: DriverState; from: number } {
-  const from = Math.max(now, stop.start + stop.targetMin * MIN);
+  const from = Math.max(now, stopEnd(stop) ?? now);
   return { driver: endStop(driver, stop, from), from };
 }

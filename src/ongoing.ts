@@ -6,7 +6,7 @@
 import { useEffect, useRef } from "react";
 import { Plan } from "./core/plan";
 import { DriverStatus } from "./core/scenarios";
-import { ActiveStop } from "./core/stop";
+import { ActiveStop, stopEnd } from "./core/stop";
 import { fmtClock, fmtDuration } from "./format";
 import { eventLabel } from "./components/Timeline";
 
@@ -71,7 +71,9 @@ export function ongoingInfo(plan: Plan | undefined, status: DriverStatus, stop: 
   const arrival = plan?.feasible ? `Przyjazd ${fmtClock(plan.arrival, now)}` : "Brak wykonalnego planu";
   const driveLeft = `jazda dziś: ${fmtDuration(status.driveLeftToday)}`;
   if (stop) {
-    const end = stop.start + stop.targetMin * 60_000;
+    const end = stopEnd(stop);
+    if (stop.dayEnd) return { title: `Koniec dnia · odpoczynek od ${fmtClock(stop.start, now)} (${fmtDuration(Math.max(0, now - stop.start) / 60_000)})`, text: end && end > now ? `11 h minie o ${fmtClock(end, now)}` : "Odpoczynek 11 h zaliczony" };
+    if (end === undefined) return { title: `Postój od ${fmtClock(stop.start, now)} (${fmtDuration(Math.max(0, now - stop.start) / 60_000)})`, text: `Skończy się, gdy ruszysz · ${arrival}` };
     return { title: end > now ? `Postój do ${fmtClock(end, now)} (${fmtDuration((end - now) / 60_000)})` : "Koniec postoju — możesz ruszać", text: arrival };
   }
   const events = plan?.feasible ? plan.events : [];

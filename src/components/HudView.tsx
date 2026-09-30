@@ -1,18 +1,34 @@
-import { ReactNode, useEffect, useState } from "react";
+import { CSSProperties, ReactNode, useEffect, useRef, useState } from "react";
+import { matchRoad, nearestPlace, RoadData, roadLabel } from "../core/roads";
 import { DeadlinePlan } from "../core/deadline";
 import { Live } from "../core/gps";
-import { Plan } from "../core/plan";
+import { DriverState, Plan, PlanEvent } from "../core/plan";
 import { Route } from "../core/route";
-import { DriverStatus } from "../core/scenarios";
+import { RULES } from "../core/rules";
+import { Better, DriverStatus } from "../core/scenarios";
 import { ServiceStatus } from "../core/service";
-import { nearestStation, Station, STATIONS } from "../core/stations";
+import { EXTENDED_WORK_MIN, WorkStatus } from "../core/workday";
+import { nearestStation, NearestStation, Parking, STATIONS } from "../core/stations";
 import { describeWeather, isHazard, Weather, WeatherIcon } from "../core/weather";
-import { fmtClock, fmtDuration, fmtKm, fmtTime } from "../format";
+import { fmtClock, fmtDay, fmtDuration, fmtHm, fmtKm, fmtTime } from "../format";
 import { Remote } from "../nearby";
 import { GpsStatus, useWakeLock } from "../tracking";
-import { ActiveStopPanel, fmtTimer, StopControlsProps, StopPicker } from "./StopControls";
+import { MUSIC_APPS, musicLink, MusicApp } from "../core/apps";
+import { launch, platform } from "../launch";
+import { HudItems, HudStyle } from "../hudConfig";
+import { HudNav, HudNavData, HudRouteMap, NavTrack, useNavTrack } from "./HudNav";
+import { nextInstruction, NavInstruction, speedLimitAt } from "../core/navmatch";
+import { isAhead, RouteWarning, warningText } from "../nav";
+import { AlertVote } from "./AlertVote";
+import { HudPlanner, HudRoutePicker } from "./HudRoutePicker";
+import { useNavVoice } from "../voice";
+import { HUD_STYLES } from "../hudConfig";
+import { ReportKind } from "../collect";
+import { ReportSheet } from "./ReportSheet";
+import { ActiveStopPanel, confirmStartDay, fmtTimer, StopControlsProps, StopPicker } from "./StopControls";
 
 interface Props {
+  origin: string;
   destination: string;
   route: Route;
   doneKm: number;
@@ -20,202 +36,842 @@ interface Props {
   plan?: Plan;
   deadline?: DeadlinePlan;
   status: DriverStatus;
+  /** Stan kierowcy, z którego policzono `status` (po zaliczeniu trwającego postoju). */
+  driver: DriverState;
   gpsOn: boolean;
   gpsStatus: GpsStatus;
   live: Live | null;
-  stations: Remote<Station[]>;
+  parkings: Remote<Parking[]>;
   weather: Remote<Weather>;
-  service: ServiceStatus;
-  serviceDate: number | null;
   mirror: boolean;
   onMirror: (on: boolean) => void;
   onEnableGps: () => void;
   onExit: () => void;
   stopControls: StopControlsProps;
+  work?: WorkStatus;
+  service: ServiceStatus;
+  /** Skróty do aplikacji wybranych w Ustawieniach. */
+  musicApp: MusicApp;
+  /** Szybszy wariant niż bieżący plan — undefined, gdy nie ma (albo jedziemy pod rozładunek). */
+  better?: Better;
+  onBetter: (b: Better) => void;
+  /** Drogi i miejscowości w pobliżu (OpenStreetMap) — undefined, gdy wyłączone lub jeszcze nie pobrane. */
+  roads?: RoadData;
+  /** Średnia prędkość dzisiejszej jazdy (km/h). */
+  avgKmh?: number;
+  animation: boolean;
+  onAnimation: (on: boolean) => void;
+  hudStyle: HudStyle;
+  /** Widoczne elementy bieżącego stylu (Ustawienia → HUD). */
+  items: HudItems;
+  onStyle: (s: HudStyle) => void;
+  floating: Floating;
+  /** Nawigacja — tylko z Premium i włączoną nawigacją (trasa albo sam cel z konta). */
+  nav?: HudNavData;
+  /** Wyszukiwanie celu i porównanie tras w HUD (Premium). */
+  planner?: HudPlanner;
+  /** Token sesji do kafelków mapy (Premium). */
+  mapToken?: string;
+  /** Komunikaty głosowe nawigacji. */
+  voice: { supported: boolean; on: boolean; toggle: () => void };
+  /** Zgłoszenia z drogi do mapy RoadPilot — tylko ze zgodą kierowcy. */
+  report?: { onSend: (kind: ReportKind, value: number | null) => Promise<void>; onVote: (w: RouteWarning, vote: 1 | -1) => Promise<void> };
 }
+
+interface Floating {
+  supported: boolean;
+  active: boolean;
+  toggle: () => void;
+}
+
+const NO_NAV: HudNavData = { route: null, dest: null, rerouting: false, onReroute: () => {} };
+
+/** Poniżej tej prędkości pasy stoją. */
+const LANES_MIN_KMH = 3;
 
 /** Po takim czasie bez odczytu prędkość jest nieaktualna. */
 const STALE_MS = 10_000;
+
+const isStop = (e: PlanEvent) => e.kind === "break" || e.kind === "rest" || e.kind === "weeklyRest";
 
 export function HudView(p: Props) {
   const now = useTick(1000);
   const [menu, setMenu] = useState(false);
   const [sheet, setSheet] = useState(false);
+  const [reporting, setReporting] = useState(false);
+  const [warnList, setWarnList] = useState(false);
+  const [planning, setPlanning] = useState(false);
+  const [zoomOffset, setZoomOffset] = useState(0);
   const fullscreen = useFullscreen();
   useWakeLock(true);
   const sc = p.stopControls;
+  const show = p.items;
+  const minimal = p.hudStyle === "minimal";
+  const navMode = p.hudStyle === "nav";
 
   const fresh = p.live && now - p.live.t <= STALE_MS ? p.live : null;
   const speed = fresh?.kmh != null ? Math.round(fresh.kmh) : null;
-  const stop = p.plan?.events.find((e) => e.kind === "break" || e.kind === "rest" || e.kind === "weeklyRest");
-  const stopIn = stop ? (stop.start - now) / 60_000 : undefined;
-  const totalKm = p.doneKm + p.route.totalKm;
+  const road = fresh && p.roads ? matchRoad(p.roads.roads, fresh, fresh.heading) : undefined;
+  const place = p.live && p.roads ? nearestPlace(p.roads.places, p.live) : undefined;
+  const moving = speed !== null && speed >= LANES_MIN_KMH;
+  // Okres przerywanej linii przesuwa się tym szybciej, im szybciej jedziemy (90 km/h ≈ 0,28 s).
+  const laneStyle = { "--lane-dur": `${moving ? Math.min(3, Math.max(0.12, 25 / speed!)) : 1}s` } as CSSProperties;
+  // Parking tylko przed nami — to, co za plecami, nie trafia ani na oś, ani do kafelka.
+  const parking = show.parking && p.live && p.parkings.data ? nearestStation(p.parkings.data, p.live, p.live.heading) : undefined;
+  const endDay = () => confirm("Zakończyć dzień pracy? Zacznie się odpoczynek dzienny.") && sc.onEndDay();
+  const openSheet = () => { setSheet(true); setMenu(false); };
+  const hasApps = show.apps && !!musicLink(p.musicApp, platform());
+  const floatBtn = show.floating && p.floating.supported;
+  // Animacja drogi zostaje też z panelem nawigacji (poza stylem „Nawigacja” z mapą); pozycję na trasie liczymy raz — dla panelu i widoku trasy.
+  const track = useNavTrack(p.nav ?? NO_NAV, fresh);
+  const nav = p.nav && p.planner ? { ...p.nav, onPlan: () => { setPlanning(true); setMenu(false); } } : p.nav;
+  // W stylu standardowym i minimalnym panel nawigacji tylko wtedy, gdy jest cel — bez niego zbędny.
+  const navEl = nav && (navMode || (show.nav && (nav.route || nav.dest))) ? <HudNav nav={nav} track={track} compact={minimal} /> : null;
+  const planEl = planning && p.planner && (
+    <div className="hud-sheet" onClick={(e) => e.target === e.currentTarget && setPlanning(false)}>
+      <div className="hud-sheet-body wide">
+        <button className="hud-sheet-close" aria-label="Zamknij" onClick={() => setPlanning(false)}>×</button>
+        <HudRoutePicker planner={p.planner} dest={p.nav?.dest ?? null} onClose={() => setPlanning(false)} />
+      </div>
+    </div>
+  );
 
-  return (
-    <div className={`hud ${p.mirror ? "mirror" : ""}`}>
-      <header className="hud-top">
-        <div className="hud-group">
-          <Pill className="p-clock" icon="clock" value={fmtTime(now)} />
-          <Pill className="p-dest" icon="pin" label={p.destination || "Do celu"} value={fmtKm(p.route.totalKm)} />
+  const speedEl = (
+    <div className="hud-speed" aria-label="Prędkość">
+      <div className={`hud-speed-num ${speed === null ? "none" : ""}`}>
+        <strong className={speed === null ? "none" : ""}>{speed ?? "—"}</strong>
+        <span>km/h</span>
+      </div>
+      {(road || place) && (
+        <div className="hud-where">
+          {road && <b>{roadLabel(road)}</b>}
+          {place && <small>{road ? " · " : ""}{place.name}</small>}
+        </div>
+      )}
+    </div>
+  );
+
+  const menuEl = (
+    <div className="hud-menu-wrap">
+      <button className="hud-pill hud-icon-btn" aria-label="Menu HUD" aria-expanded={menu} onClick={() => setMenu(!menu)}>
+        <Icon name="dots" />
+      </button>
+      {menu && (
+        <div className="hud-menu" role="menu">
+          {HUD_STYLES.filter((h) => h.id !== p.hudStyle).map((h) => (
+            <button key={h.id} role="menuitem" onClick={() => { p.onStyle(h.id); setMenu(false); }}>
+              Styl: {h.label.toLowerCase()}
+            </button>
+          ))}
+          {p.floating.supported && (
+            <button role="menuitemcheckbox" aria-checked={p.floating.active} onClick={() => { p.floating.toggle(); setMenu(false); }}>
+              {p.floating.active ? "✓ " : ""}Pływające okienko
+            </button>
+          )}
+          <button role="menuitemcheckbox" aria-checked={p.mirror} onClick={() => { p.onMirror(!p.mirror); setMenu(false); }}>
+            {p.mirror ? "✓ " : ""}Odbicie na szybę
+          </button>
+          <button role="menuitemcheckbox" aria-checked={p.animation} onClick={() => { p.onAnimation(!p.animation); setMenu(false); }}>
+            {p.animation ? "✓ " : ""}Animacja drogi
+          </button>
+          <button role="menuitem" onClick={openSheet}>{sc.stop ? (sc.stop.dayEnd ? "Odpoczynek dzienny" : "Trwający postój") : "Zaczynam przerwę"}</button>
+          {sc.stop?.dayEnd ? (
+            <button role="menuitem" onClick={() => { if (confirmStartDay(sc.stop, now)) sc.onStartDay(); setMenu(false); }}>Rozpocznij dzień</button>
+          ) : (
+            <button role="menuitem" onClick={() => { endDay(); setMenu(false); }}>Zakończ dzień</button>
+          )}
+          {fullscreenSupported() && (
+            <button role="menuitemcheckbox" aria-checked={fullscreen} onClick={() => { toggleFullscreen(); setMenu(false); }}>
+              {fullscreen ? "✓ " : ""}Pełny ekran
+            </button>
+          )}
+          <button role="menuitem" onClick={p.onExit}>Wyjdź z HUD</button>
+        </div>
+      )}
+    </div>
+  );
+
+  const notice = !p.gpsOn ? (
+    <div className="hud-notice">
+      <span>Włącz GPS, żeby widzieć prędkość i odliczać kilometry.</span>
+      <button className="primary" onClick={p.onEnableGps}>Włącz GPS</button>
+    </div>
+  ) : p.gpsStatus === "denied" || p.gpsStatus === "unavailable" ? (
+    <div className="hud-notice warn">{p.gpsStatus === "denied" ? "Brak zgody na lokalizację — zezwól na nią w przeglądarce." : "GPS niedostępny — wymaga HTTPS."}</div>
+  ) : null;
+
+  const reportEl = reporting && p.report && (
+    <div className="hud-sheet" onClick={(e) => e.target === e.currentTarget && setReporting(false)}>
+      <div className="hud-sheet-body">
+        <button className="hud-sheet-close" aria-label="Zamknij" onClick={() => setReporting(false)}>×</button>
+        <ReportSheet onSend={p.report.onSend} onClose={() => setReporting(false)} located={p.live !== null} />
+      </div>
+    </div>
+  );
+
+  const voteEl = p.report && p.nav?.route && !track.off && (
+    <AlertVote warnings={p.nav.route.warnings} km={track.pos?.km} onVote={p.report.onVote} />
+  );
+
+  const sheetEl = sheet && (
+    <div className="hud-sheet" onClick={(e) => e.target === e.currentTarget && setSheet(false)}>
+      <div className="hud-sheet-body">
+        <button className="hud-sheet-close" aria-label="Zwiń" onClick={() => setSheet(false)}>×</button>
+        {sc.stop ? (
+          <ActiveStopPanel stop={sc.stop} driver={sc.driver} onEnd={(t) => { sc.onEnd(t); setSheet(false); }} onCancel={() => { sc.onCancel(); setSheet(false); }} onTarget={sc.onTarget} onStartDay={() => { sc.onStartDay(); setSheet(false); }} />
+        ) : (
+          <>
+            <StopPicker driver={sc.driver} now={now} onCancel={() => setSheet(false)} onStart={sc.onStart} />
+            <button className="ghost day-btn" onClick={() => { if (endDay()) setSheet(false); }}>Zakończ dzień</button>
+          </>
+        )}
+      </div>
+    </div>
+  );
+
+  const lanes = p.animation && !navMode && (
+    <>
+      <div className={`hud-lanes ${moving ? "" : "still"}`} style={laneStyle} aria-hidden>
+        <div className="hud-lanes-road">
+          <i className="lane edge l" /><i className="lane dash l" /><i className="lane dash r" /><i className="lane edge r" />
+        </div>
+      </div>
+    </>
+  );
+
+  const apps = hasApps || floatBtn || p.report ? <AppsTile {...p} show={hasApps} floatBtn={floatBtn} onReport={p.report ? () => { setReporting(true); setMenu(false); } : undefined} /> : null;
+
+  if (navMode) {
+    const route = p.nav?.route ?? null;
+    const pos = track.pos;
+    const next = route && pos && !track.off ? nextInstruction(route.instructions, pos.km) : undefined;
+    const limit = route && pos ? speedLimitAt(route.speedLimits, pos.km) : undefined;
+    const upcoming = route?.warnings?.filter((w) => !pos || isAhead(w, pos.km)) ?? [];
+    const arrival = arrivalInfo(p.plan, p.deadline, now);
+    const stopItem = sc.stop
+      ? { label: sc.stop.dayEnd ? "Odpoczynek" : "Postój", value: fmtTimer(Math.max(0, (now - sc.stop.start) / 60_000)), sub: sc.stop.targetMin !== null ? `z ${fmtDuration(sc.stop.targetMin)}` : "do ruszenia", tone: "active" }
+      : (() => {
+          const st = p.plan?.events.find(isStop);
+          const inMin = st ? (st.start - now) / 60_000 : undefined;
+          return st
+            ? { label: st.kind === "break" ? "Przerwa za" : "Odpoczynek za", value: inMin! <= 1 ? "teraz" : fmtDuration(inMin!), sub: `${fmtDuration((st.end - st.start) / 60_000)} o ${fmtClock(st.start, now)}`, tone: inMin! <= 30 ? "warn" : "" }
+            : { label: "Przerwa", value: "—", sub: "dojedziesz bez postoju", tone: "" };
+        })();
+    return (
+      <div className={`hud navmode ${p.mirror ? "mirror" : ""}`}>
+        <NavVoice nav={p.nav} track={track} kmh={fresh?.kmh ?? null} enabled={p.voice.on} />
+        <div className="nm-map">
+          {p.nav && p.mapToken ? <HudRouteMap nav={p.nav} track={track} live={fresh} token={p.mapToken} anchorY={0.6} zoomOffset={zoomOffset} /> : <div className="hud-map empty" />}
         </div>
 
-        <div className="hud-speed" aria-label="Prędkość">
+        <header className="nm-top">
+          {navEl ? <HudNav nav={nav!} track={track} card /> : (
+            <div className="hud-nav card off">
+              <span className="hud-nav-msg">Nawigacja jest dostępna w RoadPilot Premium.</span>
+            </div>
+          )}
+          {menuEl}
+        </header>
+
+        <div className="nm-side">
+          {p.voice.supported && (
+            <button className={`nm-btn ${p.voice.on ? "" : "off"}`} onClick={p.voice.toggle} aria-label={p.voice.on ? "Wycisz komunikaty" : "Włącz komunikaty głosowe"} aria-pressed={p.voice.on}>
+              <Icon name={p.voice.on ? "sound" : "mute"} />
+            </button>
+          )}
+          {p.planner && (
+            <button className="nm-btn" onClick={() => { setPlanning(true); setMenu(false); }} aria-label="Cel i trasy alternatywne">
+              <Icon name="search" />
+            </button>
+          )}
+          <button className={`nm-btn ${upcoming.length ? "warn" : ""}`} onClick={() => setWarnList(true)} aria-label="Ostrzeżenia na trasie">
+            <Icon name="warning" />
+            {upcoming.length > 0 && <em>{upcoming.length}</em>}
+          </button>
+          {p.report && (
+            <button className="nm-btn report" onClick={() => { setReporting(true); setMenu(false); }} aria-label="Zgłoś na drodze">
+              <Icon name="flag" />
+            </button>
+          )}
+          <div className="nm-zoom">
+            <button onClick={() => setZoomOffset((z) => Math.min(2, z + 0.5))} aria-label="Przybliż">+</button>
+            <button onClick={() => setZoomOffset((z) => Math.max(-2, z - 0.5))} aria-label="Oddal">−</button>
+          </div>
+        </div>
+        {limit !== undefined && <span className="hud-limit nm-limit" aria-label={`Ograniczenie ${limit} km/h`}>{limit}</span>}
+
+        <div className="nm-speed">
           <strong className={speed === null ? "none" : ""}>{speed ?? "—"}</strong>
           <span>km/h</span>
         </div>
+        {notice && <div className="nm-notice">{notice}</div>}
+
+        <footer className="nm-bottom">
+          <div className="nm-info">
+            <div>
+              <Icon name="flag" />
+              <span><small>Do celu</small><b>{fmtKm(p.route.totalKm)}</b></span>
+            </div>
+            <div className={arrival.bad ? "bad" : ""}>
+              <Icon name="clock" />
+              <span><small>Przyjazd</small><b>{arrival.clock}</b><i>{arrival.left !== undefined ? `za ${arrival.left}` : arrival.note}</i></span>
+            </div>
+            <button className={stopItem.tone} onClick={openSheet}>
+              <Icon name="coffee" />
+              <span><small>{stopItem.label}</small><b>{stopItem.value}</b><i>{stopItem.sub}</i></span>
+            </button>
+            <div>
+              <Icon name="road" />
+              <span><small>Trasa</small><b>{route ? routeRefs(route.instructions) : "—"}</b><i>{route ? fmtKm(route.lengthKm) : ""}{route?.engine === "roadpilot" ? " · RoadPilot" : ""}</i></span>
+            </div>
+          </div>
+        </footer>
+
+        {warnList && (
+          <div className="hud-sheet" onClick={(e) => e.target === e.currentTarget && setWarnList(false)}>
+            <div className="hud-sheet-body">
+              <button className="hud-sheet-close" aria-label="Zamknij" onClick={() => setWarnList(false)}>×</button>
+              <div className="stop-label">Ostrzeżenia na trasie: ograniczenia dla pojazdu, fotoradary, kontrole</div>
+              {upcoming.length ? (
+                <ul className="nm-warn-list">
+                  {upcoming.map((w) => (
+                    <li key={w.source + w.id + w.kind}>
+                      <b>{warningText(w)}</b>
+                      <span>{pos ? (w.toKm !== undefined && pos.km >= w.km ? `trwa — do końca ${fmtKm(w.toKm - pos.km)}` : `za ${fmtKm(Math.max(0, w.km - pos.km))}`) : `km ${Math.round(w.km)}`}{w.name ? ` · ${w.name}` : ""}</span>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="muted">Brak znanych ograniczeń, fotoradarów i kontroli (dane OpenStreetMap i zgłoszenia kierowców, Polska).</p>
+              )}
+            </div>
+          </div>
+        )}
+        {voteEl}
+        {sheetEl}
+        {reportEl}
+        {planEl}
+      </div>
+    );
+  }
+
+  if (minimal) {
+    return (
+      <div className={`hud minimal ${p.mirror ? "mirror" : ""}`}>
+        {lanes}
+        <header className="hud-min-top">
+          <span className="hud-min-meta">
+            {show.clock && <b>{fmtTime(now)}</b>}
+            {show.weather && <MinWeather weather={p.weather} />}
+          </span>
+          {menuEl}
+        </header>
+        <section className="hud-min-main">
+          {speedEl}
+          {notice}
+          {navEl}
+          {show.route && <MinProgress done={p.doneKm} left={p.route.totalKm} />}
+        </section>
+        <footer className="hud-min-foot">
+          <MinStats {...p} now={now} parking={parking} onBreak={openSheet} />
+          {(show.better && p.better) || apps ? (
+            <div className="hud-min-extra">
+              {show.better && p.better && <BetterCard better={p.better} now={now} onPick={p.onBetter} />}
+              {apps}
+            </div>
+          ) : null}
+        </footer>
+        {voteEl}
+        {sheetEl}
+        {reportEl}
+        {planEl}
+      </div>
+    );
+  }
+
+  const tiles = [show.drive, show.break, show.work].filter(Boolean).length;
+  // Dolny rząd: kolumny tylko dla widocznych kafelków (szersze dla lepszego scenariusza i MOP-u).
+  const info = [
+    show.better && p.better && "1.6fr",
+    show.parking && "1.3fr",
+    show.service && "1fr",
+    apps && "auto",
+  ].filter(Boolean) as string[];
+  // Same przyciski (MOP, serwis i lepszy scenariusz ukryte) idą nad kafelki — kafelki zostają na dole ekranu.
+  const appsOnly = !!apps && info.length === 1;
+
+  return (
+    <div className={`hud ${p.mirror ? "mirror" : ""} ${navEl ? "with-nav" : ""}`}>
+      {lanes}
+      <header className="hud-top">
+        <div className="hud-group">
+          {show.clock && <Pill className="p-clock" icon="clock" value={fmtTime(now)} label={fmtDay(now)} below />}
+          {show.dest && <Pill className="p-dest" icon="pin" label="Do celu" value={fmtKm(p.route.totalKm)} />}
+        </div>
+
+        {speedEl}
 
         <div className="hud-group right">
-          <button className="hud-pill-btn p-stop" onClick={() => { setSheet(!sheet); setMenu(false); }} aria-label={sc.stop ? "Trwający postój" : "Zaczynam przerwę"}>
-            {sc.stop ? (
-              <Pill icon="coffee" label="Postój" value={fmtTimer(Math.max(0, (now - sc.stop.start) / 60_000))} tone="active" />
-            ) : (
-              <Pill
-                icon="coffee"
-                label={stop ? (stop.kind === "break" ? "Przerwa" : "Odpoczynek") : "Do celu"}
-                value={stop ? (stopIn! <= 1 ? "teraz" : `za ${fmtDuration(stopIn!)}`) : "bez postoju"}
-                tone={stop && stopIn! <= 0 ? "bad" : stop && stopIn! <= 30 ? "warn" : undefined}
-              />
-            )}
-          </button>
-          <WeatherPill weather={p.weather} gpsOn={p.gpsOn} located={p.live !== null} />
-          <div className="hud-menu-wrap">
-            <button className="hud-pill hud-icon-btn" aria-label="Menu HUD" aria-expanded={menu} onClick={() => setMenu(!menu)}>
-              <Icon name="dots" />
-            </button>
-            {menu && (
-              <div className="hud-menu" role="menu">
-                <button role="menuitemcheckbox" aria-checked={p.mirror} onClick={() => { p.onMirror(!p.mirror); setMenu(false); }}>
-                  {p.mirror ? "✓ " : ""}Odbicie na szybę
-                </button>
-                <button role="menuitem" onClick={() => { setSheet(true); setMenu(false); }}>{sc.stop ? "Trwający postój" : "Zaczynam przerwę"}</button>
-                {fullscreenSupported() ? (
-                  <button role="menuitemcheckbox" aria-checked={fullscreen} onClick={() => { toggleFullscreen(); setMenu(false); }}>
-                    {fullscreen ? "✓ " : ""}Pełny ekran
-                  </button>
-                ) : (
-                  <span className="hud-menu-note">Pełny ekran: ta przeglądarka go nie obsługuje. Na iPhonie dodaj RoadPilot do ekranu początkowego (Udostępnij → „Do ekranu początkowego”).</span>
-                )}
-                <button role="menuitem" onClick={p.onExit}>Wyjdź z HUD</button>
-              </div>
-            )}
-          </div>
+          {show.avg && (
+            <div className="hud-pill p-avg" title="Średnia prędkość dzisiejszej jazdy">
+              <span className="hud-avg-sign" aria-hidden>⌀</span>
+              <span className="hud-pill-text">
+                <b>{p.avgKmh !== undefined ? Math.round(p.avgKmh) : "—"} <i>km/h</i></b>
+                <small className="accent">Średnia dziś</small>
+              </span>
+            </div>
+          )}
+          {show.weather && <WeatherPill weather={p.weather} gpsOn={p.gpsOn} located={p.live !== null} />}
+          {menuEl}
         </div>
       </header>
 
       <section className="hud-mid">
-        {!p.gpsOn ? (
-          <div className="hud-notice">
-            <span>Włącz GPS, żeby widzieć prędkość, najbliższą stację i odliczać kilometry.</span>
-            <button className="primary" onClick={p.onEnableGps}>Włącz GPS</button>
-          </div>
-        ) : p.gpsStatus === "denied" || p.gpsStatus === "unavailable" ? (
-          <div className="hud-notice warn">{p.gpsStatus === "denied" ? "Brak zgody na lokalizację — zezwól na nią w przeglądarce." : "GPS niedostępny — wymaga HTTPS."}</div>
-        ) : (
-          <div className="hud-route">
-            <div className="hud-route-labels">
-              <span>{p.doneKm > 0 ? `przejechane ${fmtKm(p.doneKm)}` : "start"}</span>
-              <span>{stop ? `${stop.kind === "break" ? "przerwa" : "odpoczynek"} ${fmtDuration((stop.end - stop.start) / 60_000)} o ${fmtClock(stop.start, now)} · ok. ${fmtKm(p.doneKm + stop.fromKm)}` : ""}</span>
-              <span>{p.destination || "cel"} · {fmtKm(totalKm)}</span>
-            </div>
-            <div className="hud-progress" aria-label="Postęp trasy">
-              <span style={{ width: `${totalKm > 0 ? Math.min(100, (p.doneKm / totalKm) * 100) : 0}%` }} />
-              {stop && totalKm > 0 && <i style={{ left: `${Math.min(100, ((p.doneKm + stop.fromKm) / totalKm) * 100)}%` }} title="Postój" />}
-            </div>
-          </div>
-        )}
+        {/* My — na środkowym pasie animacji drogi, zawsze przodem (bez obracania wg kierunku), tuż nad kafelkami. */}
+        {lanes && <svg className="hud-me" viewBox="-30 -34 60 64" aria-hidden><path d="M0 -30 L22 24 L0 12 L-22 24 Z" /></svg>}
+        {notice}
+        {navEl}
+        {show.route && <RouteLine {...p} now={now} parking={parking} />}
+        {(show.stats || show.arrival) && <Stats {...p} now={now} />}
       </section>
 
-      {sheet && (
-        <div className="hud-sheet" onClick={(e) => e.target === e.currentTarget && setSheet(false)}>
-          <div className="hud-sheet-body">
-            <button className="hud-sheet-close" aria-label="Zwiń" onClick={() => setSheet(false)}>×</button>
-            {sc.stop ? (
-              <ActiveStopPanel stop={sc.stop} driver={sc.driver} onEnd={(t) => { sc.onEnd(t); setSheet(false); }} onCancel={() => { sc.onCancel(); setSheet(false); }} onTarget={sc.onTarget} />
-            ) : (
-              <StopPicker driver={sc.driver} now={now} onCancel={() => setSheet(false)} onStart={sc.onStart} />
-            )}
-          </div>
-        </div>
-      )}
+      {voteEl}
+      {sheetEl}
+      {reportEl}
+      {planEl}
 
-      <footer className="hud-tiles">
-        <ArrivalTile plan={p.plan} deadline={p.deadline} now={now} />
-        <Tile icon="wheel" label="Jazda dziś — zostało" tone={p.status.driveLeftToday <= 30 ? "warn" : undefined}>
-          <strong>{fmtDuration(p.status.driveLeftToday)}</strong>
-          <span>do przerwy {fmtDuration(Math.min(p.status.untilBreak, p.status.driveLeftToday))}</span>
-        </Tile>
-        <StationTile {...p} />
-        <ServiceTile s={p.service} date={p.serviceDate} now={now} />
+      <footer className="hud-foot">
+        {appsOnly && <div className="hud-apps-row">{apps}</div>}
+        {tiles > 0 && (
+          <div className={`hud-tiles n${tiles}`} style={{ "--tiles": tiles } as CSSProperties}>
+            {show.drive && <DriveTile status={p.status} driver={p.driver} />}
+            {show.break && <BreakTile {...p} now={now} onOpen={openSheet} />}
+            {show.work && <WorkTile work={p.work} now={now} />}
+          </div>
+        )}
+        {info.length > 0 && !appsOnly && (
+          <div className={`hud-info ${show.better && p.better ? "with-better" : ""} ${apps ? "with-apps" : ""}`} style={{ "--info": info.join(" ") } as CSSProperties}>
+            {show.better && p.better && <BetterCard better={p.better} now={now} onPick={p.onBetter} />}
+            {show.parking && <ParkingTile gpsOn={p.gpsOn} live={p.live} parkings={p.parkings} found={parking} />}
+            {show.service && <ServiceTile service={p.service} />}
+            {apps}
+          </div>
+        )}
       </footer>
     </div>
   );
 }
 
-function ArrivalTile({ plan, deadline, now }: { plan?: Plan; deadline?: DeadlinePlan; now: number }) {
+interface Marker {
+  icon: IconName;
+  /** Km od bieżącej pozycji. */
+  km: number;
+  label: string;
+  tone: "stop" | "parking" | "service";
+}
+
+/** Na osi zostają tylko znaczniki oddalone od siebie o tyle (część trasy) — inaczej podpisy nachodzą na siebie. */
+const MARKER_GAP = 0.11;
+/** …ale nie mniej niż tyle pikseli — na wąskim ekranie (pionowo) podpisy „za 355 km 17:47” muszą się zmieścić obok siebie. */
+const MARKER_GAP_PX = 96;
+const DASHES = 18;
+
+/**
+ * Oś trasy: Start → Cel, przejechana część na zielono, ciężarówka w miejscu, w którym jesteśmy.
+ * Wszystkie znaczniki podpisujemy odległością od bieżącej pozycji („za 92 km”) — tak samo jak kafelki.
+ */
+function RouteLine(p: Props & { now: number; parking?: NearestStation<Parking> }) {
+  const trackRef = useRef<HTMLDivElement>(null);
+  const [trackW, setTrackW] = useState(600);
+  useEffect(() => {
+    const el = trackRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(([e]) => e.contentRect.width > 0 && setTrackW(e.contentRect.width));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  const gap = Math.max(MARKER_GAP, MARKER_GAP_PX / trackW);
+  const left = p.route.totalKm;
+  const total = p.doneKm + left;
+  const done = total > 0 ? Math.min(1, p.doneKm / total) : 0;
+
+  // Kolejność = ważność: postoje z planu, potem parking, serwis.
+  const candidates: Marker[] = [];
+  for (const e of (p.plan?.events ?? []).filter(isStop).slice(0, 2)) {
+    candidates.push({ icon: e.kind === "break" ? "coffee" : "bed", km: e.fromKm, label: fmtClock(e.start, p.now), tone: "stop" });
+  }
+  if (p.parking?.ahead) candidates.push({ icon: "parking", km: p.parking.km, label: "", tone: "parking" });
+  if (p.service.kmLeft !== undefined && p.service.kmLeft > 0) candidates.push({ icon: "wrench", km: p.service.kmLeft, label: "serwis", tone: "service" });
+  const markers: (Marker & { at: number })[] = [];
+  for (const m of candidates) {
+    if (m.km < 1 || m.km > left || total <= 0) continue;
+    const at = (p.doneKm + m.km) / total;
+    if (markers.every((o) => Math.abs(o.at - at) >= gap)) markers.push({ ...m, at });
+  }
+
+  return (
+    <div className="hud-route" aria-label="Postęp trasy">
+      <div className="hud-route-end start">
+        <Icon name="play" />
+        <b>Start</b>
+        {p.origin && <small>{p.origin}</small>}
+      </div>
+      <div className="hud-track" ref={trackRef}>
+        <div className="hud-dashes">
+          {Array.from({ length: DASHES }, (_, i) => <i key={i} className={(i + 0.5) / DASHES <= done ? "on" : ""} />)}
+        </div>
+        <div className="hud-truck" style={{ "--p": done } as CSSProperties}>
+          <b>{Math.round(done * 100)}%</b>
+          <Icon name="truck" />
+        </div>
+        {markers.map((m) => (
+          <div key={m.tone + m.km} className={`hud-marker m-${m.tone}`} style={{ left: `${Math.min(96, Math.max(4, m.at * 100))}%` }}>
+            <Icon name={m.icon} />
+            <b>za {fmtKm(m.km)}</b>
+            {m.label && <small>{m.label}</small>}
+          </div>
+        ))}
+      </div>
+      <div className="hud-route-end">
+        <Icon name="finish" />
+        <b>Cel</b>
+        {p.destination && <small>{p.destination}</small>}
+      </div>
+    </div>
+  );
+}
+
+/** Pokonano / Pozostało / Szacowany czas dojazdu — przyjazd z planu, czyli z przerwami i odpoczynkami po drodze. */
+/** Przyjazd z planu (z postojami) — ten sam w obu stylach. */
+function arrivalInfo(plan: Plan | undefined, deadline: DeadlinePlan | undefined, now: number) {
   if (!plan) {
-    return (
-      <Tile icon="flag" label="Przyjazd" tone={deadline ? "bad" : undefined}>
-        <strong>{deadline?.earliest !== undefined ? <Clock t={deadline.earliest} now={now} /> : "—"}</strong>
-        <span>{deadline ? `nie zdążysz na ${fmtClock(deadline.deadline, now)}` : "brak wykonalnego planu"}</span>
-      </Tile>
+    return {
+      clock: deadline?.earliest !== undefined ? fmtClock(deadline.earliest, now) : "—",
+      left: undefined,
+      note: deadline ? `nie zdążysz na ${fmtClock(deadline.deadline, now)}` : "brak wykonalnego planu",
+      bad: true,
+    };
+  }
+  const stops = plan.events.filter(isStop);
+  const stopMin = stops.reduce((a, e) => a + (e.end - e.start) / 60_000, 0);
+  return {
+    clock: fmtClock(plan.arrival, now),
+    left: fmtDuration(Math.max(0, plan.arrival - now) / 60_000),
+    note: [stops.length ? `z postojami ${fmtDuration(stopMin)}` : "bez postojów", deadline ? `rozładunek ${fmtClock(deadline.deadline, now)}` : ""].filter(Boolean).join(" · "),
+    bad: false,
+  };
+}
+
+function Stats({ plan, deadline, doneKm, route, now, items }: Props & { now: number }) {
+  const a = arrivalInfo(plan, deadline, now);
+  const cols = [items.stats && "1fr", items.stats && "1fr", items.arrival && "1.4fr"].filter(Boolean).join(" ");
+  return (
+    <div className="hud-stats" style={{ "--stats": cols } as CSSProperties}>
+      {items.stats && <div><small>Pokonano</small><b>{fmtKm(doneKm)}</b></div>}
+      {items.stats && <div><small>Pozostało</small><b>{fmtKm(route.totalKm)}</b></div>}
+      {items.arrival && (
+        <div className={a.bad ? "bad" : ""}>
+          <small>Szacowany czas dojazdu</small>
+          <b>{a.left !== undefined ? <>{a.left} <small>({a.clock})</small></> : a.clock}</b>
+          <span>{a.note}</span>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Komunikaty głosowe — osobny komponent, żeby hook działał tylko w stylu Nawigacja. */
+function NavVoice({ nav, track, kmh, enabled }: { nav?: HudNavData; track: NavTrack; kmh: number | null; enabled: boolean }) {
+  const route = nav?.route ?? null;
+  const pos = track.pos;
+  const next = route && pos && !track.off ? nextInstruction(route.instructions, pos.km) : undefined;
+  useNavVoice(enabled && !!route, next, pos?.km, route?.warnings, kmh);
+  return null;
+}
+
+/** Główne drogi trasy z opisów manewrów: „A1 · S7 · A4” (autostrady, ekspresówki, drogi krajowe) — max 3. */
+export function routeRefs(list: NavInstruction[]) {
+  // Polskie numery A / S; europejskie E tylko, gdy innych nie ma (E75 to ta sama A1).
+  const collect = (re: RegExp) => {
+    const refs: string[] = [];
+    for (const i of list) {
+      for (const m of `${i.street ?? ""} ${i.signpost ?? ""} ${i.text}`.matchAll(re)) {
+        const r = m[1].replace(/\s/, "");
+        if (!refs.includes(r)) refs.push(r);
+      }
+    }
+    return refs;
+  };
+  const refs = collect(/\b([AS]\s?\d{1,2})\b/g);
+  const all = refs.length ? refs : collect(/\b(E\s?\d{2,3})\b/g);
+  return all.length ? all.slice(0, 3).join(" · ") : "drogi lokalne";
+}
+
+/** Styl minimalistyczny: pogoda jako zwykły tekst. */
+function MinWeather({ weather }: { weather: Remote<Weather> }) {
+  if (!weather.data) return null;
+  const d = describeWeather(weather.data.code, weather.data.isDay);
+  return <span className={isHazard(weather.data) ? "warn" : ""}><Icon name={d.icon} />{Math.round(weather.data.tempC)}°C</span>;
+}
+
+/** Styl minimalistyczny: cienka linia postępu zamiast osi ze znacznikami. */
+function MinProgress({ done, left }: { done: number; left: number }) {
+  const total = done + left;
+  const pct = total > 0 ? Math.min(1, done / total) : 0;
+  return (
+    <div className="hud-min-progress" aria-label="Postęp trasy">
+      <span style={{ width: `${pct * 100}%` }} />
+      <i style={{ left: `${pct * 100}%` }} />
+      <b>{Math.round(pct * 100)}%</b>
+    </div>
+  );
+}
+
+interface MinStat {
+  key: string;
+  label: string;
+  value: ReactNode;
+  sub?: string;
+  tone?: Tone;
+  onClick?: () => void;
+}
+
+/** Styl minimalistyczny: same liczby z podpisami, bez kafelków i pasków. */
+function MinStats(p: Props & { now: number; parking?: NearestStation<Parking>; onBreak: () => void }) {
+  const { items: show, now, status, driver, stopControls: sc } = p;
+  const out: MinStat[] = [];
+  if (show.dest) out.push({ key: "dest", label: "Do celu", value: fmtKm(p.route.totalKm) });
+  if (show.arrival) {
+    const a = arrivalInfo(p.plan, p.deadline, now);
+    out.push({ key: "arrival", label: "Przyjazd", value: a.clock, sub: a.left !== undefined ? `za ${a.left}` : a.note, tone: a.bad ? "bad" : undefined });
+  }
+  if (show.break) {
+    if (sc.stop) {
+      out.push({ key: "break", label: sc.stop.dayEnd ? "Odpoczynek" : "Postój", value: fmtTimer(Math.max(0, (now - sc.stop.start) / 60_000)), sub: sc.stop.targetMin !== null ? `z ${fmtDuration(sc.stop.targetMin)}` : "do ruszenia", tone: "active", onClick: p.onBreak });
+    } else {
+      const stop = p.plan?.events.find(isStop);
+      const inMin = stop ? (stop.start - now) / 60_000 : undefined;
+      out.push(stop
+        ? { key: "break", label: stop.kind === "break" ? "Przerwa za" : "Odpoczynek za", value: inMin! <= 1 ? "teraz" : fmtDuration(inMin!), sub: `${fmtDuration((stop.end - stop.start) / 60_000)} o ${fmtClock(stop.start, now)}`, tone: inMin! <= 0 && stop.kind === "break" ? "bad" : inMin! <= 30 ? "warn" : undefined, onClick: p.onBreak }
+        : { key: "break", label: "Przerwa", value: "—", sub: "dojedziesz bez postoju", onClick: p.onBreak });
+    }
+  }
+  if (show.drive) {
+    const limit = driver.drivenTodayMin > RULES.dailyDrive ? RULES.dailyDriveExtended : RULES.dailyDrive;
+    out.push({ key: "drive", label: "Jazda — zostało", value: fmtDuration(status.driveLeftToday), sub: `${fmtHm(driver.drivenTodayMin)} / ${fmtHm(limit)}`, tone: status.driveLeftToday <= 0 ? "bad" : status.driveLeftToday <= 30 ? "warn" : undefined });
+  }
+  if (show.work) {
+    const w = p.work;
+    const end = w && (w.phase === "extended" || w.phase === "extendedOver") && w.extendedEnd ? w.extendedEnd : w?.end;
+    out.push(w
+      ? { key: "work", label: "Koniec pracy", value: fmtClock(end!, now), sub: `praca ${fmtHm(w.elapsedMin)}`, tone: w.phase === "ok" ? undefined : w.phase === "soon" || w.phase === "extended" ? "warn" : "bad" }
+      : { key: "work", label: "Praca", value: "—", sub: "odpoczynek dzienny" });
+  }
+  if (show.stats) out.push({ key: "done", label: "Pokonano", value: fmtKm(p.doneKm) });
+  if (show.avg) out.push({ key: "avg", label: "Średnia", value: p.avgKmh !== undefined ? `${Math.round(p.avgKmh)} km/h` : "—" });
+  if (show.parking) {
+    const ok = p.parking && p.parking.ahead !== false ? p.parking : undefined;
+    out.push({ key: "parking", label: ok ? PARKING_TITLE[ok.station.kind].replace("Najbliższy ", "") : "MOP", value: ok ? fmtStationKm(ok.km) : "—", sub: ok ? ok.station.name : undefined });
+  }
+  if (show.service && p.service.level !== "none") {
+    const km = p.service.kmLeft;
+    out.push({ key: "service", label: "Serwis", value: km !== undefined ? (km > 0 ? `${fmtThousands(km)} km` : "po terminie") : p.service.daysLeft! >= 0 ? `${p.service.daysLeft} dni` : "po terminie", tone: p.service.level === "overdue" ? "bad" : p.service.level === "soon" ? "warn" : undefined });
+  }
+  if (!out.length) return null;
+  return (
+    <div className="hud-min-stats" style={{ "--n": Math.min(out.length, 6) } as CSSProperties}>
+      {out.map((st) => {
+        const body = (
+          <>
+            <small>{st.label}</small>
+            <b>{st.value}</b>
+            {st.sub && <span>{st.sub}</span>}
+          </>
+        );
+        return st.onClick ? (
+          <button key={st.key} className={`hud-min-stat ${st.tone ?? ""}`} onClick={st.onClick}>{body}</button>
+        ) : (
+          <div key={st.key} className={`hud-min-stat ${st.tone ?? ""}`}>{body}</div>
+        );
+      })}
+    </div>
+  );
+}
+
+function Bar({ value, tone }: { value: number; tone?: Tone }) {
+  return <div className={`hud-bar ${tone ?? ""}`}><span style={{ width: `${Math.min(100, Math.max(0, value * 100))}%` }} /></div>;
+}
+
+/** Jazda dziś wobec dziennego limitu (9 h, 10 h przy wydłużeniu). */
+function DriveTile({ status, driver }: { status: DriverStatus; driver: DriverState }) {
+  const limit = driver.drivenTodayMin > RULES.dailyDrive ? RULES.dailyDriveExtended : RULES.dailyDrive;
+  const byWeek = status.weekLeft < limit - driver.drivenTodayMin;
+  const tone: Tone = status.driveLeftToday <= 0 ? "bad" : status.driveLeftToday <= 30 ? "warn" : undefined;
+  return (
+    <Tile icon="wheel" label="Czas jazdy dziś" tone={tone} bar={driver.drivenTodayMin / limit}>
+      <strong>{fmtHm(driver.drivenTodayMin)} <em>/ {fmtHm(limit)}</em></strong>
+      <span>zostało {fmtDuration(status.driveLeftToday)}{byWeek ? " · limit tygodnia" : ""}</span>
+    </Tile>
+  );
+}
+
+/** Następny postój z planu; w trakcie postoju — jego licznik. Otwiera panel postoju. */
+function BreakTile({ plan, status, driver, stopControls: sc, now, onOpen }: Props & { now: number; onOpen: () => void }) {
+  // Segmenty po 30 min ciągłej jazdy — 9 segmentów = 4,5 h.
+  const segments = Math.round(RULES.maxContinuousDrive / 30);
+  const lit = Math.min(segments, Math.floor(driver.sinceBreakMin / 30 + 1e-6));
+  let body: ReactNode;
+  let tone: Tone;
+  if (sc.stop) {
+    const elapsed = Math.max(0, (now - sc.stop.start) / 60_000);
+    tone = "active";
+    body = (
+      <>
+        <span className="hud-tile-label">{sc.stop.dayEnd ? "Odpoczynek dzienny" : "Postój trwa"}</span>
+        <strong>{fmtTimer(elapsed)}</strong>
+        <span>{sc.stop.targetMin !== null ? `z ${fmtDuration(sc.stop.targetMin)}` : "do ruszenia"}</span>
+      </>
+    );
+  } else {
+    const stop = plan?.events.find(isStop);
+    const inMin = stop ? (stop.start - now) / 60_000 : undefined;
+    // Spóźniona przerwa to naruszenie; odpoczynek „teraz” to po prostu wybrany plan.
+    tone = inMin === undefined ? undefined : inMin <= 0 && stop!.kind === "break" ? "bad" : inMin <= 30 ? "warn" : undefined;
+    body = stop ? (
+      <>
+        <span className="hud-tile-label">{stop.kind === "break" ? "Następna przerwa" : "Odpoczynek dzienny"}</span>
+        <strong>{inMin! <= 1 ? "teraz" : fmtDuration(inMin!)}</strong>
+        <span>{fmtDuration((stop.end - stop.start) / 60_000)} o {fmtClock(stop.start, now)} · max {fmtDuration(RULES.maxContinuousDrive)} jazdy</span>
+      </>
+    ) : (
+      <>
+        <span className="hud-tile-label">Następna przerwa</span>
+        <strong>{fmtDuration(status.untilBreak)}</strong>
+        <span>dojedziesz bez postoju</span>
+      </>
     );
   }
   return (
-    <Tile icon="flag" label="Przyjazd">
-      <strong><Clock t={plan.arrival} now={now} /></strong>
-      <span>{deadline ? `rozładunek ${fmtClock(deadline.deadline, now)}` : `za ${fmtDuration(Math.max(0, plan.arrival - now) / 60_000)}`}</span>
-    </Tile>
+    <button className={`hud-tile hud-tile-btn ${tone ?? ""}`} onClick={onOpen} aria-label="Postój">
+      <Icon name="coffee" className="hud-tile-ico" />
+      <div className="hud-tile-body">{body}</div>
+      <Icon name="chevron" className="hud-chevron" />
+      <div className="hud-segments" aria-hidden>
+        {Array.from({ length: segments }, (_, i) => <i key={i} className={i < lit ? "on" : ""} />)}
+      </div>
+    </button>
   );
 }
 
-/** „jutro 06:01” — dzień mniejszą czcionką, żeby godzina mieściła się w wąskim kafelku. */
-function Clock({ t, now }: { t: number; now: number }) {
-  const [day, time] = fmtClock(t, now).split(" ");
-  return time ? <><small className="hud-day">{day}</small>{time}</> : <>{day}</>;
-}
-
-function StationTile({ gpsOn, live, stations }: Props) {
-  let main = "—";
-  let sub: string;
-  let truck = false;
-  const found = live && stations.data ? nearestStation(stations.data, live, live.heading) : undefined;
-  if (!gpsOn) sub = "włącz GPS";
-  else if (!live) sub = "czekam na pozycję…";
-  else if (found) {
-    main = found.station.name;
-    truck = found.station.truck;
-    const where = found.ahead === null ? "w pobliżu" : found.ahead ? "przed Tobą" : "za Tobą";
-    sub = `${fmtStationKm(found.km)} · ${where}`;
-  } else if (stations.data) sub = `brak w promieniu ${STATIONS.radiusM / 1000} km`;
-  else if (stations.error) sub = "nie udało się pobrać — ponowię za chwilę";
-  else sub = "szukam stacji…";
-  return (
-    <Tile icon="fuel" label="Najbliższa stacja">
-      <strong className="ellipsis">{main}{truck && <em className="hud-badge">TIR</em>}</strong>
-      <span>{sub}</span>
-    </Tile>
-  );
-}
-
-function ServiceTile({ s, date, now }: { s: ServiceStatus; date: number | null; now: number }) {
-  if (s.level === "none") {
+/** Czas pracy (okres dnia pracy) wobec limitu — 13 h albo 15 h po wejściu w wydłużenie. */
+function WorkTile({ work, now }: { work?: WorkStatus; now: number }) {
+  if (!work) {
     return (
-      <Tile icon="wrench" label="Serwis">
+      <Tile icon="briefcase" label="Czas pracy" bar={0}>
         <strong className="dim">—</strong>
-        <span>ustaw w Ustawieniach</span>
+        <span>odpoczynek dzienny</span>
       </Tile>
     );
   }
-  const km = s.kmLeft === undefined ? undefined : s.kmLeft > 0 ? `za ${fmtNum(s.kmLeft)} km` : `${fmtNum(-s.kmLeft)} km po`;
-  const day =
-    s.daysLeft === undefined || date === null
-      ? undefined
-      : s.daysLeft === 0 ? "dziś" : s.daysLeft === 1 ? "jutro" : s.daysLeft > 0 ? `${fmtDate(date)} · za ${s.daysLeft} dni` : `${fmtDate(date)} · ${-s.daysLeft} dni po`;
+  const extended = (work.phase === "extended" || work.phase === "extendedOver") && work.extendedEnd !== undefined;
+  const limit = extended ? EXTENDED_WORK_MIN : work.elapsedMin + work.leftMin;
+  const end = extended ? work.extendedEnd! : work.end;
+  const tone: Tone = work.phase === "over" || work.phase === "extendedOver" ? "bad" : work.phase === "ok" ? undefined : "warn";
   return (
-    <Tile icon="wrench" label={s.level === "overdue" ? "Serwis — po terminie" : "Serwis"} tone={s.level === "overdue" ? "bad" : s.level === "soon" ? "warn" : undefined}>
-      <strong>{km ?? day}</strong>
-      <span>{km ? day ?? "przebieg z GPS" : "termin"}</span>
+    <Tile icon="briefcase" label="Czas pracy" tone={tone} bar={work.elapsedMin / limit}>
+      <strong>{fmtHm(work.elapsedMin)} <em>/ {fmtHm(limit)}</em></strong>
+      <span>{end > now ? `koniec o ${fmtClock(end, now)}` : "limit minął"}{extended ? " · wydłużony" : ""}</span>
     </Tile>
+  );
+}
+
+const SCENARIO_TEXT = { now: "Jedź teraz", rest9: "Odpocznij teraz 9 h", rest11: "Odpocznij teraz 11 h" } as const;
+
+/** Szybszy wariant — pokazujemy tylko, gdy istnieje; dotknięcie przełącza plan (po potwierdzeniu). */
+function BetterCard({ better, now, onPick }: { better: Better; now: number; onPick: (b: Better) => void }) {
+  const lead = better.kind === "scenario" ? SCENARIO_TEXT[better.id] : `Dopuść ${better.label}`;
+  const ask = better.kind === "scenario" ? `${lead} — przyjazd ${fmtClock(better.arrival, now)}. Przełączyć plan?` : `Dopuścić ${better.label}? Przyjazd o ${fmtClock(better.arrival, now)}.`;
+  return (
+    <button className="hud-better" onClick={() => confirm(ask) && onPick(better)}>
+      <Icon name="clock" className="hud-tile-ico" />
+      <span className="hud-better-text">
+        <b>Lepszy scenariusz</b>
+        <span>{lead}: przyjazd <em>{fmtDuration(better.savedMin)} wcześniej</em> ({fmtClock(better.arrival, now)})</span>
+      </span>
+      <Icon name="chevron" className="hud-chevron" />
+    </button>
+  );
+}
+
+const PARKING_TITLE: Record<Parking["kind"], string> = { mop: "Najbliższy MOP", services: "Najbliższy MOP", truck: "Parking TIR" };
+
+function lookupText<T>(gpsOn: boolean, live: Live | null, data: Remote<T[]>, what: string) {
+  if (!gpsOn) return "włącz GPS";
+  if (!live) return "czekam na pozycję…";
+  if (data.data) return `brak przed Tobą (${STATIONS.radiusM / 1000} km)`;
+  if (data.error) return "nie udało się pobrać — ponowię";
+  return `szukam ${what}…`;
+}
+
+/** Najbliższy MOP / parking dla ciężarówek przed nami. */
+function ParkingTile({ gpsOn, live, parkings, found }: { gpsOn: boolean; live: Live | null; parkings: Remote<Parking[]>; found?: NearestStation<Parking> }) {
+  const ok = found && found.ahead !== false ? found : undefined;
+  return (
+    <div className="hud-info-tile is-parking">
+      <span className="hud-p" aria-hidden>P</span>
+      <span className="hud-info-text">
+        <small>{ok ? PARKING_TITLE[ok.station.kind] : "Najbliższy MOP"}</small>
+        <b className="ellipsis">{ok ? ok.station.name : "—"}</b>
+        <span>{ok ? `${fmtStationKm(ok.km)}${ok.station.kind === "services" ? " · stacja paliw, bar" : ""}` : lookupText(gpsOn, live, parkings, "parkingów")}</span>
+      </span>
+    </div>
+  );
+}
+
+function ServiceTile({ service }: { service: ServiceStatus }) {
+  const tone = service.level === "overdue" ? "bad" : service.level === "soon" ? "warn" : "";
+  const main =
+    service.kmLeft !== undefined ? (service.kmLeft > 0 ? `za ${fmtThousands(service.kmLeft)} km` : "po terminie")
+    : service.daysLeft !== undefined ? (service.daysLeft >= 0 ? `za ${service.daysLeft} dni` : "po terminie")
+    : "—";
+  const sub = service.level === "none" ? "ustaw w Ustawieniach" : service.kmLeft !== undefined && service.daysLeft !== undefined ? `lub za ${service.daysLeft} dni` : "";
+  return (
+    <div className={`hud-info-tile ${tone}`}>
+      <Icon name="wrench" className="hud-info-ico" />
+      <span className="hud-info-text">
+        <small>Serwis</small>
+        <b>{main}</b>
+        {sub && <span>{sub}</span>}
+      </span>
+    </div>
+  );
+}
+
+/** Muzyka, zgłoszenia i przycisk pływającego okienka — to, co kierowca włączył w Ustawieniach. */
+function AppsTile({ musicApp, show, floatBtn, floating, onReport }: Props & { show: boolean; floatBtn: boolean; onReport?: () => void }) {
+  const os = platform();
+  const music = show ? musicLink(musicApp, os) : undefined;
+  return (
+    <div className="hud-apps">
+      {onReport && (
+        <button className="hud-app report" onClick={onReport} aria-label="Zgłoś na drodze">
+          <Icon name="flag" />
+          <span>Zgłoś</span>
+        </button>
+      )}
+      {floatBtn && (
+        <button className={`hud-app ${floating.active ? "on" : ""}`} onClick={floating.toggle} aria-label="Pływające okienko" aria-pressed={floating.active}>
+          <Icon name="pip" />
+          <span>Okienko</span>
+        </button>
+      )}
+      {music && (
+        <button className="hud-app music" onClick={() => launch(music, os)} aria-label={`Muzyka: ${MUSIC_APPS.find((a) => a.id === musicApp)!.label}`}>
+          <Icon name="music" />
+          <span>{MUSIC_APPS.find((a) => a.id === musicApp)!.label}</span>
+        </button>
+      )}
+    </div>
   );
 }
 
@@ -226,33 +882,40 @@ function WeatherPill({ weather: { data, loading, error }, gpsOn, located }: { we
     return <Pill className="p-weather" icon="cloud" label="Pogoda" value={why} />;
   }
   const d = describeWeather(data.code, data.isDay);
-  return <Pill className="p-weather" icon={d.icon} value={`${Math.round(data.tempC)}°C`} label={d.text} tone={isHazard(data) ? "warn" : undefined} />;
+  return <Pill className="p-weather" icon={d.icon} value={`${Math.round(data.tempC)}°C`} label={d.text} tone={isHazard(data) ? "warn" : undefined} below />;
 }
 
 type Tone = "warn" | "bad" | "active" | undefined;
 
-function Pill({ icon, label, value, tone, className = "" }: { icon: IconName; label?: string; value: string; tone?: Tone; className?: string }) {
+/** `below` — podpis pod wartością (godzina / data, temperatura / opis), jak na wizualizacji. */
+function Pill({ icon, label, value, tone, className = "", below }: { icon: IconName; label?: string; value: string; tone?: Tone; className?: string; below?: boolean }) {
   return (
     <div className={`hud-pill ${className} ${tone ?? ""}`}>
       <Icon name={icon} />
       <span className="hud-pill-text">
-        {label && <small>{label}</small>}
+        {label && !below && <small>{label}</small>}
         <b>{value}</b>
+        {label && below && <small>{label}</small>}
       </span>
     </div>
   );
 }
 
-function Tile({ icon, label, tone, children }: { icon: IconName; label: string; tone?: Tone; children: ReactNode }) {
+/** `bar` — pasek postępu pod całym kafelkiem. */
+function Tile({ icon, label, tone, bar, children }: { icon: IconName; label: string; tone?: Tone; bar: number; children: ReactNode }) {
   return (
     <div className={`hud-tile ${tone ?? ""}`}>
-      <span className="hud-tile-label"><Icon name={icon} />{label}</span>
-      {children}
+      <Icon name={icon} className="hud-tile-ico" />
+      <div className="hud-tile-body">
+        <span className="hud-tile-label">{label}</span>
+        {children}
+      </div>
+      <Bar value={bar} tone={tone} />
     </div>
   );
 }
 
-type IconName = "clock" | "pin" | "coffee" | "dots" | "flag" | "wheel" | "fuel" | "wrench" | WeatherIcon;
+type IconName = "sound" | "mute" | "warning" | "road" | "clock" | "pin" | "coffee" | "dots" | "flag" | "wheel" | "parking" | "truck" | "play" | "finish" | "chevron" | "briefcase" | "wrench" | "bed" | "nav" | "music" | "pip" | "search" | WeatherIcon;
 
 const CLOUD = "M7 17a4.5 4.5 0 1 1 .9-8.9A6 6 0 0 1 19.3 9.6 3.8 3.8 0 0 1 18 17H7Z";
 const ICONS: Record<IconName, string> = {
@@ -262,8 +925,22 @@ const ICONS: Record<IconName, string> = {
   dots: "M12 5h.01M12 12h.01M12 19h.01",
   flag: "M5 21V4M5 4h12l-2.5 4 2.5 4H5",
   wheel: "M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18ZM12 14a2 2 0 1 0 0-4 2 2 0 0 0 0 4ZM3.5 10.5 10 12M14 12l6.5-1.5M12 14v7",
-  fuel: "M4 21V5a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2v16M3 21h12M4 10h10M14 8l3 3v6.5a1.5 1.5 0 0 0 3 0V9l-3-3",
-  wrench: "M14.7 6.3a4 4 0 0 0-5.3 5.2L3.5 17.4a1.5 1.5 0 0 0 0 2.1l1 1a1.5 1.5 0 0 0 2.1 0l5.9-5.9a4 4 0 0 0 5.2-5.3l-2.4 2.4-2.6-.5-.5-2.6 2.5-2.3Z",
+  parking: "M5 3h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2ZM10 17V7h3.5a3 3 0 0 1 0 6H10",
+  truck: "M2 6h12v10H2zM14 9h4l3 3.5V16h-7M6.5 19a1.8 1.8 0 1 0 0-3.6 1.8 1.8 0 0 0 0 3.6ZM17.5 19a1.8 1.8 0 1 0 0-3.6 1.8 1.8 0 0 0 0 3.6Z",
+  play: "M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18ZM10 8.5v7l5.5-3.5-5.5-3.5Z",
+  finish: "M5 21V4M5 4h14v9H5M9 4v9M13 4v9M17 4v9M5 8.5h14",
+  chevron: "M9 5l7 7-7 7",
+  briefcase: "M3 8h18v11H3zM8 8V5h8v3M3 13h18M10 13v2h4v-2",
+  wrench: "M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.8-3.8a6 6 0 0 1-7.9 7.9l-6.9 6.9a2.1 2.1 0 0 1-3-3l6.9-6.9a6 6 0 0 1 7.9-7.9l-3.8 3.8Z",
+  nav: "M3 11l18-8-8 18-2-8-8-2Z",
+  sound: "M4 9h4l5-4v14l-5-4H4V9ZM16.5 8.5a5 5 0 0 1 0 7M19 6a8.5 8.5 0 0 1 0 12",
+  mute: "M4 9h4l5-4v14l-5-4H4V9ZM17 9l5 6M22 9l-5 6",
+  warning: "M12 3 2 21h20L12 3ZM12 10v5M12 18h.01",
+  road: "M8 3 4 21M16 3l4 18M12 4v3M12 11v3M12 18v3",
+  pip: "M3 5h18v14H3zM12 12h7v5h-7z",
+  search: "M10.5 17a6.5 6.5 0 1 0 0-13 6.5 6.5 0 0 0 0 13ZM15.3 15.3 21 21",
+  music: "M9 18V5l11-2v13M9 18a3 3 0 1 1-6 0 3 3 0 0 1 6 0ZM20 16a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z",
+  bed: "M3 18V7M3 14h18v4M21 14v-2a3 3 0 0 0-3-3h-7v5M7 12a1.8 1.8 0 1 0 0-3.6A1.8 1.8 0 0 0 7 12Z",
   sun: "M12 16.5a4.5 4.5 0 1 0 0-9 4.5 4.5 0 0 0 0 9ZM12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4",
   moon: "M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5Z",
   cloud: CLOUD,
@@ -273,13 +950,16 @@ const ICONS: Record<IconName, string> = {
   storm: `${CLOUD}M12.5 17l-2 3h3l-2 3`,
 };
 
-function Icon({ name }: { name: IconName }) {
+function Icon({ name, className = "" }: { name: IconName; className?: string }) {
   return (
-    <svg className="hud-ico" viewBox="0 0 24 24" aria-hidden>
+    <svg className={`hud-ico ${className}`} viewBox="0 0 24 24" aria-hidden>
       <path d={ICONS[name]} />
     </svg>
   );
 }
+
+/** „3 450” — tysiące ze spacją, jak w polskich liczbach. */
+const fmtThousands = (n: number) => Math.round(n).toString().replace(/\B(?=(\d{3})+(?!\d))/g, " ");
 
 function useTick(ms: number) {
   const [now, setNow] = useState(() => Date.now());
@@ -290,9 +970,7 @@ function useTick(ms: number) {
   return now;
 }
 
-const fmtNum = (n: number) => Math.round(n).toLocaleString("pl-PL");
 const fmtStationKm = (km: number) => (km < 10 ? `${km.toFixed(1).replace(".", ",")} km` : `${Math.round(km)} km`);
-const fmtDate = (t: number) => new Date(t).toLocaleDateString("pl-PL", { day: "2-digit", month: "2-digit" });
 
 // Safari (macOS, iPadOS) i starsze WebView mają tylko wersje z prefiksem webkit. iPhone nie ma pełnego ekranu dla stron wcale.
 type WebkitDocument = Document & { webkitFullscreenElement?: Element | null; webkitExitFullscreen?: () => Promise<void> | void };

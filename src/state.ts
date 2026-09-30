@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { GpsTrack } from "./core/gps";
 import { DriverState } from "./core/plan";
 import { DEFAULT_SPEEDS, ProfileId, Segment, Speeds } from "./core/route";
+import { ScenarioId } from "./core/scenarios";
 import { ServiceInfo } from "./core/service";
 import { ActiveStop } from "./core/stop";
 
@@ -36,6 +37,8 @@ export interface Settings {
   service: ServiceInfo;
   /** HUD: obraz w lustrzanym odbiciu — do odbicia w szybie (telefon leży na desce). */
   hudMirror: boolean;
+  /** Stałe powiadomienie (jak odtwarzacz muzyki) — trzyma aplikację przy życiu w tle. */
+  ongoing: boolean;
 }
 
 export interface AppState {
@@ -53,6 +56,8 @@ export interface AppState {
   hud: boolean;
   /** Trwający postój oznaczony przez kierowcę („zaczynam przerwę”) — null, gdy jedzie. */
   stop: ActiveStop | null;
+  /** Scenariusz wybrany przez kierowcę zamiast zalecanego — null = zalecany przez RoadPilot. */
+  choice: ScenarioId | null;
 }
 
 const KEY = "roadpilot:v1";
@@ -71,12 +76,13 @@ export function defaultState(now = Date.now()): AppState {
       weekDrivenMin: 0,
       prevWeekDrivenMin: 0,
     },
-    settings: { speeds: { ...DEFAULT_SPEEDS }, parkingBufferMin: 45, allowExtension: false, allowReducedRest: false, gps: false, liveEta: false, service: { date: null, km: null, odoAtSet: 0 }, hudMirror: false },
+    settings: { speeds: { ...DEFAULT_SPEEDS }, parkingBufferMin: 45, allowExtension: false, allowReducedRest: false, gps: false, liveEta: false, service: { date: null, km: null, odoAtSet: 0 }, hudMirror: false, ongoing: false },
     planTime: null,
     track: null,
     odoKm: 0,
     hud: false,
     stop: null,
+    choice: null,
   };
 }
 

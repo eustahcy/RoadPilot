@@ -56,8 +56,9 @@ src/core/          RoadPilot Core — czyste, deterministyczne funkcje TS (bez R
 src/state.ts       AppState (version: 1) w localStorage pod kluczem "roadpilot:v1", useNow (tick 15 s)
 src/tracking.ts    Geolocation.watchPosition + Wake Lock → applyFix na stanie; zwraca { status, live };
                    startStop/finishStop — ręczny postój (ruszenie z GPS kończy go; GPS nie zalicza tego postoju drugi raz)
+src/ongoing.ts     stałe powiadomienie: cicha pętla audio (WAV generowany w pamięci) + Media Session, ongoingInfo = tekst karty
 src/nearby.ts      HUD: useStations (Overpass, z serwerem zapasowym) i useWeather (Open-Meteo)
-src/App.tsx        jedyne miejsce łączące stan z silnikiem (useMemo), 4 zakładki: Plan/Trasa/Tachograf/Ustawienia;
+src/App.tsx        jedyne miejsce łączące stan z silnikiem (useMemo); activePlan = wybór kierowcy (AppState.choice) → plan pod rozładunek → zalecany; 4 zakładki: Plan/Trasa/Tachograf/Ustawienia;
                    gdy state.hud — renderuje tylko HudView
 src/components/    widoki; HudView.tsx = tryb HUD; fields.tsx = NumberField, OptionalNumberField, DurationField, Toggle, Stepper
 public/sw.js       service worker (cache "roadpilot-vN"): nawigacja network-first, assets cache-first
@@ -104,6 +105,9 @@ Widoki nie liczą reguł same — tylko formatują wyniki silnika.
 - `creditDriving` obcina `sinceBreakMin` do 270 — przekroczenie ciągłej jazdy nie jest widoczne w stanie.
 - `DurationField` pozwala wpisać np. 10 h 59 min jazdy dziennej (limit godzin, a minuty do 59).
 - `planForDeadline` zakłada monotoniczność (`maxWhere`) — przy granicy tygodnia może nie znaleźć optimum.
+- Stałe powiadomienie to obejście PWA (audio + Media Session): na Androidzie może przejąć fokus audio i zatrzymać
+  muzykę z innej aplikacji; znika po zamknięciu aplikacji z listy ostatnich. Prawdziwa usługa w tle wymaga opakowania
+  natywnego (np. Capacitor). GPS w tle nie jest gwarantowany — luki nadrabia `addFix` po powrocie.
 - Przypomnienia (`Reminders.tsx`) liczą od `Date.now()`, także gdy ustawiono inną godzinę planowania.
 - Poza zakresem silnika: odpoczynek tygodniowy po 6 okresach 24 h, dyrektywa 2002/15 (czas pracy, noc),
   promy/pociągi, jazda w załodze, lokalne zakazy ruchu.

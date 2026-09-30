@@ -8,12 +8,13 @@ import { SettingsView } from "./components/SettingsView";
 import { planForDeadline } from "./core/deadline";
 import { GPS, recentSpeed, uniformSpeeds } from "./core/gps";
 import { remainingSegments, Route, segmentsFromProfile } from "./core/route";
-import { compareScenarios, driverStatus, whatIfs } from "./core/scenarios";
+import { compareScenarios, driverStatus, ScenarioId, whatIfs } from "./core/scenarios";
 import { serviceStatus } from "./core/service";
 import { planAfterStop } from "./core/stop";
 import { fmtClock, fmtTime } from "./format";
 import { defaultState, floorMinute, useNow, usePersistentState } from "./state";
 import { useStations, useWeather } from "./nearby";
+import { ongoingInfo, useOngoingNotification } from "./ongoing";
 import { changeStop, finishStop, startStop, useGpsTracking } from "./tracking";
 
 type Tab = "plan" | "route" | "driver" | "settings";
@@ -60,6 +61,15 @@ function App() {
     [route, driver, planNow, trip.unloadAt, trip.unloadBufferMin, options.allowExtension, options.allowReducedRest],
   );
 
+  const best = comparison.scenarios.find((s) => s.id === comparison.bestId);
+  // Wybór kierowcy wygrywa z zaleceniem (także z planem pod rozładunek), o ile scenariusz jest wykonalny.
+  const chosen = comparison.scenarios.find((s) => s.id === state.choice && s.plan.feasible);
+  const activePlan = chosen?.plan ?? deadline?.plan ?? best?.plan;
+  const choose = (choice: ScenarioId | null) => setState((s) => ({ ...s, choice }));
+
+  const setOngoing = (ongoing: boolean) => setState((s) => ({ ...s, settings: { ...s.settings, ongoing } }));
+  useOngoingNotification(settings.ongoing, ongoingInfo(activePlan, status, state.stop, now), () => setOngoing(false));
+
   const go = (t: Tab) => {
     setTab(t);
     window.scrollTo({ top: 0 });
@@ -86,13 +96,12 @@ function App() {
   };
 
   if (state.hud) {
-    const best = comparison.scenarios.find((s) => s.id === comparison.bestId);
     return (
       <HudView
         destination={trip.destination}
         route={route}
         doneKm={trip.doneKm}
-        plan={deadline ? deadline.plan : best?.plan}
+        plan={activePlan}
         deadline={deadline}
         status={status}
         gpsOn={settings.gps}
@@ -144,6 +153,11 @@ function App() {
             status={status}
             planNow={viewNow}
             deadline={deadline}
+            chosen={chosen}
+            activePlan={activePlan}
+            onChoose={choose}
+            ongoing={settings.ongoing}
+            onOngoing={setOngoing}
             liveKmh={liveKmh}
             stopControls={stopProps}
             gps={

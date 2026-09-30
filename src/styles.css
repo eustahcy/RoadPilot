@@ -332,3 +332,11 @@ input[type="number"]::-webkit-inner-spin-button, input[type="number"]::-webkit-o
   .hud-tile strong { font-size: clamp(20px, 7vh, 30px); }
   .hud-tile > span:last-child { font-size: 12px; }
 }
+
+/* Wybór scenariusza przez kierowcę */
+.scenario.chosen { border-color: rgba(232, 180, 76, .6); background: linear-gradient(135deg, rgba(232, 180, 76, .09), #10161d); }
+.scenario.chosen .scenario-eta strong { color: var(--amber); }
+.badge.chosen { background: rgba(232, 180, 76, .15); color: var(--amber); }
+.scenario-actions { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-top: 4px; }
+.pick { padding: 8px 14px; font-size: 12px; border-radius: 10px; min-height: 36px; }
+.late-note { color: var(--red); font-weight: 750; }

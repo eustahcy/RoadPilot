@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { ParkingHint, Plan } from "../core/plan";
 import { fmtTime } from "../format";
+import { ongoingSupported, startOngoing } from "../ongoing";
 import { eventLabel } from "./Timeline";
 
 interface Reminder {
@@ -66,6 +67,30 @@ export function Reminders({ plan, parking }: { plan: Plan; parking?: ParkingHint
       {supported && Notification.permission !== "denied" && (
         <button className={enabled ? "ghost" : "primary"} onClick={toggle}>{enabled ? "Wyłącz" : "Włącz"}</button>
       )}
+    </section>
+  );
+}
+
+/** Stałe powiadomienie w zasłonie (karta odtwarzacza) — aplikacja działa po zminimalizowaniu i przy wygaszonym ekranie. */
+export function OngoingCard({ on, onChange }: { on: boolean; onChange: (on: boolean) => void }) {
+  // Dźwięk startujemy bezpośrednio w kliknięciu — inaczej przeglądarka go zablokuje.
+  const toggle = async () => {
+    if (on) return onChange(false);
+    if (await startOngoing()) onChange(true);
+  };
+  return (
+    <section className="card reminders">
+      <div>
+        <div className="eyebrow">Stałe powiadomienie</div>
+        <p className="muted">
+          {ongoingSupported
+            ? on
+              ? "Włączone: następna czynność i przyjazd są w powiadomieniach i na ekranie blokady. Aplikacja działa w tle, dopóki nie zamkniesz jej z listy ostatnich. „Pauza” na karcie je wyłącza."
+              : "Karta jak w odtwarzaczu muzyki — RoadPilot działa w tle po zminimalizowaniu i przy wygaszonym ekranie."
+            : "Ta przeglądarka nie obsługuje karty odtwarzacza (Media Session)."}
+        </p>
+      </div>
+      {ongoingSupported && <button className={on ? "ghost" : "primary"} onClick={toggle}>{on ? "Wyłącz" : "Włącz"}</button>}
     </section>
   );
 }

@@ -2,10 +2,10 @@ import { ReactNode, useState } from "react";
 import { DeadlinePlan } from "../core/deadline";
 import { parkingHint, Plan, PlanEvent, PlanOptions } from "../core/plan";
 import { Route } from "../core/route";
-import { Comparison, DriverStatus, explain, Scenario, WhatIf } from "../core/scenarios";
+import { Comparison, DriverStatus, explain, Scenario, ScenarioId, WhatIf } from "../core/scenarios";
 import { fmtClock, fmtDuration, fmtKm } from "../format";
 import { AppState } from "../state";
-import { Reminders } from "./Reminders";
+import { OngoingCard, Reminders } from "./Reminders";
 import { StopCard, StopControlsProps } from "./StopControls";
 import { eventLabel, Timeline } from "./Timeline";
 
@@ -17,6 +17,13 @@ interface Props {
   status: DriverStatus;
   planNow: number;
   deadline?: DeadlinePlan;
+  /** Scenariusz wybrany przez kierowcę (zamiast zalecanego). */
+  chosen?: Scenario;
+  /** Plan, według którego jedziemy: wybrany, pod rozładunek albo zalecany. */
+  activePlan?: Plan;
+  onChoose: (id: ScenarioId | null) => void;
+  ongoing: boolean;
+  onOngoing: (on: boolean) => void;
   /** Prędkość z GPS, z której liczony jest przyjazd (km/h). */
   liveKmh?: number;
   gps: ReactNode;
@@ -26,11 +33,9 @@ interface Props {
   goTo: (tab: "route" | "driver") => void;
 }
 
-export function PlanView({ state, route, comparison, hints, status, planNow, deadline, liveKmh, gps, stopControls, onOption, onOptions, goTo }: Props) {
+export function PlanView({ state, route, comparison, hints, status, planNow, deadline, chosen, activePlan: active, onChoose, ongoing, onOngoing, liveKmh, gps, stopControls, onOption, onOptions, goTo }: Props) {
   const best = comparison.scenarios.find((s) => s.id === comparison.bestId);
   const { trip, settings } = state;
-  // Z awizacją liczy się plan dobrany pod rozładunek, bez niej — najwcześniejszy przyjazd.
-  const active: Plan | undefined = deadline ? deadline.plan : best?.plan;
   const parking = active ? parkingHint(active, route, settings.parkingBufferMin) : undefined;
 
   return (
@@ -43,7 +48,13 @@ export function PlanView({ state, route, comparison, hints, status, planNow, dea
             {fmtKm(route.totalKm)} · {fmtDuration(route.driveMinutes(0))} samej jazdy{liveKmh ? ` · tempo z GPS ${liveKmh} km/h` : ""}
           </span>
         </button>
-        {deadline ? (
+        {chosen ? (
+          <div className="eta-block">
+            <span className="eyebrow">Przewidywany przyjazd</span>
+            <strong className={`eta-big ${deadline && chosen.plan.arrival > deadline.deadline ? "late" : ""}`}>{fmtClock(chosen.plan.arrival, planNow)}</strong>
+            <span className="muted">Twój wybór: {chosen.label.toLowerCase()} · łącznie {fmtDuration((chosen.plan.arrival - planNow) / 60_000)}</span>
+          </div>
+        ) : deadline ? (
           <div className="eta-block">
             <span className="eyebrow">Rozładunek {fmtClock(deadline.deadline, planNow)}</span>
             <strong className={`eta-big ${deadline.onTime ? "" : "late"}`}>{fmtClock(deadline.plan?.arrival ?? deadline.earliest ?? deadline.deadline, planNow)}</strong>
@@ -70,7 +81,9 @@ export function PlanView({ state, route, comparison, hints, status, planNow, dea
 
       {gps}
 
-      {deadline ? (
+      {chosen ? (
+        <NextStep best={chosen} parking={parking} planNow={planNow} chosen deadline={deadline?.deadline} onReset={() => onChoose(null)} />
+      ) : deadline ? (
         <DeadlineCard d={deadline} parking={parking} planNow={planNow} onOptions={onOptions} goTo={goTo} />
       ) : (
         <NextStep best={best} parking={parking} planNow={planNow} />
@@ -97,7 +110,7 @@ export function PlanView({ state, route, comparison, hints, status, planNow, dea
         <h2>Co się bardziej opłaca?</h2>
         <div className="scenario-list">
           {comparison.scenarios.map((s) => (
-            <ScenarioCard key={s.id} s={s} best={best} planNow={planNow} deadline={deadline?.deadline} />
+            <ScenarioCard key={s.id} s={s} best={best} planNow={planNow} deadline={deadline?.deadline} chosen={chosen?.id === s.id} onChoose={() => onChoose(chosen?.id === s.id ? null : s.id)} />
           ))}
         </div>
         {hints.map((h) => (
@@ -116,12 +129,14 @@ export function PlanView({ state, route, comparison, hints, status, planNow, dea
         )}
       </section>
 
-      {best && <Reminders plan={best.plan} parking={parking} />}
+      {active && <Reminders plan={active} parking={parking} />}
+
+      <OngoingCard on={ongoing} onChange={onOngoing} />
     </>
   );
 }
 
-function NextStep({ best, parking, planNow }: { best?: Scenario; parking?: ReturnType<typeof parkingHint>; planNow: number }) {
+function NextStep({ best, parking, planNow, chosen, deadline, onReset }: { best?: Scenario; parking?: ReturnType<typeof parkingHint>; planNow: number; chosen?: boolean; deadline?: number; onReset?: () => void }) {
   if (!best) return null;
   const events = best.plan.events;
   const first = events[0];
@@ -143,9 +158,12 @@ function NextStep({ best, parking, planNow }: { best?: Scenario; parking?: Retur
   }
   return (
     <section className="card next">
-      <div className="eyebrow">Następna czynność</div>
+      <div className="eyebrow">{chosen ? "Następna czynność · Twój wybór" : "Następna czynność"}</div>
       <h2>{title}</h2>
       <p>{text}</p>
+      {chosen && deadline !== undefined && best.plan.arrival > deadline && (
+        <p className="late-note">Spóźnienie na rozładunek {fmtDuration((best.plan.arrival - deadline) / 60_000)}.</p>
+      )}
       {parking && (
         <p className="parking">
           <span className="p-badge">P</span>
@@ -154,6 +172,7 @@ function NextStep({ best, parking, planNow }: { best?: Scenario; parking?: Retur
           </span>
         </p>
       )}
+      {chosen && <button className="text-btn" onClick={onReset}>Wróć do zalecenia RoadPilot</button>}
     </section>
   );
 }
@@ -219,14 +238,14 @@ function DeadlineCard({ d, parking, planNow, onOptions, goTo }: { d: DeadlinePla
   );
 }
 
-function ScenarioCard({ s, best, planNow, deadline }: { s: Scenario; best?: Scenario; planNow: number; deadline?: number }) {
+function ScenarioCard({ s, best, planNow, deadline, chosen, onChoose }: { s: Scenario; best?: Scenario; planNow: number; deadline?: number; chosen: boolean; onChoose: () => void }) {
   const [open, setOpen] = useState(false);
   const p = s.plan;
   const isBest = best?.id === s.id;
   const lead = s.id === "now" ? "Jeżeli ruszysz teraz" : `Jeżeli odpoczniesz ${s.id === "rest9" ? "9" : "11"} godzin`;
   const diff = best && !isBest && p.feasible ? (p.arrival - best.plan.arrival) / 60_000 : 0;
   return (
-    <article className={`scenario ${isBest ? "recommended" : ""} ${p.feasible ? "" : "unavailable"}`}>
+    <article className={`scenario ${isBest ? "recommended" : ""} ${chosen ? "chosen" : ""} ${p.feasible ? "" : "unavailable"}`}>
       <div className="scenario-top">
         <div>
           <div className="scenario-name">{s.label}</div>
@@ -241,6 +260,7 @@ function ScenarioCard({ s, best, planNow, deadline }: { s: Scenario; best?: Scen
         <p className="scenario-say">
           {lead}, przewidywany przyjazd: <strong>{fmtClock(p.arrival, planNow)}</strong>.
           {isBest && <span className="badge">Najwcześniej</span>}
+          {chosen && <span className="badge chosen">Twój wybór</span>}
           {diff >= 1 && <span className="later"> O {fmtDuration(diff)} później niż „{best!.label}”.</span>}
           {deadline !== undefined && (p.arrival <= deadline
             ? <span className="slot ok">zdążysz · {fmtDuration((deadline - p.arrival) / 60_000)} przed</span>
@@ -250,9 +270,12 @@ function ScenarioCard({ s, best, planNow, deadline }: { s: Scenario; best?: Scen
         <p className="scenario-say">{p.problem}</p>
       )}
       {p.feasible && (
-        <button className="text-btn" onClick={() => setOpen(!open)} aria-expanded={open}>
-          {open ? "Ukryj szczegóły" : "Pokaż szczegóły"}
-        </button>
+        <div className="scenario-actions">
+          <button className="text-btn" onClick={() => setOpen(!open)} aria-expanded={open}>
+            {open ? "Ukryj szczegóły" : "Pokaż szczegóły"}
+          </button>
+          <button className={chosen ? "ghost pick" : "primary pick"} onClick={onChoose}>{chosen ? "Anuluj wybór" : "Wybieram"}</button>
+        </div>
       )}
       {open && (
         <div className="details">

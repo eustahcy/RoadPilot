@@ -109,7 +109,7 @@ function App() {
     if (!auth || !navDest || !live || rerouting) return;
     setRerouting(true);
     try {
-      const next = await fetchRoute(auth.token, { lat: live.lat, lon: live.lon }, navDest, settings.vehicle, Date.now(), settings.navEngine);
+      const next = await fetchRoute(auth.token, { lat: live.lat, lon: live.lon }, navDest, settings.vehicle, Date.now(), settings.navEngine, settings.routeType);
       setState((s) => ({ ...s, navRoute: next, trip: tripFromRoute(s.trip, next) }));
     } catch {
       /* brak sieci lub limit — HUD spróbuje ponownie za minutę */
@@ -302,6 +302,7 @@ function App() {
           token: auth.token,
           vehicle: settings.vehicle,
           engine: settings.navEngine,
+          routeType: settings.routeType,
           position: live ? { lat: live.lat, lon: live.lon } : null,
           onRoute: (r: NavRoute) => setState((s) => ({ ...s, navRoute: r, trip: tripFromRoute(s.trip, r) })),
         } : undefined}
@@ -417,6 +418,7 @@ function App() {
             nav={{
               access: navAccess,
               engine: settings.navEngine,
+              routeType: settings.routeType,
               token: auth?.token ?? null,
               enabled: navAccess === "premium",
               vehicle: settings.vehicle,
@@ -441,7 +443,7 @@ function App() {
             onPlanTime={(t) => setState((s) => ({ ...s, planTime: t }))}
             onReset={() => setState(defaultState())}
             navAccess={navAccess}
-            friends={{ api: auth ? friends : null, gpsOn: settings.gps }}
+            friends={{ api: auth ? friends : null, gpsOn: settings.gps, me }}
             account={{
               user: auth?.user ?? null,
               token: auth?.token ?? null,

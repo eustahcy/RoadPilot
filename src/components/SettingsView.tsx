@@ -11,7 +11,7 @@ import { EXTENDED_WORK_MIN, WorkSettings } from "../core/workday";
 import { MUSIC_APPS, MusicApp } from "../core/apps";
 import { DEFAULT_HUD_ITEMS, HUD_ITEMS, HUD_STYLES, HudItems } from "../hudConfig";
 import { floatingSupported } from "../floating";
-import { DEFAULT_VEHICLE, NavAccess, Vehicle } from "../nav";
+import { DEFAULT_VEHICLE, NavAccess, ROUTE_TYPES, Vehicle } from "../nav";
 import { MapDataSection } from "./MapConsent";
 import { AdminMap } from "./AdminMap";
 import { REPORT_KINDS } from "../collect";
@@ -29,7 +29,7 @@ interface Props {
   onReset: () => void;
   account: AccountProps;
   /** Znajomi: API z konta (null bez konta) i czy GPS jest włączony (wysyłka obecności). */
-  friends: { api: FriendsApi | null; gpsOn: boolean };
+  friends: { api: FriendsApi | null; gpsOn: boolean; me: { lat: number; lon: number } | null };
 }
 
 interface AccountProps {
@@ -94,7 +94,7 @@ export function SettingsView({ initialCategory, navAccess, state, now, onSetting
 
       {cat === "account" && <AccountSection {...account} />}
 
-      {cat === "friends" && <FriendsSettings api={friends.api} share={settings.friendsShare} onShare={(friendsShare) => set({ friendsShare })} gpsOn={friends.gpsOn} onLogin={account.onLogin} />}
+      {cat === "friends" && <FriendsSettings api={friends.api} share={settings.friendsShare} onShare={(friendsShare) => set({ friendsShare })} gpsOn={friends.gpsOn} onLogin={account.onLogin} me={friends.me} now={now} mapToken={navAccess === "premium" ? account.token : null} />}
 
       {cat === "planning" && (
         <>
@@ -273,6 +273,20 @@ function VehicleSection({ settings, navAccess, onChange }: { settings: Settings;
             ))}
           </div>
           <p className="muted small">Gdy limit TomTom się wyczerpie, trasy w Polsce liczy automatycznie silnik RoadPilot.</p>
+        </section>
+      )}
+      {navAccess === "premium" && (
+        <section className="card">
+          <div className="eyebrow">Rodzaj trasy</div>
+          <div className="hud-style-pick">
+            {ROUTE_TYPES.map((t) => (
+              <button key={t.id} className={`hud-style-opt ${settings.routeType === t.id ? "active" : ""}`} aria-pressed={settings.routeType === t.id} onClick={() => onChange({ routeType: t.id })}>
+                <strong>{t.label}</strong>
+                <small>{t.hint}</small>
+              </button>
+            ))}
+          </div>
+          <p className="muted small">Działa od następnej wyznaczonej trasy. Alternatywy w porównaniu tras są zawsze liczone dla wybranego rodzaju.</p>
         </section>
       )}
       <section className="card">

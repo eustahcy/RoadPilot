@@ -78,7 +78,8 @@ src/components/HudNav.tsx  useNavTrack (pozycja na trasie, poza trasą → onRer
 src/collect.ts     mapa RoadPilot (za zgodą users.data_consent_at): useTraceCollector (ślad co 5 s / 60 m, >8 km/h, tylko PL, bufor w localStorage
                    "roadpilot:trace", wysyłka co 5 min / 400 pkt), sendReport, setConsent, deleteMyMapData; MapConsent.tsx, ReportSheet.tsx
 src/voice.ts       komunikaty głosowe (Web Speech, pl-PL): useNavVoice — manewry (progi zależne od prędkości) i ostrzeżenia ≤ 1 km; spokenDist
-src/nav.ts         nawigacja (beta): Vehicle, NavPlace, NavRoute; searchPlaces / fetchRoute przez API → TomTom; AppState.navRoute tylko lokalnie (nie w sync)
+src/nav.ts         nawigacja (beta): Vehicle, NavPlace, NavRoute, RouteType (fastest/shortest/eco → Settings.routeType, POST /api/nav/route);
+                   searchPlaces / fetchRoute przez API → TomTom; AppState.navRoute tylko lokalnie (nie w sync)
 src/components/NavCard.tsx  Trasa: wyszukiwanie celu, „Wyznacz trasę dla ciężarówki”; trasa → trip.segments (profil custom) → silnik przerw
 src/hudConfig.ts   HudStyle (full/minimal), HUD_ITEMS, DEFAULT_HUD_ITEMS — Settings.hudItems[styl]; element „road” steruje też pobieraniem dróg
 src/floating.ts    pływające okienko: canvas → captureStream → <video> → PiP (requestPictureInPicture / webkitSetPresentationMode); useFloating(info, prepare)
@@ -95,7 +96,8 @@ src/components/AuthScreen.tsx  logowanie / rejestracja / „Kontynuuj bez konta�
 src/core/friends.ts  znajomi: presenceOf (co wysyłamy: pozycja, prędkość, status driving/standing/break/rest/dayEnd, since, cel, przyjazd, tachograf),
                    describeFriend (km w linii prostej, status, „25 min z 45 min”), nearestFriend; testy friends.test.ts
 src/friends.ts     useFriends: GET /api/friends co 30 s (gdy widoczna), POST /api/presence co 20 s tylko z kontem + GPS + friendsShare
-                   + ≥1 zaakceptowany znajomy; wyłączenie → POST {off:true} kasuje obecność. Friends.tsx = karta na Planie, Ustawienia → Znajomi, kafelek HUD
+                   + ≥1 zaakceptowany znajomy; wyłączenie → POST {off:true} kasuje obecność. Friends.tsx = karta na Planie, Ustawienia → Znajomi
+                   (status + „Gdzie jest”: MapView z pozycją przy Premium, inaczej link do map), kafelek HUD
 public/sw.js       service worker (cache "roadpilot-vN"): nawigacja network-first, assets cache-first, /api/ zawsze z sieci
 server/friends.mjs   znajomi: cleanPresence (walidacja obecności, pozycja do 1e-4°), friendView (relation accepted/invited/pending, obecność tylko
                    świeża ≤ PRESENCE_TTL 10 min); tabele friends (user_id zaprasza friend_id, accepted_at) i presence (JSON, 1 wiersz na konto);

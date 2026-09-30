@@ -6,6 +6,7 @@ import { fmtClock, fmtKm } from "../format";
 export const fmtFriendDist = (km: number) => (km < 10 ? `${km.toFixed(1).replace(".", ",")} km` : fmtKm(km));
 import { FriendsApi } from "../friends";
 import { Toggle } from "./fields";
+import { MapView } from "./MapView";
 
 interface CardProps {
   api: FriendsApi;
@@ -87,11 +88,73 @@ interface SettingsProps {
   onShare: (on: boolean) => void;
   gpsOn: boolean;
   onLogin: () => void;
+  /** Nasza pozycja (odległość do znajomego) i chwila „teraz”. */
+  me: { lat: number; lon: number } | null;
+  now: number;
+  /** Token do kafelków mapy (Premium) — bez niego zamiast mapy link do aplikacji map. */
+  mapToken: string | null;
+}
+
+/** Co znajomy robi: „Jedzie · 82 km/h · w trasie 3 h 10 min → Gdańsk” albo „Przerwa · 25 min z 45 min”. */
+function FriendStatus({ f, me, now }: { f: Friend; me: { lat: number; lon: number } | null; now: number }) {
+  if (!f.presence) return <span className="muted small">brak sygnału — aplikacja zamknięta albo GPS wyłączony</span>;
+  const info = describeFriend(f.presence, me, now);
+  const p = f.presence;
+  return (
+    <>
+      <span className="friend-status">
+        <strong>{info.status}</strong>
+        {p.kmh !== null && p.status === "driving" ? ` · ${p.kmh} km/h` : ""}
+        {info.duration ? ` · ${info.duration}` : ""}
+        {info.km !== undefined ? ` · ${fmtFriendKm(info)}` : ""}
+      </span>
+      <span className="muted small">
+        {p.dest ? `→ ${p.dest}` : "bez celu"}
+        {p.leftKm !== null && p.dest ? ` · ${fmtKm(p.leftKm)}` : ""}
+        {p.arrival !== null && p.dest ? ` · przyjazd ${fmtClock(p.arrival, now)}` : ""}
+        {p.driveLeftMin !== null ? ` · jazda zostało ${fmtMin(p.driveLeftMin)}` : ""}
+        {` · sygnał ${fmtAgo(now - p.at)}`}
+      </span>
+    </>
+  );
+}
+
+const fmtAgo = (ms: number) => (ms < 90_000 ? "przed chwilą" : `${Math.round(ms / 60_000)} min temu`);
+
+/** Gdzie stoi znajomy: mapa (Premium, kafelki przez nasz serwer) albo link do aplikacji map w telefonie. */
+function FriendMap({ f, mapToken }: { f: Friend; mapToken: string | null }) {
+  const p = f.presence!;
+  const moving = p.status === "driving";
+  return (
+    <div className="friend-map-wrap">
+      {mapToken ? (
+        <div className="friend-map">
+          <MapView
+            token={mapToken}
+            center={p}
+            zoom={13}
+            overlay={(px) => {
+              const [x, y] = px(p);
+              return (
+                <g className={`hud-map-friend ${moving ? "" : "stopped"}`} transform={`translate(${x.toFixed(1)} ${y.toFixed(1)})`}>
+                  <path transform={`rotate(${moving && p.heading !== null ? p.heading : 0})`} d="M0 -24 L17 19 L0 10 L-17 19 Z" />
+                </g>
+              );
+            }}
+          />
+        </div>
+      ) : (
+        <p className="muted small">Mapa w aplikacji wymaga Premium. Pozycja: {p.lat.toFixed(4)}, {p.lon.toFixed(4)}.</p>
+      )}
+      <a className="ghost friend-open" href={`https://www.google.com/maps/search/?api=1&query=${p.lat},${p.lon}`} target="_blank" rel="noopener">Otwórz w aplikacji map</a>
+    </div>
+  );
 }
 
 /** Ustawienia → Znajomi: zaproszenie po e-mailu, lista, akceptacja i usuwanie, przełącznik udostępniania. */
-export function FriendsSettings({ api, share, onShare, gpsOn, onLogin }: SettingsProps) {
+export function FriendsSettings({ api, share, onShare, gpsOn, onLogin, me, now, mapToken }: SettingsProps) {
   const [email, setEmail] = useState("");
+  const [shownMap, setShownMap] = useState<number | null>(null);
   const [msg, setMsg] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
   const [busy, setBusy] = useState(false);
   if (!api) {
@@ -141,10 +204,19 @@ export function FriendsSettings({ api, share, onShare, gpsOn, onLogin }: Setting
           <div className="eyebrow">{g.title}</div>
           <ul className="friends manage">
             {g.items.map((f) => (
-              <li key={f.id} className="friend">
+              <li key={f.id} className={`friend ${f.relation === "accepted" && !f.presence ? "offline" : ""}`}>
                 <span className="friend-avatar" aria-hidden>{f.name.charAt(0).toUpperCase()}</span>
-                <span className="friend-body"><b>{f.name}</b><span className="muted small">{f.email}</span></span>
-                <span className="row-buttons">{g.action(f)}</span>
+                <span className="friend-body">
+                  <b>{f.name} <span className="muted small">{f.email}</span></b>
+                  {f.relation === "accepted" && <FriendStatus f={f} me={me} now={now} />}
+                </span>
+                <span className="row-buttons">
+                  {f.relation === "accepted" && f.presence && (
+                    <button className={shownMap === f.id ? "ghost active" : "ghost"} onClick={() => setShownMap(shownMap === f.id ? null : f.id)}>{shownMap === f.id ? "Ukryj mapę" : "Gdzie jest"}</button>
+                  )}
+                  {g.action(f)}
+                </span>
+                {shownMap === f.id && f.presence && <FriendMap f={f} mapToken={mapToken} />}
               </li>
             ))}
           </ul>

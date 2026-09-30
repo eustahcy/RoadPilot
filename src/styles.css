@@ -946,7 +946,14 @@ input[type="number"]::-webkit-inner-spin-button, input[type="number"]::-webkit-o
 .friend-km { display: grid; text-align: right; }
 .friend-km strong { font-size: 18px; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .friend-km small { color: var(--mute); font-size: 10px; }
-.friends.manage .row-buttons { margin-top: 0; }
+.friends.manage .row-buttons { margin-top: 0; justify-content: flex-end; }
+.friends.manage .friend { grid-template-columns: auto minmax(0, 1fr); }
+.friends.manage .friend > .row-buttons { grid-column: 1 / -1; }
+.friend-map-wrap { grid-column: 1 / -1; display: grid; gap: 8px; }
+.friend-map { position: relative; height: 220px; border-radius: 12px; overflow: hidden; border: 1px solid var(--line-2); }
+.friend-map .map-view { background: #0a1219; }
+.friend-open { display: inline-block; justify-self: start; text-decoration: none; }
+.ghost.active { border-color: var(--green); color: var(--green); }
 .hud-info-tile.is-friend { border-color: rgba(78, 161, 255, .55); }
 .hud-avatar { display: grid; place-items: center; flex: none; width: calc(7 * var(--u)); height: calc(7 * var(--u)); border-radius: 50%; background: rgba(78, 161, 255, .22); color: #8ec3ff; font-size: calc(4 * var(--u)); font-weight: 900; line-height: 1; }
 .hud-map-friend path { fill: #4ea1ff; stroke: #08111a; stroke-width: 3; stroke-linejoin: round; filter: drop-shadow(0 0 8px rgba(78, 161, 255, .6)); }

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { ApiError } from "../api";
-import { currentPosition, fetchRoutes, NavEngine, NavPlace, NavRoute, searchPlaces, Vehicle } from "../nav";
+import { currentPosition, fetchRoutes, NavEngine, NavPlace, NavRoute, RouteType, searchPlaces, Vehicle } from "../nav";
 import { RouteCompare } from "./RouteCompare";
 
 /** Dane do wyznaczania trasy prosto z HUD (Premium). */
@@ -8,6 +8,7 @@ export interface HudPlanner {
   token: string;
   vehicle: Vehicle;
   engine: NavEngine;
+  routeType: RouteType;
   /** Pozycja z GPS HUD — inaczej pytamy telefon jednorazowo. */
   position: { lat: number; lon: number } | null;
   onRoute: (r: NavRoute) => void;
@@ -59,7 +60,7 @@ export function HudRoutePicker({ planner, dest: current, onClose }: { planner: H
     setRoutes([]);
     try {
       const from = planner.position ?? (await currentPosition());
-      const all = await fetchRoutes(planner.token, from, to, planner.vehicle, Date.now(), planner.engine);
+      const all = await fetchRoutes(planner.token, from, to, planner.vehicle, Date.now(), planner.engine, planner.routeType);
       setRoutes(all);
       setSelectedAt(all[0]?.at);
     } catch (e) {

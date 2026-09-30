@@ -49,12 +49,15 @@ export function vehicleParams(v) {
 }
 
 /** `alternatives` — ile tras alternatywnych (TomTom liczy je w tym samym zapytaniu, bez dodatkowego kosztu). */
-export function routeUrl(from, to, vehicle, key, alternatives = 0) {
+export const ROUTE_TYPES = new Set(["fastest", "shortest", "eco"]);
+
+/** `routeType` — fastest / shortest / eco (TomTom); nieznany → fastest. */
+export function routeUrl(from, to, vehicle, key, alternatives = 0, routeType = "fastest") {
   const q = vehicleParams(vehicle);
   if (alternatives > 0) q.set("maxAlternatives", String(alternatives));
   q.set("key", key);
   q.set("traffic", "true");
-  q.set("routeType", "fastest");
+  q.set("routeType", ROUTE_TYPES.has(routeType) ? routeType : "fastest");
   q.set("instructionsType", "tagged");
   q.set("language", "pl-PL");
   for (const s of ["motorway", "urban", "lanes", "speedLimit", "traffic"]) q.append("sectionType", s);

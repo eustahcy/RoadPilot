@@ -25,7 +25,8 @@ export function decodePolyline6(s) {
 }
 
 /** Zapytanie Valhalla /route dla ciężarówki z danymi pojazdu z aplikacji. */
-export function valhallaRequest(from, to, v, exclude = [], alternates = 0) {
+/** `routeType` "shortest" → Valhalla liczy po długości, nie po czasie; "eco" u nas = najszybsza. */
+export function valhallaRequest(from, to, v, exclude = [], alternates = 0, routeType = "fastest") {
   return {
     ...(alternates > 0 ? { alternates } : {}),
     locations: [{ lat: from.lat, lon: from.lon }, { lat: to.lat, lon: to.lon }],
@@ -41,6 +42,7 @@ export function valhallaRequest(from, to, v, exclude = [], alternates = 0) {
         axle_count: v.axles,
         hazmat: !!v.adr && v.adr !== "none",
         top_speed: v.maxKmh,
+        ...(routeType === "shortest" ? { shortest: true } : {}),
       },
     },
     directions_options: { units: "kilometers", language: "pl-PL" },

@@ -2,11 +2,12 @@ import { useEffect, useState } from "react";
 import { ApiError } from "../api";
 import { fmtDuration, fmtKm, fmtTime } from "../format";
 import { RouteCompare } from "./RouteCompare";
-import { currentPosition, fetchRoutes, isAlert, NavAccess, NavEngine, NavPlace, NavRoute, RouteWarning, searchPlaces, Vehicle, warningText } from "../nav";
+import { currentPosition, fetchRoutes, isAlert, NavAccess, NavEngine, NavPlace, NavRoute, RouteType, RouteWarning, searchPlaces, Vehicle, warningText } from "../nav";
 
 export interface NavProps {
   access: NavAccess;
   engine: NavEngine;
+  routeType: RouteType;
   /** Token sesji — nawigacja idzie przez konto (Premium). */
   token: string | null;
   enabled: boolean;
@@ -85,7 +86,7 @@ export function NavCard(p: NavProps) {
     setError(null);
     try {
       const from = p.position ?? (await currentPosition());
-      const all = await fetchRoutes(p.token!, from, p.dest, p.vehicle, Date.now(), p.engine);
+      const all = await fetchRoutes(p.token!, from, p.dest, p.vehicle, Date.now(), p.engine, p.routeType);
       setOptions(all);
       p.onRoute(all[0]);
     } catch (e) {

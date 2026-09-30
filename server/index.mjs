@@ -9,7 +9,7 @@ import { cleanPoints, cleanReport, inPoland } from "./collect.mjs";
 import { parseValhalla, parseValhallaAlternates, valhallaRequest } from "./valhalla.mjs";
 import { ALERT_KINDS, ALERT_TTL_H, applyVotes, blockingPoints, routeAlerts, routeBoxes, routeWarnings } from "./warnings.mjs";
 import { compareReports, REPORT_TO_OSM } from "./compare.mjs";
-import { parseRoutes, parseSearch, routeError, routeUrl, searchUrl, validPoint } from "./nav.mjs";
+import { parseRoutes, parseSearch, ROUTE_TYPES, routeError, routeUrl, searchUrl, validPoint } from "./nav.mjs";
 import { cleanPresence, friendView } from "./friends.mjs";
 import { readFile } from "node:fs/promises";
 import { createServer } from "node:http";
@@ -330,10 +330,10 @@ routes["GET /api/nav/search"] = async (req, user) => {
 /** Tyle razy silnik RoadPilot liczy trasę od nowa, omijając ograniczenia z naszej bazy, których pojazd nie spełnia. */
 const MAX_DETOURS = 6;
 
-async function valhallaOnce(from, to, vehicle, exclude) {
+async function valhallaOnce(from, to, vehicle, exclude, routeType = "fastest") {
   let r;
   try {
-    r = await fetch(`${VALHALLA_URL}/route`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(valhallaRequest(from, to, vehicle, exclude)), signal: AbortSignal.timeout(30_000) });
+    r = await fetch(`${VALHALLA_URL}/route`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(valhallaRequest(from, to, vehicle, exclude, 0, routeType)), signal: AbortSignal.timeout(30_000) });
   } catch {
     return null;
   }
@@ -345,17 +345,17 @@ async function valhallaOnce(from, to, vehicle, exclude) {
  * sprawdzamy trasę naszą bazą i przy twardym konflikcie (oś, masa, wysokość, szerokość, długość, zakaz) liczymy
  * od nowa z tym miejscem wykluczonym. Gdy objazdu nie ma — zostaje ostatnia wykonalna trasa z ostrzeżeniami.
  */
-async function valhallaRoute(from, to, vehicle) {
+async function valhallaRoute(from, to, vehicle, routeType = "fastest") {
   if (!VALHALLA_URL) return null;
   let veh;
   try {
     veh = parseVehicle(vehicle);
   } catch {
-    return valhallaOnce(from, to, vehicle, []);
+    return valhallaOnce(from, to, vehicle, [], routeType);
   }
   const exclude = [];
   const seen = new Set();
-  let best = await valhallaOnce(from, to, vehicle, exclude);
+  let best = await valhallaOnce(from, to, vehicle, exclude, routeType);
   if (!best) return null;
   for (let i = 0; i < MAX_DETOURS; i++) {
     const blocking = blockingPoints(await findWarnings(best.points, veh, false), best.lengthKm).filter((p) => !seen.has(p.key));
@@ -364,7 +364,7 @@ async function valhallaRoute(from, to, vehicle) {
       seen.add(p.key);
       exclude.push(p);
     });
-    const next = await valhallaOnce(from, to, vehicle, exclude);
+    const next = await valhallaOnce(from, to, vehicle, exclude, routeType);
     if (!next) break; // bez objazdu — zostaje poprzednia trasa (ostrzeżenia pokaże aplikacja)
     best = next;
   }
@@ -372,9 +372,9 @@ async function valhallaRoute(from, to, vehicle) {
 }
 
 /** Trasy alternatywne z Valhalli (bez omijania ograniczeń — kierowca widzi ostrzeżenia przy porównaniu). */
-async function valhallaAlternates(from, to, vehicle) {
+async function valhallaAlternates(from, to, vehicle, routeType = "fastest") {
   try {
-    const r = await fetch(`${VALHALLA_URL}/route`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(valhallaRequest(from, to, vehicle, [], 2)), signal: AbortSignal.timeout(30_000) });
+    const r = await fetch(`${VALHALLA_URL}/route`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(valhallaRequest(from, to, vehicle, [], 2, routeType)), signal: AbortSignal.timeout(30_000) });
     return r.ok ? parseValhallaAlternates(await r.json().catch(() => null)) : [];
   } catch {
     return [];
@@ -399,22 +399,23 @@ routes["POST /api/nav/route"] = async (req, user) => {
   const to = validPoint(body.to);
   if (!from || !to) throw new HttpError(400, "Brak punktu startu lub celu.");
   const withAlts = body.alternatives === true;
+  const routeType = ROUTE_TYPES.has(body.routeType) ? body.routeType : "fastest";
   let url;
   try {
-    url = routeUrl(from, to, body.vehicle, TOMTOM_KEY, withAlts ? 2 : 0);
+    url = routeUrl(from, to, body.vehicle, TOMTOM_KEY, withAlts ? 2 : 0, routeType);
   } catch (e) {
     throw new HttpError(400, e.message);
   }
   const ownPossible = !!VALHALLA_URL && inPoland(from.lat, from.lon) && inPoland(to.lat, to.lon);
   if (body.engine === "roadpilot" && ownPossible) {
-    const own = await valhallaRoute(from, to, body.vehicle);
-    if (own) return [200, { route: own, alternatives: withAlts ? distinct(own, (await valhallaAlternates(from, to, body.vehicle)).map((a) => ({ ...a, engine: "roadpilot" }))) : [] }];
+    const own = await valhallaRoute(from, to, body.vehicle, routeType);
+    if (own) return [200, { route: own, alternatives: withAlts ? distinct(own, (await valhallaAlternates(from, to, body.vehicle, routeType)).map((a) => ({ ...a, engine: "roadpilot" }))) : [] }];
   }
   userDaily("route", user);
   try {
     await spend("route");
   } catch (e) {
-    const own = ownPossible ? await valhallaRoute(from, to, body.vehicle) : null;
+    const own = ownPossible ? await valhallaRoute(from, to, body.vehicle, routeType) : null;
     if (own) return [200, { route: { ...own, fallback: true } }];
     throw e;
   }
@@ -422,7 +423,7 @@ routes["POST /api/nav/route"] = async (req, user) => {
   const [route, ...alts] = r.ok ? parseRoutes(r.json) : [];
   if (route) return [200, { route: { ...route, engine: "tomtom" }, alternatives: distinct(route, alts).map((a) => ({ ...a, engine: "tomtom" })) }];
   if (r.status >= 500 && ownPossible) {
-    const own = await valhallaRoute(from, to, body.vehicle);
+    const own = await valhallaRoute(from, to, body.vehicle, routeType);
     if (own) return [200, { route: { ...own, fallback: true } }];
   }
   throw new HttpError(r.status === 400 || r.status === 404 ? 422 : 502, routeError(r.json));

@@ -10,7 +10,7 @@ import { ServiceInfo } from "./core/service";
 import { ActiveStop } from "./core/stop";
 import { MusicApp } from "./core/apps";
 import { DEFAULT_HUD_ITEMS, HudItems, HudStyle } from "./hudConfig";
-import { DEFAULT_VEHICLE, NavEngine, NavPlace, NavRoute, Vehicle } from "./nav";
+import { DEFAULT_VEHICLE, NavEngine, NavPlace, NavRoute, Vehicle, RouteType } from "./nav";
 import { DEFAULT_WORK, WorkSettings } from "./core/workday";
 
 export interface Trip {
@@ -62,8 +62,9 @@ export interface Settings {
   /** Nawigacja RoadPilot dla ciężarówek (beta, TomTom) i dane pojazdu do niej. */
   navEnabled: boolean;
   vehicle: Vehicle;
-  /** Silnik tras (Ustawienia → Pojazd i nawigacja). */
+  /** Silnik tras i rodzaj trasy (Ustawienia → Pojazd i nawigacja). */
   navEngine: NavEngine;
+  routeType: RouteType;
   /** Komunikaty głosowe nawigacji (przycisk 🔊 w HUD). */
   navVoice: boolean;
   /** Znajomi widzą moją pozycję, postój, cel i stan tachografu (tylko zaakceptowani, tylko przy włączonym GPS). */
@@ -109,7 +110,7 @@ export function defaultState(now = Date.now()): AppState {
       weekDrivenMin: 0,
       prevWeekDrivenMin: 0,
     },
-    settings: { speeds: { ...DEFAULT_SPEEDS }, parkingBufferMin: 45, allowExtension: false, allowReducedRest: false, gps: false, liveEta: false, service: { date: null, km: null, odoAtSet: 0 }, hudMirror: false, ongoing: false, autoStop: true, hudAnimation: true, hudStyle: "full", hudItems: { full: { ...DEFAULT_HUD_ITEMS.full }, minimal: { ...DEFAULT_HUD_ITEMS.minimal }, nav: { ...DEFAULT_HUD_ITEMS.nav } }, work: { ...DEFAULT_WORK }, musicApp: "none", navEnabled: false, vehicle: { ...DEFAULT_VEHICLE }, navEngine: "tomtom", navVoice: true, friendsShare: true },
+    settings: { speeds: { ...DEFAULT_SPEEDS }, parkingBufferMin: 45, allowExtension: false, allowReducedRest: false, gps: false, liveEta: false, service: { date: null, km: null, odoAtSet: 0 }, hudMirror: false, ongoing: false, autoStop: true, hudAnimation: true, hudStyle: "full", hudItems: { full: { ...DEFAULT_HUD_ITEMS.full }, minimal: { ...DEFAULT_HUD_ITEMS.minimal }, nav: { ...DEFAULT_HUD_ITEMS.nav } }, work: { ...DEFAULT_WORK }, musicApp: "none", navEnabled: false, vehicle: { ...DEFAULT_VEHICLE }, navEngine: "tomtom", routeType: "fastest", navVoice: true, friendsShare: true },
     planTime: null,
     track: null,
     odoKm: 0,

@@ -33,6 +33,13 @@ export interface NavPlace {
 /** Trasa z TomTom w formacie aplikacji (server/nav.mjs → parseRoute). Kilometry liczone od startu trasy. */
 /** Silnik tras: TomTom (pełne dane, korki, pasy) albo własny RoadPilot (OSM Polska, bez kosztów, bez pasów). */
 export type NavEngine = "tomtom" | "roadpilot";
+/** Rodzaj trasy: najszybsza / najkrótsza / ekonomiczna (TomTom eco; własny silnik liczy ją jak najszybszą). */
+export type RouteType = "fastest" | "shortest" | "eco";
+export const ROUTE_TYPES: { id: RouteType; label: string; hint: string }[] = [
+  { id: "fastest", label: "Najszybsza", hint: "Najkrótszy czas jazdy — autostrady i ekspresówki, z korkami." },
+  { id: "shortest", label: "Najkrótsza", hint: "Najmniej kilometrów, nawet kosztem czasu — dłuższe odcinki przez miasta." },
+  { id: "eco", label: "Ekonomiczna", hint: "Kompromis czasu i paliwa (TomTom); własny silnik liczy ją jak najszybszą." },
+];
 
 export interface NavRoute {
   /** Kiedy wyznaczona (ms) i skąd — do „wyznacz ponownie”. */
@@ -175,14 +182,14 @@ export async function searchPlaces(token: string, q: string, near?: { lat: numbe
   return r.results;
 }
 
-export async function fetchRoute(token: string, from: { lat: number; lon: number }, to: NavPlace, vehicle: Vehicle, now: number, engine: NavEngine = "tomtom"): Promise<NavRoute> {
-  const r = await api<{ route: Omit<NavRoute, "at" | "from" | "to"> }>("POST", "/nav/route", { from, to: { lat: to.lat, lon: to.lon }, vehicle, engine }, token);
+export async function fetchRoute(token: string, from: { lat: number; lon: number }, to: NavPlace, vehicle: Vehicle, now: number, engine: NavEngine = "tomtom", routeType: RouteType = "fastest"): Promise<NavRoute> {
+  const r = await api<{ route: Omit<NavRoute, "at" | "from" | "to"> }>("POST", "/nav/route", { from, to: { lat: to.lat, lon: to.lon }, vehicle, engine, routeType }, token);
   return withWarnings(token, { ...r.route, at: now, from, to }, vehicle);
 }
 
 /** Trasa z alternatywami (do porównania) — każda już z ostrzeżeniami z naszej bazy. Pierwsza = najlepsza wg silnika. */
-export async function fetchRoutes(token: string, from: { lat: number; lon: number }, to: NavPlace, vehicle: Vehicle, now: number, engine: NavEngine = "tomtom"): Promise<NavRoute[]> {
-  const r = await api<{ route: Omit<NavRoute, "at" | "from" | "to">; alternatives?: Omit<NavRoute, "at" | "from" | "to">[] }>("POST", "/nav/route", { from, to: { lat: to.lat, lon: to.lon }, vehicle, engine, alternatives: true }, token);
+export async function fetchRoutes(token: string, from: { lat: number; lon: number }, to: NavPlace, vehicle: Vehicle, now: number, engine: NavEngine = "tomtom", routeType: RouteType = "fastest"): Promise<NavRoute[]> {
+  const r = await api<{ route: Omit<NavRoute, "at" | "from" | "to">; alternatives?: Omit<NavRoute, "at" | "from" | "to">[] }>("POST", "/nav/route", { from, to: { lat: to.lat, lon: to.lon }, vehicle, engine, routeType, alternatives: true }, token);
   // Różne `at` — po nim aplikacja rozpoznaje trasę (np. dociąganie ostrzeżeń).
   return Promise.all([r.route, ...(r.alternatives ?? [])].map((x, i) => withWarnings(token, { ...x, at: now + i, from, to }, vehicle)));
 }

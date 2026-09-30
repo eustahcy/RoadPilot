@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseRoute, parseRoutes, parseSearch, routeError, vehicleParams } from "./nav.mjs";
+import { parseRoute, parseRoutes, parseSearch, routeError, routeUrl, vehicleParams } from "./nav.mjs";
 
 /** Punkty co ~1,11 km na północ (0,01°) wzdłuż południka 0. */
 const pts = (n) => Array.from({ length: n }, (_, i) => ({ latitude: i * 0.01, longitude: 0 }));
@@ -51,6 +51,15 @@ describe("nawigacja TomTom", () => {
     expect(q.get("vehicleHeight")).toBe("4");
     expect(q.get("vehicleAdrTunnelRestrictionCode")).toBe("D");
     expect(() => vehicleParams({ ...v, heightM: 9 })).toThrow(/heightM/);
+  });
+
+  it("rodzaj trasy w adresie TomTom; nieznany → fastest", () => {
+    const v = { heightM: 4, widthM: 2.55, lengthM: 16.5, weightKg: 40000, axleWeightKg: 11500, axles: 5, maxKmh: 90, adr: "none" };
+    const type = (t) => new URL(routeUrl({ lat: 52, lon: 21 }, { lat: 53, lon: 21 }, v, "k", 0, t)).searchParams.get("routeType");
+    expect(type("shortest")).toBe("shortest");
+    expect(type("eco")).toBe("eco");
+    expect(type("bogus")).toBe("fastest");
+    expect(type()).toBe("fastest");
   });
 
   it("wyszukiwanie i błędy", () => {

@@ -89,14 +89,14 @@ export interface MapViewProps {
   onMove?: (center: LatLon, zoom: number) => void;
   className?: string;
   /**
-   * Płynny dojazd do nowej pozycji i obrotu (ms) — GPS podaje pozycję co ~1 s, bez tego mapa skakałaby co sekundę.
-   * Kafelki leżą względem stałego punktu odniesienia, a przesunięcie do bieżącej pozycji jest w transformacji warstwy
-   * (animowanej CSS). Punkt odniesienia przenosimy dopiero, gdy odjedziemy daleko — wtedy bez animacji.
+   * Pozycja „na teraz” (przewidywana między odczytami GPS) — wołana w każdej klatce; przesuwa i obraca warstwę
+   * bezpośrednio w DOM, bez ponownego renderu. Kafelki leżą względem stałego punktu odniesienia (przenoszonego
+   * dopiero, gdy odjedziemy daleko), a do bieżącej pozycji dowozi je transformacja warstwy.
    */
-  smoothMs?: number;
+  follow?: () => { lat: number; lon: number; bearing?: number } | undefined;
 }
 
-export function MapView({ token, center, zoom, bearing = 0, pitch = 0, anchorY = 0.5, overlay, children, onMove, className = "", smoothMs = 0 }: MapViewProps) {
+export function MapView({ token, center, zoom, bearing = 0, pitch = 0, anchorY = 0.5, overlay, children, onMove, className = "", follow }: MapViewProps) {
   const box = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState({ w: 800, h: 500 });
   useEffect(() => {
@@ -131,29 +131,19 @@ export function MapView({ token, center, zoom, bearing = 0, pitch = 0, anchorY =
   const scale = 2 ** (zoom - z);
   const [pxX, pxY] = worldPx(center, z);
   // Warstwa większa niż ekran: po obrocie i pochyleniu nie może być pustych rogów.
-  const reach = Math.hypot(size.w, size.h) * (pitch > 0 ? 2.2 : 0.75);
+  const reach = Math.hypot(size.w, size.h) * (pitch > 0 ? 2 : 0.75);
   const half = reach / scale;
   // Punkt odniesienia kafelków (cx, cy): przy płynnej mapie zostaje w miejscu, aż odjedziemy o ćwierć zasięgu.
   const origin = useRef<{ z: number; x: number; y: number } | null>(null);
   const o = origin.current;
-  const rebased = !smoothMs || !o || o.z !== z || Math.hypot(pxX - o.x, pxY - o.y) > half / 4;
-  if (rebased) origin.current = { z, x: pxX, y: pxY };
+  if (!follow || !o || o.z !== z || Math.hypot(pxX - o.x, pxY - o.y) > half / 4) origin.current = { z, x: pxX, y: pxY };
   const [cx, cy] = [origin.current!.x, origin.current!.y];
-  // Przeniesienie punktu odniesienia przesuwa kafelki i transformację naraz — ta klatka bez animacji, następna już z nią.
-  const [, bump] = useState(0);
-  const snap = useRef(false);
-  if (rebased) snap.current = true;
-  useEffect(() => {
-    if (!snap.current || !smoothMs) return;
-    const id = requestAnimationFrame(() => {
-      snap.current = false;
-      bump((n) => n + 1);
-    });
-    return () => cancelAnimationFrame(id);
-  });
   // Obrót bez „długiej drogi” przez 360° (359° → 1° to obrót o 2°, nie o −358°).
   const turn = useRef(bearing);
-  turn.current += ((bearing - turn.current + 540) % 360) - 180;
+  const unwrap = (b: number) => {
+    turn.current += ((b - turn.current + 540) % 360) - 180;
+    return turn.current;
+  };
   /** Kafelki poziomu `lz` w zasięgu (koło, nie kwadrat), od najbliższych — te ładują się pierwsze. */
   const level = (lz: number, cachedOnly: boolean) => {
     const f = 2 ** (z - lz); // rozmiar kafelka poziomu lz w pikselach poziomu z (w jednostkach TILE)
@@ -183,10 +173,31 @@ export function MapView({ token, center, zoom, bearing = 0, pitch = 0, anchorY =
   };
   const ax = size.w / 2;
   const ay = size.h * anchorY;
-  const layer: CSSProperties = {
-    transform: `translate(${ax}px, ${ay}px) rotateX(${pitch}deg) rotate(${-turn.current}deg) translate(${(-(pxX - cx) * scale).toFixed(1)}px, ${(-(pxY - cy) * scale).toFixed(1)}px)`,
-    transition: smoothMs && !snap.current ? `transform ${smoothMs}ms linear` : "none",
-  };
+  /** Transformacja warstwy dla pozycji `p` (px poziomu z) i kierunku — to samo w renderze i w każdej klatce. */
+  const layerTransform = (x: number, y: number, b: number) => `translate(${ax}px, ${ay}px) rotateX(${pitch}deg) rotate(${-unwrap(b)}deg) translate(${(-(x - cx) * scale).toFixed(1)}px, ${(-(y - cy) * scale).toFixed(1)}px)`;
+  const now = follow?.();
+  const [nx, ny] = now ? worldPx(now, z) : [pxX, pxY];
+  const layer: CSSProperties = { transform: layerTransform(nx, ny, now?.bearing ?? bearing) };
+  // Między renderami (odczyt GPS co ~1 s) warstwę dowozi pętla klatek — zapis jednego stylu, bez Reacta.
+  const layerRef = useRef<HTMLDivElement>(null);
+  const geom = useRef({ z, layerTransform, bearing });
+  geom.current = { z, layerTransform, bearing };
+  useEffect(() => {
+    if (!follow) return;
+    let id = 0;
+    const tick = () => {
+      const p = follow();
+      const el = layerRef.current;
+      if (p && el) {
+        const g = geom.current;
+        const [x, y] = worldPx(p, g.z);
+        el.style.transform = g.layerTransform(x, y, p.bearing ?? g.bearing);
+      }
+      id = requestAnimationFrame(tick);
+    };
+    id = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(id);
+  }, [follow]);
 
   return (
     <div
@@ -199,7 +210,7 @@ export function MapView({ token, center, zoom, bearing = 0, pitch = 0, anchorY =
       onPointerCancel={onPointerUp}
       onWheel={onWheel}
     >
-      <div className="map-layer" style={layer}>
+      <div className="map-layer" ref={layerRef} style={layer}>
         {backdrop.map((t) => (
           <img key={`b${t.k}`} className="map-tile" src={blobs.get(t.k) as string} style={{ left: t.x * scale, top: t.y * scale, width: t.size * scale, height: t.size * scale }} alt="" draggable={false} />
         ))}

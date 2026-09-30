@@ -949,7 +949,7 @@ input[type="number"]::-webkit-inner-spin-button, input[type="number"]::-webkit-o
 .friends.manage .row-buttons { margin-top: 0; }
 .hud-info-tile.is-friend { border-color: rgba(78, 161, 255, .55); }
 .hud-avatar { display: grid; place-items: center; flex: none; width: calc(7 * var(--u)); height: calc(7 * var(--u)); border-radius: 50%; background: rgba(78, 161, 255, .22); color: #8ec3ff; font-size: calc(4 * var(--u)); font-weight: 900; line-height: 1; }
-.hud-map-friend circle { fill: #4ea1ff; stroke: #08111a; stroke-width: 3; }
-.hud-map-friend.stopped circle { fill: #e8b44c; }
+.hud-map-friend path { fill: #4ea1ff; stroke: #08111a; stroke-width: 3; stroke-linejoin: round; filter: drop-shadow(0 0 8px rgba(78, 161, 255, .6)); }
+.hud-map-friend.stopped path { fill: #ef6a5b; filter: drop-shadow(0 0 8px rgba(239, 106, 91, .6)); }
 .hud-map-friend rect { fill: rgba(8, 17, 26, .85); stroke: rgba(140, 175, 195, .4); stroke-width: 1; }
 .hud-map-friend text { fill: #eef3f6; font: 800 15px system-ui, sans-serif; text-anchor: middle; }

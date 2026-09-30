@@ -3,7 +3,8 @@ import { Live } from "../core/gps";
 import { bearingAtKm, isOffRoute, lanesAhead, locate, NAV, NavInstruction, nextInstruction, pointAtKm, RoutePos, routeSlice, speedLimitAt } from "../core/navmatch";
 import { isAhead, jamMatters, jamTone, NavPlace, NavRoute, TrafficSection, warningText } from "../nav";
 import { MapView } from "./MapView";
-import { Friend } from "../core/friends";
+import { Friend, STATUS_LABEL } from "../core/friends";
+import { fmtDuration } from "../core/scenarios";
 import { distanceM } from "../core/gps";
 
 /** Nawigacja w HUD: trasa (może jej nie być w tym urządzeniu — wtedy cel z konta) i wyznaczanie od bieżącej pozycji. */
@@ -321,13 +322,19 @@ export function HudRouteMap({ nav, track, live, token, anchorY = 0.8, zoomOffset
               })}
               {mates.map(({ f, p, km }) => {
                 const [x, y] = px(p);
-                const text = km !== undefined ? `${f.name} · ${km < 10 ? km.toFixed(1).replace(".", ",") : Math.round(km)} km` : f.name;
-                const w = text.length * 8.5 + 16;
+                const moving = p.status === "driving";
+                // Etykieta: imię · km od nas · prędkość (w ruchu) albo rodzaj postoju i ile trwa.
+                const extra = moving ? (p.kmh !== null ? `${p.kmh} km/h` : "") : `${STATUS_LABEL[p.status].toLowerCase()}${p.since !== null ? ` ${fmtDuration(Math.max(0, ((live?.t ?? Date.now()) - p.since) / 60_000))}` : ""}`;
+                const text = [f.name, km !== undefined ? `${km < 10 ? km.toFixed(1).replace(".", ",") : Math.round(km)} km` : "", extra].filter(Boolean).join(" · ");
+                const w = text.length * 9.5 + 18;
                 return (
-                  <g key={`f${f.id}`} className={`hud-map-friend ${p.status === "driving" ? "" : "stopped"}`} transform={`translate(${x.toFixed(1)} ${y.toFixed(1)}) ${upright}`}>
-                    <circle r="9" />
-                    <rect x={-w / 2} y={-40} width={w} height={24} rx={12} />
-                    <text x={0} y={-23}>{text}</text>
+                  <g key={`f${f.id}`} className={`hud-map-friend ${moving ? "" : "stopped"}`} transform={`translate(${x.toFixed(1)} ${y.toFixed(1)})`}>
+                    {/* Strzałka jak nasza (prosto, bez spłaszczenia pochyleniem): obrót o kierunek znajomego względem kierunku mapy */}
+                    <path transform={`${upright} rotate(${moving && p.heading !== null ? p.heading - bearing : 0})`} d="M0 -24 L17 19 L0 10 L-17 19 Z" />
+                    <g transform={upright}>
+                      <rect x={-w / 2} y={-56} width={w} height={26} rx={13} />
+                      <text x={0} y={-38}>{text}</text>
+                    </g>
                   </g>
                 );
               })}

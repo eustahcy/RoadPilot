@@ -42,6 +42,9 @@ export function valhallaRequest(from, to, v, exclude = [], alternates = 0, route
         axle_count: v.axles,
         hazmat: !!v.adr && v.adr !== "none",
         top_speed: v.maxKmh,
+        // Trzymaj się dróg dla ciężarówek: bez tego Valhalla ścina łuki autostrad wojewódzkimi przez wsie
+        // (np. A1 Piątek → 703/702/708 → Stryków zamiast A1/A2), choć czas wychodzi prawie ten sam.
+        use_truck_route: true,
         ...(routeType === "shortest" ? { shortest: true } : {}),
       },
     },

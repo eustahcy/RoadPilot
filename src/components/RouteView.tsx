@@ -62,6 +62,7 @@ export function RouteView({ trip, route, onChange, nav }: Props) {
       <section className="card">
         <div className="eyebrow">Charakter trasy</div>
         <h2>Jakimi drogami jedziesz?</h2>
+        <p className="muted small">Tylko do obliczeń przerw i przyjazdu — nie zmienia trasy nawigacji.</p>
         <div className="profiles">
           {(Object.keys(PROFILES) as Exclude<ProfileId, "custom">[]).map((id) => (
             <button key={id} className={`profile ${trip.profile === id ? "active" : ""}`} onClick={() => chooseProfile(id)}>

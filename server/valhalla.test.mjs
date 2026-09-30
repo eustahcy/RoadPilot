@@ -44,7 +44,7 @@ describe("silnik RoadPilot (Valhalla)", () => {
   it("zapytanie dla ciężarówki z danymi pojazdu", () => {
     const q = valhallaRequest({ lat: 52, lon: 19 }, { lat: 54, lon: 18 }, { heightM: 4, widthM: 2.55, lengthM: 16.5, weightKg: 40000, axleWeightKg: 11500, axles: 5, adr: "D", maxKmh: 90 });
     expect(q.costing).toBe("truck");
-    expect(q.costing_options.truck).toMatchObject({ height: 4, weight: 40, axle_load: 11.5, hazmat: true, top_speed: 90 });
+    expect(q.costing_options.truck).toMatchObject({ height: 4, weight: 40, axle_load: 11.5, hazmat: true, top_speed: 90, use_truck_route: true });
     expect(q.costing_options.truck.shortest).toBeUndefined();
     const v = { heightM: 4, widthM: 2.55, lengthM: 16.5, weightKg: 40000, axleWeightKg: 11500, axles: 5, adr: "none", maxKmh: 90 };
     expect(valhallaRequest({ lat: 52, lon: 19 }, { lat: 54, lon: 18 }, v, [], 0, "shortest").costing_options.truck.shortest).toBe(true);

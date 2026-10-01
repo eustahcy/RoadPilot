@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { fmtDuration, fmtKm } from "../format";
-import { isAlert, jamMatters, jamTone, NavRoute } from "../nav";
+import { isAlert, jamMatters, jamTone, NavRoute, TRAFFIC_ON } from "../nav";
 import { locate, routeSlice } from "../core/navmatch";
 import { routeRefs } from "./HudView";
 import { LatLon, MapView, MAX_VIEW_ZOOM, MIN_VIEW_ZOOM, moveView, useMapGestures, worldPx } from "./MapView";
@@ -86,7 +86,7 @@ export function RouteCompare({ routes, selectedAt, token, onPick, mapStyle }: { 
       const on = r.at === selectedAt;
       out.push({ pts, color: rgba("#08111a", on ? 0.9 : 0.6), widthPx: on ? 11 : 8 }, { pts, color: rgba(ROUTE_COLORS[i], on ? 1 : 0.75), widthPx: on ? 7 : 5 });
     }
-    for (const t of sel?.traffic?.filter(jamMatters) ?? []) {
+    for (const t of TRAFFIC_ON ? sel?.traffic?.filter(jamMatters) ?? [] : []) {
       const pts = routeSlice(sel!.points, t.km, Math.max(t.toKm, t.km + 0.3));
       if (pts.length > 1) out.push({ pts, color: rgba(JAM_COLOR[jamTone(t)]), widthPx: 5 });
     }
@@ -133,7 +133,7 @@ export function RouteCompare({ routes, selectedAt, token, onPick, mapStyle }: { 
                   />
                 ))}
                 {/* Utrudnienia na wybranej trasie: żółty wolniej, czerwony korek. */}
-                {sel?.traffic?.filter(jamMatters).map((t) => {
+                {TRAFFIC_ON && sel?.traffic?.filter(jamMatters).map((t) => {
                   const pts = routeSlice(sel.points, t.km, Math.max(t.toKm, t.km + 0.3));
                   return pts.length > 1 ? <path key={t.km} className={`rc-jam ${jamTone(t)}`} d={d(pts)} /> : null;
                 })}
@@ -160,7 +160,7 @@ export function RouteCompare({ routes, selectedAt, token, onPick, mapStyle }: { 
                   <b>{fmtDuration(r.travelMin)}{diff >= 1 ? <em> +{fmtDuration(diff)}</em> : <em className="best"> najszybsza</em>}</b>
                   <small>{fmtKm(r.lengthKm)} · {routeRefs(r.instructions) || "—"}</small>
                   <span className="rc-tags">
-                    {r.trafficMin >= 1 ? <span className="t-bad">korki +{fmtDuration(r.trafficMin)}{jams ? ` (${jams})` : ""}</span> : r.engine === "tomtom" ? <span className="t-ok">bez korków</span> : null}
+                    {!TRAFFIC_ON ? null : r.trafficMin >= 1 ? <span className="t-bad">korki +{fmtDuration(r.trafficMin)}{jams ? ` (${jams})` : ""}</span> : r.engine === "tomtom" ? <span className="t-ok">bez korków</span> : null}
                     {restrictions === undefined ? null : restrictions ? <span className="t-bad">ograniczenia: {restrictions}</span> : <span className="t-ok">bez ograniczeń</span>}
                     {cams > 0 && <span>fotoradary: {cams}</span>}
                   </span>

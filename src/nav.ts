@@ -34,7 +34,7 @@ export interface NavPlace {
 }
 
 /** Trasa z TomTom w formacie aplikacji (server/nav.mjs → parseRoute). Kilometry liczone od startu trasy. */
-/** Silnik tras: TomTom (pełne dane, korki, pasy) albo własny RoadPilot (OSM Polska, bez kosztów, bez pasów). */
+/** Silnik, który policzył trasę: zawsze własny RoadPilot (OSM Polska); TomTom tylko awaryjnie po stronie serwera (poza Polską / awaria). */
 export type NavEngine = "tomtom" | "roadpilot";
 /** Rodzaj trasy: najszybsza / najkrótsza / ekonomiczna (TomTom eco; własny silnik liczy ją jak najszybszą). */
 export type RouteType = "fastest" | "shortest" | "eco";
@@ -197,6 +197,9 @@ export async function refreshWarnings(token: string, route: NavRoute, km: number
   }
 }
 
+/** Korki są na razie wyłączone (2026-10-01: licencja i limity TomTom) — true włącza odświeżanie i ich pokazywanie (serwer: TRAFFIC_ENABLED=1). */
+export const TRAFFIC_ON: boolean = false;
+
 /** Korki z TomTom na trasie przed nami — dla obu silników, co kilka minut (trasa TomTom ma je tylko z chwili wyznaczenia). */
 export const TRAFFIC_REFRESH = { everyMs: 5 * 60_000, aheadKm: 150 } as const;
 
@@ -230,8 +233,8 @@ export async function searchPlaces(token: string, q: string, near?: { lat: numbe
   return r.results;
 }
 
-export async function fetchRoute(token: string, from: { lat: number; lon: number }, to: NavPlace, vehicle: Vehicle, now: number, engine: NavEngine = "tomtom", routeType: RouteType = "fastest", via: NavPlace[] = []): Promise<NavRoute> {
-  const r = await api<{ route: Omit<NavRoute, "at" | "from" | "to"> }>("POST", "/nav/route", { from, to: { lat: to.lat, lon: to.lon }, vehicle, engine, routeType, via: via.map((p) => ({ lat: p.lat, lon: p.lon })) }, token);
+export async function fetchRoute(token: string, from: { lat: number; lon: number }, to: NavPlace, vehicle: Vehicle, now: number, routeType: RouteType = "fastest", via: NavPlace[] = []): Promise<NavRoute> {
+  const r = await api<{ route: Omit<NavRoute, "at" | "from" | "to"> }>("POST", "/nav/route", { from, to: { lat: to.lat, lon: to.lon }, vehicle, routeType, via: via.map((p) => ({ lat: p.lat, lon: p.lon })) }, token);
   return withWarnings(token, { ...r.route, at: now, from, to, via }, vehicle);
 }
 
@@ -255,8 +258,8 @@ export function insertVia(route: NavRoute, via: NavPlace[], p: NavPlace): NavPla
 }
 
 /** Trasa z alternatywami (do porównania) — każda już z ostrzeżeniami z naszej bazy. Pierwsza = najlepsza wg silnika. */
-export async function fetchRoutes(token: string, from: { lat: number; lon: number }, to: NavPlace, vehicle: Vehicle, now: number, engine: NavEngine = "tomtom", routeType: RouteType = "fastest"): Promise<NavRoute[]> {
-  const r = await api<{ route: Omit<NavRoute, "at" | "from" | "to">; alternatives?: Omit<NavRoute, "at" | "from" | "to">[] }>("POST", "/nav/route", { from, to: { lat: to.lat, lon: to.lon }, vehicle, engine, routeType, alternatives: true }, token);
+export async function fetchRoutes(token: string, from: { lat: number; lon: number }, to: NavPlace, vehicle: Vehicle, now: number, routeType: RouteType = "fastest"): Promise<NavRoute[]> {
+  const r = await api<{ route: Omit<NavRoute, "at" | "from" | "to">; alternatives?: Omit<NavRoute, "at" | "from" | "to">[] }>("POST", "/nav/route", { from, to: { lat: to.lat, lon: to.lon }, vehicle, routeType, alternatives: true }, token);
   // Różne `at` — po nim aplikacja rozpoznaje trasę (np. dociąganie ostrzeżeń).
   return Promise.all([r.route, ...(r.alternatives ?? [])].map((x, i) => withWarnings(token, { ...x, at: now + i, from, to }, vehicle)));
 }

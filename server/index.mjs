@@ -473,6 +473,11 @@ routes["POST /api/nav/here"] = async (req, user) => {
 
 const MAX_VIA = 5;
 
+/** Korki są na razie wyłączone (decyzja 2026-10-01: licencja i limity TomTom) — TRAFFIC_ENABLED=1 włącza je z powrotem. */
+const TRAFFIC_ENABLED = process.env.TRAFFIC_ENABLED === "1";
+/** Trasa TomTom bez utrudnień, gdy korki są wyłączone. */
+const noTraffic = (r) => (TRAFFIC_ENABLED ? r : { ...r, traffic: [], trafficMin: 0 });
+
 routes["POST /api/nav/route"] = async (req, user) => {
   requirePremium(user);
   navThrottle("route", req);
@@ -492,7 +497,8 @@ routes["POST /api/nav/route"] = async (req, user) => {
     throw new HttpError(400, e.message);
   }
   const ownPossible = !!VALHALLA_URL && [from, ...via, to].every((p) => inPoland(p.lat, p.lon));
-  if (body.engine === "roadpilot" && ownPossible) {
+  // Trasy liczy zawsze własny silnik (wybór TomTom usunięty); TomTom tylko awaryjnie — poza Polską albo gdy Valhalla zawiedzie.
+  if (ownPossible) {
     const own = await valhallaRoute(from, to, body.vehicle, routeType, via);
     if (own) return [200, { route: own, alternatives: withAlts ? distinct(own, (await valhallaAlternates(from, to, body.vehicle, routeType)).map((a) => ({ ...a, engine: "roadpilot" }))) : [] }];
   }
@@ -506,7 +512,7 @@ routes["POST /api/nav/route"] = async (req, user) => {
   }
   const r = await tomtom(url);
   const [route, ...alts] = r.ok ? parseRoutes(r.json) : [];
-  if (route) return [200, { route: { ...route, engine: "tomtom" }, alternatives: distinct(route, alts).map((a) => ({ ...a, engine: "tomtom" })) }];
+  if (route) return [200, { route: { ...noTraffic(route), engine: "tomtom" }, alternatives: distinct(route, alts).map((a) => ({ ...noTraffic(a), engine: "tomtom" })) }];
   if (r.status >= 500 && ownPossible) {
     const own = await valhallaRoute(from, to, body.vehicle, routeType, via);
     if (own) return [200, { route: { ...own, fallback: true } }];
@@ -687,6 +693,7 @@ setInterval(() => {
  */
 routes["POST /api/nav/traffic"] = async (req, user) => {
   requirePremium(user);
+  if (!TRAFFIC_ENABLED) throw new HttpError(503, "Korki są chwilowo wyłączone.");
   navThrottle("traffic", req);
   const body = await readJson(req);
   const pts = Array.isArray(body.points) ? body.points.filter((p) => Array.isArray(p) && p.length >= 3 && p.every(Number.isFinite)).slice(0, 20000) : [];

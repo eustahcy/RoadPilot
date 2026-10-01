@@ -1,3 +1,4 @@
+import { addRecent, SavedPlaces } from "./core/places";
 import { TRUCK_SPEED } from "./core/rules";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, ApiError, Auth, isGuest, loadAuth, saveAuth, setGuest, User } from "./api";
@@ -15,7 +16,7 @@ import { NavView } from "./components/NavView";
 import { PlanView } from "./components/PlanView";
 import { RouteView } from "./components/RouteView";
 import { SettingsCategory, SettingsView } from "./components/SettingsView";
-import { ALERTS_REFRESH, fetchRoute, refreshTraffic, TRAFFIC_REFRESH, NavAccess, NavPlace, NavRoute, refreshWarnings, viaAhead, voteAlert, withWarnings } from "./nav";
+import { ALERTS_REFRESH, fetchRoute, refreshTraffic, TRAFFIC_ON, TRAFFIC_REFRESH, NavAccess, NavPlace, NavRoute, refreshWarnings, viaAhead, voteAlert, withWarnings } from "./nav";
 import { locate } from "./core/navmatch";
 import { planForDeadline } from "./core/deadline";
 import { GPS, recentSpeed, uniformSpeeds } from "./core/gps";
@@ -121,7 +122,7 @@ function App() {
     try {
       // Punkty pośrednie, których jeszcze nie minęliśmy, zostają na nowej trasie.
       const via = state.navRoute ? viaAhead(state.navRoute, live) : [];
-      const next = await fetchRoute(auth.token, { lat: live.lat, lon: live.lon }, navDest, settings.vehicle, Date.now(), settings.navEngine, settings.routeType, via);
+      const next = await fetchRoute(auth.token, { lat: live.lat, lon: live.lon }, navDest, settings.vehicle, Date.now(), settings.routeType, via);
       setState((s) => ({ ...s, navRoute: next, trip: tripFromRoute(s.trip, next) }));
     } catch {
       /* brak sieci lub limit — HUD spróbuje ponownie za minutę */
@@ -129,6 +130,10 @@ function App() {
       setRerouting(false);
     }
   };
+  /** Wybrana trasa (z wyszukiwarki, ulubionych, ostatnich) — cel trafia na początek „Ostatnich tras”. */
+  const chooseRoute = (r: NavRoute) =>
+    setState((s) => ({ ...s, navRoute: r, trip: tripFromRoute(s.trip, r), settings: { ...s.settings, places: addRecent(s.settings.places, r.to, Date.now(), r) } }));
+  const setPlaces = (places: SavedPlaces) => setState((s) => ({ ...s, settings: { ...s.settings, places } }));
   /** Koniec nawigacji: bez trasy i bez celu — sama trasa bez celu wyznaczyłaby się od razu od nowa (useNavTrack). */
   const endNav = () => setState((s) => ({ ...s, navRoute: null, trip: { ...s.trip, dest: null } }));
   /** Zmiana punktów pośrednich (dodanie z mapy / usunięcie) — trasa od razu od nowa; błąd idzie do ekranu nawigacji. */
@@ -138,7 +143,7 @@ function App() {
     if (!from) throw new Error("Brak pozycji startu — włącz GPS.");
     setRerouting(true);
     try {
-      const next = await fetchRoute(auth.token, from, navDest, settings.vehicle, Date.now(), settings.navEngine, settings.routeType, via);
+      const next = await fetchRoute(auth.token, from, navDest, settings.vehicle, Date.now(), settings.routeType, via);
       setState((s) => ({ ...s, navRoute: next, trip: tripFromRoute(s.trip, next) }));
     } finally {
       setRerouting(false);
@@ -182,7 +187,7 @@ function App() {
   }, [navOn, auth?.token, navRouteAt, hasWarnings]);
   // Korki przed nami co TRAFFIC_REFRESH.everyMs (oba silniki); trasa z własnego silnika od razu — sama korków nie ma.
   useEffect(() => {
-    if (!navOn || !auth) return;
+    if (!navOn || !auth || !TRAFFIC_ON) return;
     const tick = () => {
       const r = routeRef.current;
       if (!r || document.visibilityState !== "visible") return;
@@ -347,11 +352,12 @@ function App() {
         planner={navOn && auth ? {
           token: auth.token,
           vehicle: settings.vehicle,
-          engine: settings.navEngine,
           routeType: settings.routeType,
           position: live ? { lat: live.lat, lon: live.lon } : null,
-          onRoute: (r: NavRoute) => setState((s) => ({ ...s, navRoute: r, trip: tripFromRoute(s.trip, r) })),
+          onRoute: chooseRoute,
           mapStyle,
+          places: settings.places,
+          onPlaces: setPlaces,
         } : undefined}
         voice={{
           supported: voiceSupported(),
@@ -527,7 +533,6 @@ function App() {
             onChange={(t) => setState((s) => ({ ...s, trip: t }))}
             nav={{
               access: navAccess,
-              engine: settings.navEngine,
               routeType: settings.routeType,
               token: auth?.token ?? null,
               enabled: navAccess === "premium",
@@ -536,7 +541,9 @@ function App() {
               route: state.navRoute,
               position: settings.gps && live ? { lat: live.lat, lon: live.lon } : null,
               onDest: (dest) => setState((s) => ({ ...s, trip: { ...s.trip, dest, destination: dest ? dest.label : s.trip.destination } })),
-              onRoute: (r: NavRoute) => setState((s) => ({ ...s, navRoute: r, trip: tripFromRoute(s.trip, r) })),
+              onRoute: chooseRoute,
+              places: settings.places,
+              onPlaces: setPlaces,
               onClear: endNav,
               onSettings: () => { go("settings"); setSettingsCat("vehicle"); },
               mapStyle,

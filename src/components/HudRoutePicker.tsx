@@ -1,20 +1,24 @@
 import { GlVector } from "./GlMap";
 import { useEffect, useState } from "react";
 import { ApiError } from "../api";
-import { currentPosition, fetchRoutes, NavEngine, NavPlace, NavRoute, RouteType, searchPlaces, Vehicle } from "../nav";
+import { currentPosition, fetchRoutes, NavPlace, NavRoute, RouteType, searchPlaces, Vehicle } from "../nav";
 import { RouteCompare } from "./RouteCompare";
+import { PlaceActions, PlaceShortcuts } from "./SavedPlaces";
+import { SavedPlaces } from "../core/places";
 
 /** Dane do wyznaczania trasy prosto z HUD (Premium). */
 export interface HudPlanner {
   token: string;
   vehicle: Vehicle;
-  engine: NavEngine;
   routeType: RouteType;
   /** Pozycja z GPS HUD — inaczej pytamy telefon jednorazowo. */
   position: { lat: number; lon: number } | null;
   onRoute: (r: NavRoute) => void;
   /** Styl własnej mapy do porównania tras. */
   mapStyle?: GlVector;
+  /** Dom, ulubione, ostatnie cele. */
+  places: SavedPlaces;
+  onPlaces: (p: SavedPlaces) => void;
 }
 
 const LETTERS = ["A", "B", "C"];
@@ -63,7 +67,7 @@ export function HudRoutePicker({ planner, dest: current, onClose }: { planner: H
     setRoutes([]);
     try {
       const from = planner.position ?? (await currentPosition());
-      const all = await fetchRoutes(planner.token, from, to, planner.vehicle, Date.now(), planner.engine, planner.routeType);
+      const all = await fetchRoutes(planner.token, from, to, planner.vehicle, Date.now(), planner.routeType);
       setRoutes(all);
       setSelectedAt(all[0]?.at);
     } catch (e) {
@@ -99,7 +103,9 @@ export function HudRoutePicker({ planner, dest: current, onClose }: { planner: H
           </span>
           <button className="ghost" onClick={() => setEditing(true)}>Zmień</button>
         </div>
-      ) : (
+      ) : null}
+      {dest && !editing && <PlaceActions place={dest} places={planner.places} onPlaces={planner.onPlaces} />}
+      {(!dest || editing) && (
         <div className="nav-search">
           <input type="search" value={query} placeholder="Adres lub nazwa firmy, np. BCT Gdańsk" autoFocus onChange={(e) => { setQuery(e.target.value); setError(null); }} />
           {searching && <p className="muted small">Szukam…</p>}
@@ -115,6 +121,7 @@ export function HudRoutePicker({ planner, dest: current, onClose }: { planner: H
               ))}
             </ul>
           )}
+          {query.trim().length < 3 && <PlaceShortcuts places={planner.places} onPlaces={planner.onPlaces} onPick={pick} />}
           {dest && <button className="text-btn" onClick={() => { setEditing(false); setQuery(""); }}>Anuluj</button>}
         </div>
       )}

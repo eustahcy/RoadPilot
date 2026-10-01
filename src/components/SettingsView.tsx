@@ -219,7 +219,7 @@ export function SettingsView({ initialCategory, navAccess, state, now, onSetting
             : "Bez konta wszystko jest zapisane tylko w tym urządzeniu."}{" "}
           W trybie HUD przybliżona pozycja (z dokładnością ~1 km) trafia do OpenStreetMap (Overpass) i Open-Meteo — po
           najbliższe MOP-y i parkingi, nazwy dróg i miejscowości oraz pogodę. Przy włączonej nawigacji wpisywany cel,
-          punkt startu (pozycja GPS) i dane pojazdu idą przez serwer RoadPilot do TomTom; trasa zostaje tylko w telefonie. W czasie jazdy co 5 min serwer RoadPilot pyta TomTom o korki w obszarze ~150 km trasy przed Tobą (bez Twojej pozycji ani telefonu). Kafelki mapy w HUD pobiera serwer RoadPilot — TomTom nie widzi Twojego telefonu.
+          punkt startu (pozycja GPS) i dane pojazdu idą do serwera RoadPilot, który liczy trasę własnym silnikiem (OpenStreetMap); wpisywany cel idzie przez serwer RoadPilot do TomTom (wyszukiwanie), a trasa poza Polską — awaryjnie do TomTom. Trasa zostaje tylko w telefonie; dom, ulubione miejsca i ostatnie cele (z datą, długością i czasem trasy) są zapisane w telefonie, a z kontem — także na koncie RoadPilot (usuniesz je przyciskiem × przy wyszukiwarce celu). Kafelki mapy w HUD pobiera serwer RoadPilot — TomTom nie widzi Twojego telefonu.
           {account.user ? " Znajomi (Ustawienia → Znajomi): przy włączonym GPS i udostępnianiu serwer RoadPilot trzyma Twoją ostatnią pozycję, prędkość, postój, cel i stan tachografu — widzą je tylko zaakceptowani znajomi; wyłączenie udostępniania kasuje te dane." : ""}
           {account.user ? " Po powrocie do aplikacji po przerwie w odczytach GPS ostatnia i obecna pozycja idą do serwera RoadPilot, który liczy drogę ciężarówki (do szacunku jazdy i postoju). Przy otwarciu przekroczenia w Historii serwer dostaje jego pozycję, żeby podać miejscowość, drogę i MOP. Serwer tych pozycji nie zapisuje." : ""}
           {account.user ? " Opinie o parkingu przy celu (Trasa → nawigacja): serwer zapisuje miejsce celu, ocenę i komentarz z Twoim kontem; inni kierowcy widzą je bez Twojego imienia i e-maila. Swoją opinię usuniesz w każdej chwili, a usunięcie konta kasuje wszystkie." : ""}
@@ -261,29 +261,12 @@ function VehicleSection({ settings, navAccess, onChange }: { settings: Settings;
         <h3>Nawigacja RoadPilot dla ciężarówek{navAccess === "premium" ? " — włączona" : ""}</h3>
         <p className="muted small">
           {navAccess === "premium"
-            ? "W zakładce Trasa wyszukasz cel, a trasa uwzględni wymiary, masę i ADR; w HUD zobaczysz manewry i pasy. Cel, punkt startu i dane pojazdu idą przez serwer RoadPilot do TomTom."
+            ? "W zakładce Trasa wyszukasz cel, a trasa uwzględni wymiary, masę i ADR; w HUD zobaczysz manewry i pasy. Trasy liczy własny silnik RoadPilot (OpenStreetMap, Polska); wyszukiwanie celu przez serwer RoadPilot w TomTom."
             : navAccess === "guest"
               ? "Dostępne w RoadPilot Premium — zaloguj się na konto."
               : "Dostępne w RoadPilot Premium — wkrótce do kupienia."}
         </p>
       </section>
-      {navAccess === "premium" && (
-        <section className="card">
-          <div className="eyebrow">Silnik tras</div>
-          <div className="hud-style-pick engines">
-            {([
-              ["tomtom", "TomTom", "Pełne dane w Europie, korki na żywo, pasy ruchu i ograniczenia prędkości."],
-              ["roadpilot", "RoadPilot (beta)", "Własny silnik na OpenStreetMap — tylko Polska, bez pasów; korki na trasie dociągane z TomTom co 5 min."],
-            ] as const).map(([id, label, hint]) => (
-              <button key={id} className={`hud-style-opt ${settings.navEngine === id ? "active" : ""}`} aria-pressed={settings.navEngine === id} onClick={() => onChange({ navEngine: id })}>
-                <strong>{label}</strong>
-                <small>{hint}</small>
-              </button>
-            ))}
-          </div>
-          <p className="muted small">Gdy limit TomTom się wyczerpie, trasy w Polsce liczy automatycznie silnik RoadPilot.</p>
-        </section>
-      )}
       {navAccess === "premium" && (
         <section className="card">
           <div className="eyebrow">Rodzaj trasy</div>

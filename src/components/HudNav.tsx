@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "react";
 import { Live } from "../core/gps";
 import { alongRoute, bearingAtKm, isOffRoute, lanesAhead, locate, NAV, NavInstruction, nextInstruction, pointAtKm, RoutePos, routeSlice, speedLimitAt } from "../core/navmatch";
-import { isAhead, jamMatters, jamTone, NavPlace, NavRoute, RoutePoi, TrafficSection, warningText } from "../nav";
+import { isAhead, jamMatters, jamTone, NavPlace, NavRoute, RoutePoi, TRAFFIC_ON, TrafficSection, warningText } from "../nav";
 import { GlLine, GlMapView, GlMarker, GlVector } from "./GlMap";
 import { LatLon, moveView, useMapGestures } from "./MapView";
 import { fmtAgo, Friend, STATUS_LABEL } from "../core/friends";
@@ -182,7 +182,7 @@ export function HudNav({ nav, track, compact, card, section }: { nav: HudNavData
   const warn = route.warnings?.find((w) => isAhead(w, pos.km) && w.km - pos.km <= WARN_AHEAD_KM && (section === undefined || w.kind !== "section"));
   const inSection = warn?.toKm !== undefined && pos.km >= warn.km;
   // Najbliższe utrudnienie przed nami: blisko (TRAFFIC_AHEAD_KM) każde ważne, dalej (TRAFFIC_FAR_KM) tylko korek / zamknięcie / duże opóźnienie.
-  const jam = route.traffic?.find((t) => jamMatters(t) && t.toKm > pos.km && (t.km - pos.km <= TRAFFIC_AHEAD_KM || (t.km - pos.km <= TRAFFIC_FAR_KM && farJam(t))));
+  const jam = TRAFFIC_ON && route.traffic?.find((t) => jamMatters(t) && t.toKm > pos.km && (t.km - pos.km <= TRAFFIC_AHEAD_KM || (t.km - pos.km <= TRAFFIC_FAR_KM && farJam(t))));
 
   return (
     <div className={`${cls} ${warn || section ? "with-warn" : ""} ${jam ? "with-jam" : ""}`}>
@@ -529,7 +529,7 @@ export function HudRouteMap({ nav, track, live, token, anchorY = 0.8, zoomOffset
   const next = route && pos ? nextInstruction(route.instructions, km) : undefined;
   // Utrudnienia na widocznym kawałku trasy — żółty wolniej, czerwony korek; etykieta z opóźnieniem na początku odcinka.
   const jamTo = browse ? Infinity : km + 12;
-  const jams = (route?.traffic ?? [])
+  const jams = (TRAFFIC_ON ? route?.traffic ?? [] : [])
     .filter((t) => t.toKm > km && t.km < jamTo)
     .map((t) => ({ t, tone: jamTone(t), pts: routeSlice(route!.points, Math.max(km, t.km), Math.min(jamTo, t.toKm)) }))
     .filter((j) => j.pts.length > 1);

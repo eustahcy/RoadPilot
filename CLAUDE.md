@@ -109,6 +109,9 @@ src/collect.ts     mapa RoadPilot (za zgodą users.data_consent_at): useTraceCol
 src/voice.ts       komunikaty głosowe (Web Speech, pl-PL): useNavVoice — manewry (progi zależne od prędkości) i ostrzeżenia ≤ 1 km; spokenDist
 src/nav.ts         nawigacja (beta): Vehicle, NavPlace, NavRoute, RouteType (fastest/shortest/eco → Settings.routeType, POST /api/nav/route);
                    searchPlaces / fetchRoute przez API → TomTom; AppState.navRoute tylko lokalnie (nie w sync)
+src/core/places.ts  dom, ulubione, ostatnie cele (Settings.places — synchronizowane z grupą settings): addRecent (App.chooseRoute przy każdym wyborze trasy,
+                   ten sam cel ≤ PLACES.sameM 100 m przenoszony na górę, max recentMax 12), toggleFavorite, setHome, normalizePlaces (normalize w state.ts);
+                   UI: components/SavedPlaces.tsx — PlaceShortcuts pod pustą wyszukiwarką (HudRoutePicker w Nawigacji i NavCard), PlaceActions przy wybranym celu
 src/components/NavCard.tsx  Trasa: wyszukiwanie celu, „Wyznacz trasę dla ciężarówki”; trasa → trip.segments (profil custom) → silnik przerw
 src/vtiles.ts      useVtiles (GET /api/vtiles/meta raz na sesję, wspólne dla Nawigacji i „Gdzie jest” — w Polsce GlMapView z własnym stylem) + inVtiles
 src/hudConfig.ts   HudStyle (full/minimal; dawny „nav” migrowany do „full” w normalize), HUD_ITEMS, DEFAULT_HUD_ITEMS — Settings.hudItems[styl]; element „road” steruje też pobieraniem dróg
@@ -147,13 +150,14 @@ server/            RoadPilot API: index.mjs (node:http + mysql2), schema.sql; na
                    SMTP simply.com do resetu hasła, APP_ORIGINS = CORS + linki w e-mailach); zależności: mysql2, nodemailer
 server/warnings.mjs  ostrzeżenia na trasie z osm_restrictions + road_reports (routeBoxes → zapytania po prostokątach, routeWarnings:
                    punkt ≤ 20 m, odcinek musi biec wzdłuż trasy — most nad drogą nie ostrzega); POST /api/nav/warnings (bez kosztów TomTom)
-server/traffic.mjs  korki dla obu silników: trafficBoxes (routeBoxes sklejane do ≤ 9000 km² — limit TomTom 10 000), incidentSections
+server/traffic.mjs  KORKI WYŁĄCZONE (2026-10-01, licencja/limity TomTom): front `TRAFFIC_ON = false` (nav.ts) — bez odświeżania i bez pokazywania,
+                   serwer bez `TRAFFIC_ENABLED=1` → /api/nav/traffic 503, a trasa TomTom bez `traffic`. Kod zostaje: korki dla obu silników: trafficBoxes (routeBoxes sklejane do ≤ 9000 km² — limit TomTom 10 000), incidentSections
                    (zdarzenia TomTom kategorii TRAFFIC_CATEGORIES → { km, toKm, delayMin, level, cause } jak parseRoute; początek, środek i koniec ≤ 50 m
                    od trasy i km rosnące — druga jezdnia odpada); POST /api/nav/traffic (Premium, budżet „traffic” = TOMTOM_LIMIT_TRAFFIC, cache 2 min);
                    App: refreshTraffic (nav.ts, TRAFFIC_REFRESH 5 min / 150 km, NavRoute.trafficAt), własny silnik od razu po wyznaczeniu
 server/compare.mjs   zgłoszenia kierowców vs OSM (missing / diff / match / info, potwierdzenia); GET /api/admin/compare
 server/valhalla.mjs  własny silnik tras (Valhalla, OSM Polska, VALHALLA_URL): valhallaRequest (truck), parseValhalla → format jak parseRoute;
-                   /api/nav/route: engine "roadpilot" w PL albo zapas, gdy TomTom niedostępny / limit 80%; valhallaRoute sprawdza trasę
+                   /api/nav/route: zawsze własny silnik w PL (wybór silnika usunięty z aplikacji 2026-10-01); TomTom tylko awaryjnie — poza PL albo gdy Valhalla nie da trasy; valhallaRoute sprawdza trasę
                    findWarnings i przy twardym konflikcie (oś, masa, wysokość, szer., dł., zakaz) liczy od nowa z exclude_locations
                    w punkcie przejazdu (blockingPoints, max MAX_DETOURS); routeWarnings: odcinek ≥2 pkt i 60% przy trasie, kierunek ±30°
                    withRoadInfo (index.mjs): trace_attributes po kawałkach ≤ TRACE_CHUNK_KM → roadInfo: speedLimits ze znaków OSM i roads

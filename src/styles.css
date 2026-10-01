@@ -648,6 +648,21 @@ input[type="number"]::-webkit-inner-spin-button, input[type="number"]::-webkit-o
 .nav-results { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 4px; }
 .nav-results button { display: grid; gap: 2px; width: 100%; padding: 10px 12px; border-radius: 11px; background: var(--field); border: 1px solid var(--line-2); text-align: left; }
 .nav-results button:hover, .nav-results button:focus-visible { border-color: var(--green); }
+/* Dom, ulubione, ostatnie trasy — pod pustą wyszukiwarką celu. */
+.places { display: grid; gap: 6px; margin-top: 10px; }
+.places-head { margin-top: 6px; color: var(--dim); font-size: 11.5px; font-weight: 750; text-transform: uppercase; letter-spacing: .04em; }
+.places-list { margin-top: 0; }
+.places-list li { display: flex; gap: 4px; }
+.places-list li > button:first-child { flex: 1; min-width: 0; }
+.places-list strong, .places-list small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.place-x { flex: none; width: 44px; border-radius: 11px; background: var(--field); border: 1px solid var(--line-2); color: var(--dim); font-size: 20px; line-height: 1; }
+.place-home { display: flex; align-items: center; gap: 12px; width: 100%; padding: 10px 12px; border-radius: 11px; background: var(--field); border: 1px solid rgba(66, 211, 146, .4); text-align: left; }
+.place-home i { font-style: normal; font-size: 22px; color: var(--green); }
+.place-home span { display: grid; gap: 2px; min-width: 0; }
+.place-home small { color: var(--dim); font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.place-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.place-chip { min-height: 36px; padding: 6px 12px; border-radius: 999px; background: var(--field); border: 1px solid var(--line-2); color: inherit; font-size: 13px; font-weight: 650; }
+.place-chip.on { border-color: var(--green); color: var(--green); }
 .nav-summary { display: grid; gap: 3px; margin-top: 12px; padding: 12px; border-radius: 14px; background: rgba(66, 211, 146, .07); }
 .nav-summary b { font-size: 26px; letter-spacing: -.02em; }
 

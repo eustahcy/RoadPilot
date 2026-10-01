@@ -1,8 +1,9 @@
-import { useEffect, useState } from "react";
+import { CSSProperties, useEffect, useState } from "react";
 import { RoutePos } from "../core/navmatch";
 import { SECTION, SectionSpan, sectionLimit, SectionRun, SectionState, sectionStats, stepSection } from "../core/section";
 import { NavRoute, RouteWarning } from "../nav";
 import { fmtDist } from "./HudNav";
+import { Icon } from "./HudView";
 
 // Odcinkowy pomiar prędkości w nawigacji (jak w TomTom): zapowiedź przed odcinkiem, w trakcie pasek postępu
 // ze średnią od wjazdu w kolorze (zielona / żółta / czerwona względem limitu ciężarówki), po wyjeździe podsumowanie.
@@ -109,6 +110,45 @@ export function SectionPanel({ v, now }: { v: SectionViewData; now: number }) {
       {st.adviseKmh !== undefined && (
         <small className="sc-advice">{st.adviseKmh > 0 ? `Zwolnij — do końca jedź najwyżej ${st.adviseKmh} km/h` : "Średnia ponad limit — zwolnij do końca odcinka"}</small>
       )}
+    </div>
+  );
+}
+
+const LINE_DASHES = 18;
+
+/**
+ * Odcinkowy pomiar jak oś trasy w HUD (dolny pasek Nawigacji na tablecie): kwadraciki odcinka, ciężarówka w miejscu,
+ * w którym jesteśmy, nad nią średnia; przejechana część w kolorze średniej (zielony / żółty / czerwony).
+ * Po lewej limit (znak), po prawej meta z „do końca”.
+ */
+export function SectionLine({ v, now }: { v: SectionViewData; now: number }) {
+  const st = v.mode === "ahead" ? undefined : sectionStats(v.run, now, v.limit);
+  const done = v.mode === "ahead" ? 0 : v.mode === "done" ? 1 : st!.progress;
+  const avg = st?.avgKmh !== undefined ? Math.round(st.avgKmh) : undefined;
+  const tone = st?.tone ?? "";
+  const len = v.mode === "ahead" ? v.warn.toKm! - v.warn.km : v.run.lengthKm;
+  return (
+    <div className={`hud-route sc-line ${v.mode} ${tone}`} role="status" aria-label={v.mode === "ahead" ? `Odcinkowy pomiar za ${fmtDist(v.inKm)}` : `Odcinkowy pomiar: średnia ${avg ?? "—"} km/h`}>
+      <div className="hud-route-end start">
+        <LimitSign kmh={v.limit} />
+        <b>{v.mode === "ahead" ? "Odcinek" : "Limit"}</b>
+        <small>{v.mode === "ahead" ? `za ${fmtDist(v.inKm)}` : `${fmtDist(len)} odcinka`}</small>
+      </div>
+      <div className="hud-track">
+        <div className="hud-dashes">
+          {Array.from({ length: LINE_DASHES }, (_, i) => <i key={i} className={(i + 0.5) / LINE_DASHES <= done ? "on" : ""} />)}
+        </div>
+        <div className="hud-truck" style={{ "--p": done } as CSSProperties}>
+          <b>{v.mode === "ahead" ? "pomiar" : `${avg ?? "—"} km/h`}</b>
+          <Icon name="truck" />
+        </div>
+        {st?.adviseKmh !== undefined && <small className="sc-line-advice">{st.adviseKmh > 0 ? `Zwolnij — do końca najwyżej ${st.adviseKmh} km/h` : "Średnia ponad limit — zwolnij"}</small>}
+      </div>
+      <div className="hud-route-end">
+        {v.mode === "done" ? <span className="sc-mark" aria-hidden>{tone === "over" ? "!" : "✓"}</span> : <SectionIcon />}
+        <b>Koniec</b>
+        <small>{v.mode === "done" ? (v.limit === undefined ? "bez limitu" : tone === "over" ? "ponad limit" : "w limicie") : v.mode === "active" ? `za ${fmtDist(st!.leftKm)}` : fmtDist(len)}</small>
+      </div>
     </div>
   );
 }

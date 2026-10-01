@@ -356,7 +356,20 @@ const DASHES = 18;
  * Oś trasy: Start → Cel, przejechana część na zielono, ciężarówka w miejscu, w którym jesteśmy.
  * Wszystkie znaczniki podpisujemy odległością od bieżącej pozycji („za 92 km”) — tak samo jak kafelki.
  */
-function RouteLine(p: Props & { now: number; parking?: NearestStation<Parking> }) {
+/** Dane osi trasy — HUD i dolny pasek Nawigacji (tablet). */
+export interface RouteLineProps {
+  origin?: string;
+  destination?: string;
+  /** Pozostała trasa (km do celu) i plan postojów liczony od bieżącej pozycji. */
+  route: { totalKm: number };
+  doneKm: number;
+  plan?: Plan;
+  service?: { kmLeft?: number };
+  now: number;
+  parking?: NearestStation<Parking>;
+}
+
+export function RouteLine(p: RouteLineProps) {
   const trackRef = useRef<HTMLDivElement>(null);
   const [trackW, setTrackW] = useState(600);
   useEffect(() => {
@@ -377,7 +390,7 @@ function RouteLine(p: Props & { now: number; parking?: NearestStation<Parking> }
     candidates.push({ icon: e.kind === "break" ? "coffee" : "bed", km: e.fromKm, label: fmtClock(e.start, p.now), tone: "stop" });
   }
   if (p.parking?.ahead) candidates.push({ icon: "parking", km: p.parking.km, label: "", tone: "parking" });
-  if (p.service.kmLeft !== undefined && p.service.kmLeft > 0) candidates.push({ icon: "wrench", km: p.service.kmLeft, label: "serwis", tone: "service" });
+  if (p.service?.kmLeft !== undefined && p.service.kmLeft > 0) candidates.push({ icon: "wrench", km: p.service.kmLeft, label: "serwis", tone: "service" });
   const markers: (Marker & { at: number })[] = [];
   for (const m of candidates) {
     if (m.km < 1 || m.km > left || total <= 0) continue;

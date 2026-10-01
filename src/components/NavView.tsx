@@ -18,10 +18,10 @@ import { fmtDist, HudNav, HudNavData, HudRouteMap, ManeuverIcon, MapBrowse, NavT
 import { RULES } from "../core/rules";
 import { LatLon, MAX_VIEW_ZOOM, MIN_VIEW_ZOOM } from "./MapView";
 import { HudPlanner, HudRoutePicker } from "./HudRoutePicker";
-import { arrivalInfo, fullscreenSupported, Icon, isStop, routeRefs, STALE_MS, toggleFullscreen, useFullscreen, useTick } from "./HudView";
+import { arrivalInfo, fullscreenSupported, Icon, isStop, RouteLine, routeRefs, STALE_MS, toggleFullscreen, useFullscreen, useTick } from "./HudView";
 import { ReportKind, SnappedRoad } from "../collect";
 import { ReportSheet } from "./ReportSheet";
-import { SectionPanel, sectionKey, sectionView, useSectionRun } from "./SectionControl";
+import { SectionLine, SectionPanel, sectionKey, sectionView, useSectionRun } from "./SectionControl";
 import { sectionLimit } from "../core/section";
 import { ActiveStopPanel, confirmStartDay, fmtTimer, StopControlsProps, StopPicker } from "./StopControls";
 
@@ -141,14 +141,6 @@ export function NavView(p: NavViewProps) {
   const breakUsed = sc.stop
     ? sc.stop.targetMin ? Math.min(1, (now - sc.stop.start) / 60_000 / sc.stop.targetMin) : 1
     : Math.min(1, Math.max(0, sc.driver.sinceBreakMin / RULES.maxContinuousDrive));
-  // Pasek postępu trasy (tablet): przejechana część, punkty pośrednie i planowane postoje (km planu liczone od nas).
-  const progress = route && pos ? {
-    done: Math.min(1, pos.km / route.lengthKm),
-    marks: [
-      ...(route.via ?? []).map((v) => locate(route.points, v)?.km).filter((k): k is number => k !== undefined && k > pos.km).map((km) => ({ km, kind: "via" })),
-      ...(p.plan?.events.filter(isStop).map((e) => pos.km + e.fromKm).filter((km) => km < route.lengthKm).map((km) => ({ km, kind: "stop" })) ?? []),
-    ],
-  } : null;
   const refs = route ? routeRefs(route.instructions) : "";
   const endNav = () => {
     if (!p.nav?.onEnd || !confirm("Zakończyć nawigację? Trasa i cel zostaną usunięte.")) return;
@@ -184,7 +176,7 @@ export function NavView(p: NavViewProps) {
       </div>
 
       <header className="nm-top">
-        {nav ? <HudNav nav={nav} track={track} card section={section && <SectionPanel v={section} now={now} />} onManeuvers={() => setManeuvers(true)} /> : (
+        {nav ? <HudNav nav={nav} track={track} card section={section && <div className="nm-section-card"><SectionPanel v={section} now={now} /></div>} onManeuvers={() => setManeuvers(true)} /> : (
           <div className="hud-nav card off">
             <span className="hud-nav-msg">Nawigacja jest dostępna w RoadPilot Premium.</span>
           </div>
@@ -284,12 +276,10 @@ export function NavView(p: NavViewProps) {
       <div className="nm-progress">
         <span className="nm-progress-item"><Icon name="flag" /><span><b>{fmtKm(p.route.totalKm)}</b><small>Do celu</small></span></span>
         <span className={`nm-progress-item ${arrival.bad ? "bad" : ""}`}><Icon name="clock" /><span><b>{arrival.clock}</b><small>{arrival.left !== undefined ? `Przyjazd za ${arrival.left}` : arrival.note}</small></span></span>
+        {/* Oś trasy jak w HUD: Start → Cel, przejechane na zielono, ciężarówka z %, kubek przy planowanej przerwie („za 269 km 12:01”). */}
+        {/* Odcinkowy pomiar (zapowiedź, w trakcie, podsumowanie) zajmuje miejsce osi — na tablecie nie w karcie manewru. */}
         <span className="nm-progress-track">
-          <span className="nm-progress-bar">
-            <i style={{ width: `${Math.round((progress?.done ?? 0) * 1000) / 10}%` }} />
-            {route && progress?.marks.map((m, i) => <em key={i} className={m.kind} style={{ left: `${Math.min(100, (m.km / route.lengthKm) * 100)}%` }} />)}
-          </span>
-          <small>{fmtKm(p.route.totalKm)}{arrival.left !== undefined ? ` · ${arrival.left}` : ""}</small>
+          {section ? <SectionLine v={section} now={now} /> : <RouteLine route={p.route} doneKm={pos?.km ?? 0} plan={p.plan} now={now} destination={p.nav?.dest?.label} />}
         </span>
       </div>
 

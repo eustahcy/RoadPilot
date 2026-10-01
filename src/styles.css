@@ -697,11 +697,11 @@ input[type="number"]::-webkit-inner-spin-button, input[type="number"]::-webkit-o
 
 /* HUD: nawigacja — manewr, pasy ruchu, ograniczenie prędkości (zamiast animacji drogi) */
 .hud-nav { position: relative; z-index: 1; display: flex; align-items: center; gap: calc(2 * var(--u)); padding: calc(1.2 * var(--u)) calc(2.2 * var(--u)); border-radius: calc(2.2 * var(--u)); background: rgba(10, 18, 26, .82); border: 1px solid rgba(68, 240, 124, .35); min-width: 0; }
-.hud-nav.off { border-color: rgba(232, 180, 76, .6); justify-content: space-between; }
+.hud-nav.off { border-color: rgba(68, 240, 124, .55); justify-content: space-between; }
 .hud-nav.waiting { border-color: var(--hud-line); }
 .hud-nav-msg { color: #cfdae2; font-size: calc(2.8 * var(--u)); font-weight: 750; }
-.hud-nav.off .hud-nav-msg { color: var(--amber); }
-.hud-nav-btn { border: 1px solid rgba(232, 180, 76, .6); background: none; color: var(--amber); border-radius: calc(1.4 * var(--u)); padding: calc(1 * var(--u)) calc(2 * var(--u)); font: inherit; font-size: calc(2.4 * var(--u)); font-weight: 800; }
+.hud-nav.off .hud-nav-msg { color: var(--hud-green); }
+.hud-nav-btn { border: 1px solid rgba(68, 240, 124, .6); background: none; color: var(--hud-green); border-radius: calc(1.4 * var(--u)); padding: calc(1 * var(--u)) calc(2 * var(--u)); font: inherit; font-size: calc(2.4 * var(--u)); font-weight: 800; }
 .hud-man { display: flex; align-items: center; gap: calc(1.8 * var(--u)); flex: 1; min-width: 0; }
 .hud-man svg { flex: none; width: calc(9 * var(--u)); height: calc(9 * var(--u)); fill: none; color: #eef3f6; stroke: currentColor; stroke-width: 2.8; stroke-linecap: round; stroke-linejoin: round; }
 .hud-man.soon svg { color: var(--hud-green); }
@@ -992,7 +992,7 @@ input[type="number"]::-webkit-inner-spin-button, input[type="number"]::-webkit-o
 /* Bez trasy / czekanie na GPS: duży napis i przycisk — czytelne z odległości, karta na całą wysokość pasa. */
 .nm-top .hud-nav.card.off, .nm-top .hud-nav.card.waiting { flex-direction: column; align-items: flex-start; justify-content: center; gap: calc(2 * var(--u)); min-height: calc(18 * var(--u)); }
 .nm-top .hud-nav.card .hud-nav-msg { font-size: calc(4.2 * var(--u)); font-weight: 850; line-height: 1.2; }
-.nm-top .hud-nav.card .hud-nav-btn { padding: calc(1.6 * var(--u)) calc(3.4 * var(--u)); border-radius: calc(2 * var(--u)); background: var(--amber); border-color: var(--amber); color: #1a1406; font-size: calc(3.2 * var(--u)); }
+.nm-top .hud-nav.card .hud-nav-btn { padding: calc(1.6 * var(--u)) calc(3.4 * var(--u)); border-radius: calc(2 * var(--u)); background: var(--hud-green); border-color: var(--hud-green); color: #06210f; font-size: calc(3.2 * var(--u)); }
 .nm-tiles { grid-area: tiles; }
 .nm-side { grid-area: side; align-self: end; display: grid; gap: calc(1.2 * var(--u)); justify-items: center; }
 .nm-ctl { grid-area: ctl; align-self: end; display: grid; gap: calc(1.2 * var(--u)); justify-items: center; }
@@ -1158,12 +1158,27 @@ input[type="number"]::-webkit-inner-spin-button, input[type="number"]::-webkit-o
   .nm-progress-item b { font-size: calc(3.8 * var(--u)); font-weight: 850; font-variant-numeric: tabular-nums; white-space: nowrap; }
   .nm-progress-item small { color: var(--hud-dim); font-size: calc(2.1 * var(--u)); white-space: nowrap; }
   .nm-progress-item.bad b { color: var(--red); }
-  .nm-progress-track { flex: 1; min-width: 0; display: grid; justify-items: center; gap: calc(.9 * var(--u)); }
-  .nm-progress-bar { position: relative; width: 100%; height: calc(.9 * var(--u)); border-radius: 99px; background: rgba(140, 175, 195, .25); }
-  .nm-progress-bar i { position: absolute; left: 0; top: 0; bottom: 0; border-radius: inherit; background: var(--hud-green); box-shadow: 0 0 calc(1 * var(--u)) rgba(68, 240, 124, .45); }
-  .nm-progress-bar em { position: absolute; top: 50%; width: calc(2 * var(--u)); height: calc(2 * var(--u)); margin: calc(-1 * var(--u)) 0 0 calc(-1 * var(--u)); border-radius: 50%; background: #0d1820; border: 2px solid #cfdae2; }
-  .nm-progress-bar em.stop { border-color: var(--amber); }
-  .nm-progress-track small { color: var(--hud-dim); font-size: calc(2.1 * var(--u)); }
+  .nm-progress-track { flex: 1; min-width: 0; }
+  /* Odcinkowy pomiar na tablecie jest w dolnym pasku, nie w karcie manewru. */
+  .nm-section-card { display: none; }
+  /* Odcinek jak oś trasy: przejechana część i średnia w kolorze średniej; meta z „do końca”. */
+  .nm-progress .sc-line .sc-limit { width: calc(5.4 * var(--u)); height: calc(5.4 * var(--u)); font-size: calc(2.3 * var(--u)); }
+  .nm-progress .sc-line .sc-ico { width: calc(4.6 * var(--u)); height: calc(4.6 * var(--u)); }
+  .nm-progress .sc-line .sc-mark { width: calc(4.6 * var(--u)); height: calc(4.6 * var(--u)); font-size: calc(2.8 * var(--u)); }
+  .nm-progress .sc-line.warn .hud-dashes i.on { background: var(--amber); box-shadow: 0 0 calc(1.4 * var(--u)) rgba(232, 180, 76, .55); }
+  .nm-progress .sc-line.over .hud-dashes i.on { background: var(--red); box-shadow: 0 0 calc(1.4 * var(--u)) rgba(239, 106, 91, .55); }
+  .nm-progress .sc-line .hud-truck b { white-space: nowrap; }
+  .nm-progress .sc-line.warn .hud-truck b { color: var(--amber); }
+  .nm-progress .sc-line.over .hud-truck b { color: var(--red); }
+  .nm-progress .sc-line.ahead .hud-truck b { color: #cfdae2; }
+  .nm-progress .sc-line-advice { position: absolute; left: 0; right: 0; bottom: 0; text-align: center; color: #ffb3a8; font-size: calc(2.2 * var(--u)); font-weight: 800; }
+  /* Oś trasy z HUD w dolnym pasku — niższa niż w HUD. */
+  .nm-progress .hud-route { gap: calc(1.2 * var(--u)); }
+  .nm-progress .hud-track { height: calc(12.5 * var(--u)); }
+  .nm-progress .hud-route-end .hud-ico { width: calc(4.6 * var(--u)); height: calc(4.6 * var(--u)); }
+  .nm-progress .hud-route-end b { font-size: calc(2.6 * var(--u)); }
+  .nm-progress .hud-truck { width: calc(6 * var(--u)); left: calc(var(--p) * (100% - 6 * var(--u))); }
+  .nm-progress .hud-truck .hud-ico { width: calc(6 * var(--u)); height: calc(6 * var(--u)); }
 }
 
 .nav-trip { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 10px 0 4px; }

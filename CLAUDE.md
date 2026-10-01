@@ -137,8 +137,10 @@ src/components/NavView.tsx  nawigacja jako osobny system (nie HUD): HudRouteMap 
                    „⋯” = menu (zgłoszenie, postój, dzień, pełny ekran, zakończ nawigację, wyjdź).
                    Przycisk 2D/3D nad zoomem (Settings.navMap): 2D = HudRouteMap flat (pitch 0, FLAT_ZOOM −2, trasa na 25 km, bez horyzontu .nm-map.flat). Karty „szklane” gradientem, bez backdrop-filter;
                    Tablet (wg makiety): górny pas (karta + kafelki 2×2) na czarnym tle, mapa w siatce od 2. wiersza (.nm-map grid-area 2/1/-1/-1);
-                   w karcie zielony kafelek kolejnego manewru (HudNav .hud-after, onManeuvers → lista), na dole .nm-progress: do celu, przyjazd i pasek
-                   postępu trasy (kropki: punkty pośrednie, planowane postoje z planu); mniejsza skala --u i przyciski 8u
+                   w karcie zielony kafelek kolejnego manewru (HudNav .hud-after, onManeuvers → lista), na dole .nm-progress: do celu, przyjazd i oś trasy jak w HUD
+                   (HudView RouteLine: Start, ciężarówka z %, postoje z planu „za X km” + godzina, Cel); odcinkowy pomiar na tablecie zastępuje tę oś
+                   w tym samym stylu (SectionControl SectionLine: limit, kwadraciki w kolorze średniej, ciężarówka ze średnią, meta „za X km”)
+                   (w karcie ukryty .nm-section-card), na telefonach zostaje w karcie; mniejsza skala --u i przyciski 8u
                    strzałki (HudNav arrowGeom/Arrow): trzon + wypełniony grot (.head fill currentColor — kolor przez `color`, nie `stroke`), ostre skręty
                    z trzonem z boku, zawracanie przez lewo; rondo (RoundaboutIcon) przeciwnie do ruchu wskazówek, kąt zjazdu z serwera (valhalla.mjs
                    turnAngle: wjazd 26 → bearing_after manewru 27), przy zawracaniu zjazd po lewej; kąt z trasy przy TURN albo |kąt| ≥ 60°, inaczej ANGLES.

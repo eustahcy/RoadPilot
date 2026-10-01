@@ -170,6 +170,8 @@ export function NavCard(p: NavProps) {
         </div>
       )}
 
+      {r?.realSpeedShare ? <p className="muted small">Czas z jazdy kierowców RoadPilot na {Math.round(r.realSpeedShare * 100)}% trasy.</p> : null}
+      {r?.gate && <p className="gate-note">Trasa prowadzi do wjazdu dla ciężarówek zgłoszonego przez kierowcę.</p>}
       {r && p.token && options.length > 1 && options.some((o) => o.to.lat === r.to.lat && o.to.lon === r.to.lon) && (
         <>
           <div className="stop-label">Porównanie tras</div>

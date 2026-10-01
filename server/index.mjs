@@ -6,8 +6,10 @@
 
 import { createHash, randomBytes, randomInt, scrypt as scryptCb, timingSafeEqual } from "node:crypto";
 import { cleanPoints, cleanReport, inPoland } from "./collect.mjs";
+import { applySpeeds, SPEED_MIN } from "./speeds.mjs";
+import { badTurnClusters } from "./mapcheck.mjs";
 import { HERE_MAX_POINTS, limitHere, osrmLanes, parseValhalla, parseValhallaAlternates, roadInfo, traceChunks, tracePoints, traceRequest, valhallaRequest } from "./valhalla.mjs";
-import { ALERT_KINDS, ALERT_TTL_H, applyVotes, blockingPoints, dropCopiedBridgeHeights, routeAlerts, routeBoxes, routeWarnings } from "./warnings.mjs";
+import { ALERT_KINDS, ALERT_TTL_H, applyConditions, applyVotes, blockingPoints, dropCopiedBridgeHeights, routeAlerts, routeBoxes, routeWarnings } from "./warnings.mjs";
 import { compareReports, REPORT_TO_OSM } from "./compare.mjs";
 import { parseRoutes, parseSearch, ROUTE_TYPES, routeError, routeUrl, searchUrl, validPoint } from "./nav.mjs";
 import { cleanPresence, friendView, keepReplayedPosAt } from "./friends.mjs";
@@ -433,12 +435,13 @@ async function valhallaRoute(from, to, vehicle, routeType = "fastest", via = [])
   } catch {
     return withRoadInfo(await valhallaOnce(from, to, vehicle, [], routeType, via));
   }
-  const exclude = [];
+  // Manewry zgłoszone jako niemożliwe przez kilku kierowców — omijamy punkt tuż za nimi.
+  const exclude = await badTurnExcludes([from, ...via, to]);
   const seen = new Set();
   let best = await valhallaOnce(from, to, vehicle, exclude, routeType, via);
   if (!best) return null;
   for (let i = 0; i < MAX_DETOURS; i++) {
-    const blocking = blockingPoints(await findWarnings(best.points, veh, false), best.lengthKm).filter((p) => !seen.has(p.key));
+    const blocking = blockingPoints(await findWarnings(best.points, veh, false, { kmh: best.travelMin > 0 ? (best.lengthKm / best.travelMin) * 60 : 60, destKm: best.lengthKm, startKm: 0 }), best.lengthKm).filter((p) => !seen.has(p.key));
     if (!blocking.length) return withRoadInfo({ ...best, detours: exclude.length });
     blocking.forEach((p) => {
       seen.add(p.key);
@@ -498,6 +501,45 @@ routes["POST /api/nav/here"] = async (req, user) => {
 
 const MAX_VIA = 5;
 
+/** Potwierdzone „złe manewry” (≥ BAD_TURN_USERS kierowców) w prostokącie wokół punktów trasy — do exclude_locations. */
+async function badTurnExcludes(points) {
+  const lats = points.map((p) => p.lat), lons = points.map((p) => p.lon);
+  const [rows] = await db.query("SELECT user_id AS user, lat, lon, heading, note FROM road_reports WHERE kind = 'bad_turn' AND lat BETWEEN ? AND ? AND lon BETWEEN ? AND ?", [Math.min(...lats) - 0.3, Math.max(...lats) + 0.3, Math.min(...lons) - 0.5, Math.max(...lons) + 0.5]);
+  return badTurnClusters(rows).filter((c) => c.confirmed).slice(0, 40).map((c) => ({ lat: c.lat, lon: c.lon }));
+}
+
+/** Prędkości z jazdy kierowców (speed_cells) w pamięci — odświeżane co godzinę; brak tabeli / błąd = trasa bez nich. */
+let speedCells = { at: 0, map: new Map() };
+async function speedLookup() {
+  if (Date.now() - speedCells.at > 3_600_000) {
+    try {
+      const [rows] = await db.query("SELECT cell, dir, passes, users, kmh FROM speed_cells WHERE passes >= ? AND users >= ?", [SPEED_MIN.passes, SPEED_MIN.users]);
+      speedCells = { at: Date.now(), map: new Map(rows.map((r) => [`${r.cell}|${r.dir}`, r])) };
+    } catch (e) {
+      console.error(`Prędkości z jazdy: ${e.message}`);
+      speedCells = { at: Date.now(), map: new Map() };
+    }
+  }
+  return (cell, dir) => speedCells.map.get(`${cell}|${dir}`);
+}
+
+/** Trasa z własnego silnika + zmierzone prędkości ciężarówek (plan przerw, czas przejazdu). */
+async function withSpeeds(route) {
+  return route?.engine === "roadpilot" ? applySpeeds(route, await speedLookup()) : route;
+}
+
+/** Zgłoszony wjazd TIR dalej od celu niż tyle metrów dotyczy innego miejsca. */
+const GATE_NEAR_M = 400;
+
+/** Najbliższy zgłoszony wjazd dla ciężarówek przy celu (road_reports kind „gate”) albo null. */
+async function truckGate(to) {
+  const dLat = GATE_NEAR_M / 111_320, dLon = dLat / Math.cos((to.lat * Math.PI) / 180);
+  const [rows] = await db.query("SELECT lat, lon FROM road_reports WHERE kind = 'gate' AND lat BETWEEN ? AND ? AND lon BETWEEN ? AND ?", [to.lat - dLat, to.lat + dLat, to.lon - dLon, to.lon + dLon]);
+  const near = rows.map((r) => ({ lat: r.lat, lon: r.lon, m: distKmPts(to, r) * 1000 })).filter((r) => r.m <= GATE_NEAR_M).sort((a, b) => a.m - b.m)[0];
+  return near ? { lat: near.lat, lon: near.lon } : null;
+}
+const distKmPts = (a, b) => Math.hypot((a.lat - b.lat) * 111.32, (a.lon - b.lon) * 111.32 * Math.cos((a.lat * Math.PI) / 180));
+
 /** Korki są na razie wyłączone (decyzja 2026-10-01: licencja i limity TomTom) — TRAFFIC_ENABLED=1 włącza je z powrotem. */
 const TRAFFIC_ENABLED = process.env.TRAFFIC_ENABLED === "1";
 /** Trasa TomTom bez utrudnień, gdy korki są wyłączone. */
@@ -508,8 +550,14 @@ routes["POST /api/nav/route"] = async (req, user) => {
   navThrottle("route", req);
   const body = await readJson(req);
   const from = validPoint(body.from);
-  const to = validPoint(body.to);
-  if (!from || !to) throw new HttpError(400, "Brak punktu startu lub celu.");
+  const target = validPoint(body.to);
+  if (!from || !target) throw new HttpError(400, "Brak punktu startu lub celu.");
+  // Wjazd dla ciężarówek zgłoszony przez kierowcę przy celu — trasa prowadzi do niego, nie do środka budynku.
+  const gate = await truckGate(target);
+  const to = gate ?? target;
+  const tag = (res) => (gate ? { ...res, route: { ...res.route, gate } } : res);
+  // Prędkości z jazdy kierowców dla trasy i alternatyw (własny silnik).
+  const finish = async (res) => tag({ ...res, route: await withSpeeds(res.route), ...(res.alternatives ? { alternatives: await Promise.all(res.alternatives.map(withSpeeds)) } : {}) });
   // Punkty pośrednie (przytrzymanie na mapie → „dodaj do trasy”); z nimi bez tras alternatywnych.
   const via = Array.isArray(body.via) ? body.via.map(validPoint) : [];
   if (via.length > MAX_VIA || via.some((p) => !p)) throw new HttpError(400, `Najwyżej ${MAX_VIA} punktów pośrednich.`);
@@ -525,22 +573,22 @@ routes["POST /api/nav/route"] = async (req, user) => {
   // Trasy liczy zawsze własny silnik (wybór TomTom usunięty); TomTom tylko awaryjnie — poza Polską albo gdy Valhalla zawiedzie.
   if (ownPossible) {
     const own = await valhallaRoute(from, to, body.vehicle, routeType, via);
-    if (own) return [200, { route: own, alternatives: withAlts ? distinct(own, (await valhallaAlternates(from, to, body.vehicle, routeType)).map((a) => ({ ...a, engine: "roadpilot" }))) : [] }];
+    if (own) return [200, await finish({ route: own, alternatives: withAlts ? distinct(own, (await valhallaAlternates(from, to, body.vehicle, routeType)).map((a) => ({ ...a, engine: "roadpilot" }))) : [] })];
   }
   userDaily("route", user);
   try {
     await spend("route");
   } catch (e) {
     const own = ownPossible ? await valhallaRoute(from, to, body.vehicle, routeType, via) : null;
-    if (own) return [200, { route: { ...own, fallback: true } }];
+    if (own) return [200, await finish({ route: { ...own, fallback: true } })];
     throw e;
   }
   const r = await tomtom(url);
   const [route, ...alts] = r.ok ? parseRoutes(r.json) : [];
-  if (route) return [200, { route: { ...noTraffic(route), engine: "tomtom" }, alternatives: distinct(route, alts).map((a) => ({ ...noTraffic(a), engine: "tomtom" })) }];
+  if (route) return [200, tag({ route: { ...noTraffic(route), engine: "tomtom" }, alternatives: distinct(route, alts).map((a) => ({ ...noTraffic(a), engine: "tomtom" })) })];
   if (r.status >= 500 && ownPossible) {
     const own = await valhallaRoute(from, to, body.vehicle, routeType, via);
-    if (own) return [200, { route: { ...own, fallback: true } }];
+    if (own) return [200, await finish({ route: { ...own, fallback: true } })];
   }
   throw new HttpError(r.status === 400 || r.status === 404 ? 422 : 502, routeError(r.json));
 };
@@ -617,15 +665,20 @@ routes["POST /api/password/reset"] = async (req) => {
  * Ograniczenia z naszej bazy na trasie [lat, lon, km][], których pojazd nie spełnia, oraz (gdy `alerts`) fotoradary,
  * odcinkowe pomiary i świeże zgłoszenia kontroli — posortowane po km.
  */
-async function findWarnings(pts, vehicle, alerts = true) {
+/**
+ * `timing` — do ograniczeń warunkowych: { kmh } średnia prędkość trasy (czas przejazdu każdego miejsca = teraz + km / kmh),
+ * { destKm } km celu (dojazd w strefie). Domyślnie 60 km/h i koniec wysłanego kawałka.
+ */
+async function findWarnings(pts, vehicle, alerts = true, timing = {}) {
   const warnings = [];
   for (const box of routeBoxes(pts)) {
     const area = [box.minLat, box.maxLat, box.minLon, box.maxLon];
     const [osm] = await db.query(
-      `SELECT 'osm' AS source, osm_id AS id, kind, value, raw, lat, lon, geom, name, bridge FROM osm_restrictions
+      `SELECT 'osm' AS source, osm_id AS id, kind, value, raw, lat, lon, geom, name, bridge, cond FROM osm_restrictions
        WHERE lat BETWEEN ? AND ? AND lon BETWEEN ? AND ? AND (
-         (kind = 'height' AND value < ?) OR (kind = 'weight' AND value < ?) OR (kind = 'axle' AND value < ?) OR
-         (kind = 'width' AND value < ?) OR (kind = 'length' AND value < ?) OR kind = 'hgv')`,
+         (kind = 'height' AND value < ?) OR (kind = 'weight' AND (value < ? OR cond IS NOT NULL)) OR (kind = 'axle' AND value < ?) OR
+         (kind = 'width' AND value < ?) OR (kind = 'length' AND value < ?) OR kind = 'hgv' OR kind = 'incline')
+       AND NOT EXISTS (SELECT 1 FROM osm_overrides o WHERE o.osm_id = osm_restrictions.osm_id AND o.kind = osm_restrictions.kind)`,
       [...area, vehicle.heightM, vehicle.weightKg / 1000, vehicle.axleWeightKg / 1000, vehicle.widthM, vehicle.lengthM],
     );
     const [rep] = await db.query(
@@ -656,7 +709,12 @@ async function findWarnings(pts, vehicle, alerts = true) {
     warnings.push(...(found.length ? applyVotes(found, await alertVotes(found)) : []));
   }
   warnings.sort((a, b) => a.km - b.km);
-  return warnings.filter((w, i) => !warnings.slice(0, i).some((p) => p.kind === w.kind && w.km - p.km < 0.15));
+  const unique = warnings.filter((w, i) => !warnings.slice(0, i).some((p) => p.kind === w.kind && w.km - p.km < 0.15));
+  // Zakazy w godzinach i „nie dotyczy dojazdu” — w chwili, w której tam będziemy.
+  const startKm = pts[0][2];
+  const kmh = timing.kmh > 5 ? timing.kmh : 60;
+  const now = Date.now();
+  return applyConditions(unique, { timeAt: (km) => now + ((km - startKm) / kmh) * 3_600_000, destKm: timing.destKm ?? pts[pts.length - 1][2], startKm: timing.startKm ?? startKm, weightT: vehicle.weightKg / 1000 });
 }
 
 /** Głosy „jest / nie ma” dla znalezionych ostrzeżeń (ostatnie 180 dni) → Map "source:id" → { up, down, lastUp, lastDown }. */
@@ -687,7 +745,10 @@ routes["POST /api/nav/warnings"] = async (req, user) => {
   const vehicle = parseVehicle(body.vehicle);
   const pts = Array.isArray(body.points) ? body.points.filter((p) => Array.isArray(p) && p.length >= 3 && p.every(Number.isFinite)).slice(0, 20000) : [];
   if (pts.length < 2) throw new HttpError(400, "Brak trasy.");
-  return [200, { warnings: await findWarnings(pts, vehicle), pois: body.pois === false ? undefined : await findPois(pts, body.tolls === true) }];
+  // Aplikacja podaje długość i czas całej trasy (kawałek przy odświeżaniu nie kończy się na celu).
+  const lengthKm = Number(body.lengthKm), travelMin = Number(body.travelMin);
+  const timing = lengthKm > 0 && travelMin > 0 ? { kmh: (lengthKm / travelMin) * 60, destKm: lengthKm, startKm: 0 } : {};
+  return [200, { warnings: await findWarnings(pts, vehicle, true, timing), pois: body.pois === false ? undefined : await findPois(pts, body.tolls === true) }];
 };
 
 /** Najwięcej prostokątów TomTom na jedno odświeżenie (trasa przed nami ~150 km to zwykle 1–3). */
@@ -1129,6 +1190,26 @@ routes["GET /api/admin/stats"] = async (req, user) => {
     osm: Object.fromEntries(osmKinds.map((r) => [r.kind, r.n])),
     recent: recent.map((r) => ({ kind: r.kind, lat: r.lat, lon: r.lon, value: r.value === null ? null : Number(r.value), note: r.note, at: new Date(r.created_at).getTime(), email: r.email })),
   }];
+};
+
+/** Administracja → Błędy mapy: podejrzane ograniczenia (z jazdy kierowców) i zgłoszenia „zły manewr”. */
+routes["GET /api/admin/mapcheck"] = async (req, user) => {
+  requireAdmin(user);
+  const [suspects] = await db.query("SELECT s.osm_id, s.kind, s.value, s.users, s.lat, s.lon, s.name, s.updated_at, o.osm_id IS NOT NULL AS hidden FROM map_suspects s LEFT JOIN osm_overrides o ON o.osm_id = s.osm_id AND o.kind = s.kind ORDER BY s.users DESC LIMIT 200");
+  const [hidden] = await db.query("SELECT o.osm_id, o.kind, r.value, r.name, r.lat, r.lon FROM osm_overrides o LEFT JOIN osm_restrictions r ON r.osm_id = o.osm_id AND r.kind = o.kind ORDER BY o.created_at DESC LIMIT 200");
+  const [turns] = await db.query("SELECT user_id AS user, lat, lon, heading, note FROM road_reports WHERE kind = 'bad_turn' ORDER BY id DESC LIMIT 2000");
+  return [200, { suspects: suspects.map((r) => ({ ...r, hidden: !!r.hidden })), hidden, badTurns: badTurnClusters(turns) }];
+};
+
+/** Ukrycie (hide: true) / przywrócenie ograniczenia z OSM — działa od razu dla tras i ostrzeżeń. */
+routes["POST /api/admin/override"] = async (req, user) => {
+  requireAdmin(user);
+  const b = await readJson(req);
+  const osmId = String(b.osmId ?? ""), kind = String(b.kind ?? "");
+  if (!/^[nwr]\d{1,18}$/.test(osmId) || !/^[a-z_]{2,12}$/.test(kind)) throw new HttpError(400, "Nieprawidłowe ograniczenie.");
+  if (b.hide) await db.query("INSERT IGNORE INTO osm_overrides (osm_id, kind, hidden_by) VALUES (?, ?, ?)", [osmId, kind, user.id]);
+  else await db.query("DELETE FROM osm_overrides WHERE osm_id = ? AND kind = ?", [osmId, kind]);
+  return [200, {}];
 };
 
 function requireAdmin(user) {

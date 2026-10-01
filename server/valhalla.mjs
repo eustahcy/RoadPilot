@@ -122,6 +122,8 @@ export function parseValhalla(json) {
     });
   }
 
+  const curves = sharpCurves(pts, km, instructions);
+
   const points = [];
   let lastKm = -Infinity;
   pts.forEach((p, i) => {
@@ -143,7 +145,49 @@ export function parseValhalla(json) {
     lanes: [],
     speedLimits: [],
     traffic: [],
+    curves,
   };
+}
+
+/** Zakręt ciaśniejszy niż tyle metrów promienia — dla długiego zestawu trzeba zwolnić i zająć szerzej pas. */
+export const CURVE_MAX_R = 25;
+/** Zakręt na skrzyżowaniu (manewr w tylu km) to skręt, nie łuk drogi — nie ostrzegamy. */
+const CURVE_MANEUVER_KM = 0.06;
+/** Punkty do promienia: tyle metrów przed i za. */
+const CURVE_SPAN_M = 15;
+
+/**
+ * Ciasne łuki drogi z geometrii trasy (pełna, przed rozrzedzeniem): promień okręgu przez punkty ±CURVE_SPAN_M.
+ * Pomija skrzyżowania z manewrem i ronda; sąsiednie punkty jednego łuku → jeden zakręt z najmniejszym promieniem.
+ */
+export function sharpCurves(pts, km, instructions = []) {
+  const out = [];
+  const turns = instructions.filter((i) => i.maneuver !== "STRAIGHT" && i.maneuver !== "FOLLOW").map((i) => i.km);
+  const at = (target) => {
+    // Punkt na łamanej w danym km (interpolacja).
+    let j = 1;
+    while (j < km.length - 1 && km[j] < target) j++;
+    const f = km[j] > km[j - 1] ? Math.max(0, Math.min(1, (target - km[j - 1]) / (km[j] - km[j - 1]))) : 0;
+    return { lat: pts[j - 1].latitude + f * (pts[j].latitude - pts[j - 1].latitude), lon: pts[j - 1].longitude + f * (pts[j].longitude - pts[j - 1].longitude) };
+  };
+  const total = km[km.length - 1] ?? 0;
+  const span = CURVE_SPAN_M / 1000;
+  for (let k = span; k <= total - span; k += 0.01) {
+    if (turns.some((t) => Math.abs(t - k) <= CURVE_MANEUVER_KM)) continue;
+    const [a, b, c] = [at(k - span), at(k), at(k + span)];
+    const kx = 111_320 * Math.cos((b.lat * Math.PI) / 180);
+    const P = (p) => [(p.lon - b.lon) * kx, (p.lat - b.lat) * 111_320];
+    const [A, C] = [P(a), P(c)];
+    const ab = Math.hypot(A[0], A[1]), bc = Math.hypot(C[0], C[1]), ac = Math.hypot(C[0] - A[0], C[1] - A[1]);
+    const cross = Math.abs(A[0] * C[1] - A[1] * C[0]);
+    if (cross < 1e-6) continue;
+    const r = (ab * bc * ac) / (2 * cross);
+    if (r >= CURVE_MAX_R) continue;
+    const last = out[out.length - 1];
+    if (last && k - last.km < 0.08) { if (r < last.radiusM) { last.km = round(k, 3); last.radiusM = Math.round(r); } }
+    else out.push({ km: round(k, 3), radiusM: Math.round(r) });
+  }
+  return out;
 }
 
 // ── Pasy ruchu (asystent pasa) ──────────────────────────────────────────────────────────────────────

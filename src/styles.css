@@ -708,10 +708,12 @@ input[type="number"]::-webkit-inner-spin-button, input[type="number"]::-webkit-o
 /* Strzałki manewrów i pasów: grot wypełniony kolorem strzałki, pierścień ronda przygaszony. */
 .hud-man svg .head, .hud-lane svg .head, .nm-man-list svg .head { fill: currentColor; stroke-width: 1.2; }
 .hud-man svg .ring, .nm-man-list svg .ring { opacity: .4; stroke-width: 2; }
+/* Numer zjazdu w środku ronda. */
+svg .rb-exit { fill: currentColor; stroke: none; font: 900 7.5px system-ui, sans-serif; }
 .hud-man > span { display: grid; min-width: 0; line-height: 1.15; }
 .hud-man b { font-size: calc(5 * var(--u)); font-weight: 850; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .hud-man.soon b { color: var(--hud-green); }
-.hud-exit { margin-left: calc(1.4 * var(--u)); padding: calc(.2 * var(--u)) calc(1 * var(--u)); border-radius: calc(.8 * var(--u)); background: #1f6fe5; color: #fff; font-size: .45em; font-style: normal; font-weight: 800; vertical-align: .35em; }
+.hud-exit { margin-left: calc(1.4 * var(--u)); padding: calc(.2 * var(--u)) calc(1 * var(--u)); border-radius: calc(.8 * var(--u)); background: #12804a; box-shadow: inset 0 0 0 2px rgba(255, 255, 255, .85); color: #fff; font-size: .45em; font-style: normal; font-weight: 800; vertical-align: .35em; }
 .hud-man small { color: #cfdae2; font-size: calc(2.4 * var(--u)); font-weight: 650; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .hud-man small.hud-then { color: var(--hud-dim); font-size: calc(2 * var(--u)); }
 .hud-lanes-guide { display: grid; justify-items: center; gap: calc(.6 * var(--u)); flex: none; }
@@ -786,8 +788,17 @@ input[type="number"]::-webkit-inner-spin-button, input[type="number"]::-webkit-o
 .consent-list b { color: var(--text); }
 .report { display: grid; gap: 12px; }
 .report-kinds { display: flex; flex-wrap: wrap; gap: 6px; }
+.bad-turn { display: grid; gap: 2px; width: 100%; margin-bottom: 12px; padding: 10px 12px; border-radius: 14px; border: 1px solid rgba(239, 106, 91, .55); background: rgba(120, 24, 30, .45); color: #ffd7d1; text-align: left; }
+.bad-turn b { font-size: 15px; }
+.bad-turn small { color: #f0c4bd; font-size: 12.5px; }
+.mapcheck-list { list-style: none; margin: 8px 0 12px; padding: 0; display: grid; gap: 6px; }
+.mapcheck-list li { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 10px; background: var(--field); border: 1px solid var(--line-2); font-size: 13.5px; }
+.mapcheck-list li > span { flex: 1; min-width: 0; }
+.mapcheck-list i { color: var(--dim); font-style: normal; }
+.mapcheck-list a { color: var(--green); font-weight: 700; font-size: 12.5px; }
+.gate-note { margin: 6px 0; padding: 8px 10px; border-radius: 10px; background: rgba(42, 138, 74, .18); border: 1px solid rgba(66, 211, 146, .45); color: #bff0cf; font-size: 13px; font-weight: 650; }
 .report-places-label { margin: 12px 0 6px; color: #9fb0bc; font-size: 12.5px; font-weight: 750; }
-.report-places { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 12px; }
+.report-places { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-bottom: 12px; }
 .report-place { display: grid; justify-items: center; gap: 4px; padding: 8px 4px; border-radius: 14px; border: 1px solid rgba(78, 161, 255, .45); background: rgba(22, 60, 120, .35); color: #eef3f6; font-size: 12.5px; font-weight: 750; }
 .report-place .report-ico { width: 40px; height: 40px; }
 .report-place.active { border-color: var(--green); background: rgba(66, 211, 146, .16); }

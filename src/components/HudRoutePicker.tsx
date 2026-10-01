@@ -132,6 +132,7 @@ export function HudRoutePicker({ planner, dest: current, onClose }: { planner: H
       {routes.length > 0 && !editing && (
         <>
           {routes.length === 1 && <p className="muted small">Brak sensownych tras alternatywnych — jest tylko jedna.</p>}
+          {routes[0]?.gate && <p className="gate-note">Trasa prowadzi do wjazdu dla ciężarówek zgłoszonego przez kierowcę.</p>}
           <RouteCompare routes={routes} selectedAt={selectedAt} token={planner.token} onPick={(r) => setSelectedAt(r.at)} mapStyle={planner.mapStyle} />
         </>
       )}

@@ -32,6 +32,19 @@ export interface SpeedLimit {
 export const NAV = {
   /** Dalej od trasy niż tyle metrów (plus dokładność GPS) = zjechaliśmy z trasy. */
   offRouteM: 50,
+  /** Kierunek z odbiornika GPS wiarygodny dopiero od tej prędkości (km/h) — wolniej z przesunięcia albo z drogi. */
+  headingMinKmh: 15,
+  /** Kierunek z przesunięcia: co najmniej tyle metrów między odczytami. */
+  headingMinMoveM: 20,
+  /** Odcinek trasy „w naszym kierunku”: różnica kierunków najwyżej tyle stopni. */
+  dirMatchDeg: 70,
+  /** Bez odczytów (tunel) przewidujemy ruch po trasie najwyżej tyle s i tyle km. */
+  deadReckonS: 60,
+  deadReckonKm: 1.5,
+  /** Przybliżenie mapy przed manewrem od tylu km. */
+  junctionZoomKm: 0.4,
+  /** Tyle s bez odczytu = „GPS słaby” (przewidujemy). */
+  weakGpsS: 5,
   /** Tyle czasu poza trasą, zanim wyznaczymy ją od nowa (ms). */
   rerouteAfterMs: 8_000,
   /** Dalej niż tyle metrów od trasy — wyznaczamy od razu (na pewno inna droga). */
@@ -88,6 +101,83 @@ export function locate(points: RoutePoint[], pos: { lat: number; lon: number }, 
     if (!best || off < best.offM) best = { km: aKm + t * (bKm - aKm), offM: off, idx: i };
   }
   return best;
+}
+
+/** Odczyt do śladu dopasowania: pozycja, prędkość i kierunek z odbiornika (może go nie być). */
+export interface TrackFix {
+  lat: number;
+  lon: number;
+  kmh: number | null;
+  heading: number | null;
+}
+
+const bearingDeg = (a: { lat: number; lon: number }, b: { lat: number; lon: number }) =>
+  ((Math.atan2((b.lon - a.lon) * Math.cos((a.lat * Math.PI) / 180), b.lat - a.lat) * 180) / Math.PI + 360) % 360;
+const angleDiff = (a: number, b: number) => { const d = Math.abs((((a - b) % 360) + 360) % 360); return Math.min(d, 360 - d); };
+
+/**
+ * Kierunek jazdy: z odbiornika tylko od NAV.headingMinKmh (wolniej iPhone podaje go z dużym błędem), inaczej z przesunięcia
+ * między odczytami (≥ NAV.headingMinMoveM); null = nie wiemy (postój) — mapa się nie obraca.
+ */
+export function travelHeading(fixes: TrackFix[]): number | null {
+  const last = fixes[fixes.length - 1];
+  if (!last) return null;
+  if (last.heading !== null && (last.kmh ?? 0) >= NAV.headingMinKmh) return last.heading;
+  for (let i = fixes.length - 2; i >= 0; i--) {
+    const a = fixes[i];
+    const d = Math.hypot((last.lat - a.lat) * M_PER_DEG, (last.lon - a.lon) * M_PER_DEG * Math.cos((last.lat * Math.PI) / 180));
+    if (d >= NAV.headingMinMoveM) return bearingDeg(a, last);
+  }
+  return null;
+}
+
+/**
+ * Dopasowanie do trasy po śladzie: najbliższy odcinek w naszym kierunku (±NAV.dirMatchDeg) — trasa biegnąca obok w drugą
+ * stronę (pętla, zjazd, druga jezdnia przy zawracaniu) nie przejmuje pozycji; odległość od trasy = mediana z ostatnich
+ * odczytów (pojedynczy zły odczyt przy wiadukcie nie daje „Poza trasą”). Bez kierunku — jak `locate`.
+ */
+export function locateTrace(points: RoutePoint[], fixes: TrackFix[], hint?: number): RoutePos | undefined {
+  const last = fixes[fixes.length - 1];
+  if (!last || points.length < 2) return undefined;
+  const heading = travelHeading(fixes);
+  let pos: RoutePos | undefined;
+  if (heading === null) pos = locate(points, last, hint);
+  else {
+    const from = hint === undefined ? 0 : Math.max(0, hint - NAV.windowBack);
+    const to = hint === undefined ? points.length - 1 : Math.min(points.length - 1, hint + NAV.windowAhead);
+    const kx = M_PER_DEG * Math.cos((last.lat * Math.PI) / 180);
+    let any: RoutePos | undefined;
+    for (let i = from; i < to; i++) {
+      const [aLat, aLon, aKm] = points[i];
+      const [bLat, bLon, bKm] = points[i + 1];
+      const bx = (bLon - aLon) * kx, by = (bLat - aLat) * M_PER_DEG;
+      const px = (last.lon - aLon) * kx, py = (last.lat - aLat) * M_PER_DEG;
+      const len2 = bx * bx + by * by;
+      const t = len2 > 0 ? Math.max(0, Math.min(1, (px * bx + py * by) / len2)) : 0;
+      const off = Math.hypot(px - t * bx, py - t * by);
+      const cand = { km: aKm + t * (bKm - aKm), offM: off, idx: i };
+      if (!any || off < any.offM) any = cand;
+      if (len2 > 0 && angleDiff(bearingDeg({ lat: aLat, lon: aLon }, { lat: bLat, lon: bLon }), heading) > NAV.dirMatchDeg) continue;
+      if (!pos || off < pos.offM) pos = cand;
+    }
+    // Nigdzie w naszym kierunku — jedziemy pod prąd trasy (zawracamy): najbliższy odcinek, a odległość zdecyduje o „poza trasą”.
+    pos ??= any;
+  }
+  if (!pos || fixes.length < 3) return pos;
+  // Mediana odległości ostatnich 3 odczytów od trasy w okolicy dopasowania.
+  const offs = fixes.slice(-3).map((f) => locate(points, f, pos!.idx)?.offM ?? Infinity).sort((a, b) => a - b);
+  return { ...pos, offM: Math.min(pos.offM, offs[1]) };
+}
+
+/**
+ * Przybliżenie mapy przed manewrem (poziomy zoomu do dodania): od NAV.junctionZoomKm do manewru +1, przy złożonym miejscu
+ * (rondo, pasy do wyboru, kolejny manewr w 300 m) +1,3; za manewrem 0 (wraca płynnie). Prosto / „jedź dalej” — bez zmian.
+ */
+export function junctionZoom(list: NavInstruction[], lanes: LaneSection[], km: number): number {
+  const next = nextInstruction(list, km);
+  if (!next || next.inKm > NAV.junctionZoomKm || /^(STRAIGHT|FOLLOW|DEPART)$/.test(next.ins.maneuver)) return 0;
+  const complex = next.ins.maneuver.startsWith("ROUNDABOUT") || !!next.then || lanes.some((l) => Math.abs(l.km - next.ins.km) <= 0.2);
+  return complex ? 1.3 : 1;
 }
 
 /** Następny manewr przed nami (pomijamy „wyjedź”) i odległość do niego (km). */

@@ -98,6 +98,8 @@ CREATE TABLE IF NOT EXISTS osm_restrictions (
   KEY (lat, lon),
   KEY (kind)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+-- Warunki z OSM (2026-10-01): godziny, dni, „nie dotyczy dojazdu” — JSON z conditional.mjs parseConditional.
+ALTER TABLE osm_restrictions ADD COLUMN IF NOT EXISTS cond TEXT NULL;
 
 -- Fotoradary, odcinkowe pomiary prędkości, kamery na czerwonym (OSM; import: server/enforcement-import.mjs).
 -- from_* — skąd jedzie mierzony pojazd (kierunek; NULL = oba), to_* — koniec odcinka (tylko section).
@@ -211,4 +213,37 @@ CREATE TABLE IF NOT EXISTS premium_keys (
   used_at DATETIME NULL,
   KEY (created_at),
   CONSTRAINT fk_pkeys_used FOREIGN KEY (used_by) REFERENCES users (id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Prędkości ciężarówek z jazdy kierowców (2026-10-01): komórka ~250 m × kierunek (0–7), mediana przejazdów
+-- (budowa: server/speed-build.mjs, co tydzień w scripts/weekly-update.sh).
+CREATE TABLE IF NOT EXISTS speed_cells (
+  cell VARCHAR(24) NOT NULL,
+  dir TINYINT NOT NULL,
+  passes INT NOT NULL,
+  users INT NOT NULL,
+  kmh SMALLINT NOT NULL,
+  PRIMARY KEY (cell, dir)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Błędy mapy (2026-10-01): ograniczenia, przez które przejechali kierowcy z niespełniającym pojazdem (suspects-build.mjs),
+-- i ograniczenia ukryte przez admina (nie wpływają na trasy ani ostrzeżenia).
+CREATE TABLE IF NOT EXISTS map_suspects (
+  osm_id VARCHAR(20) NOT NULL,
+  kind VARCHAR(12) NOT NULL,
+  value DECIMAL(7,2) NULL,
+  users INT NOT NULL,
+  lat DOUBLE NOT NULL,
+  lon DOUBLE NOT NULL,
+  name VARCHAR(120) NOT NULL DEFAULT '',
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (osm_id, kind)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS osm_overrides (
+  osm_id VARCHAR(20) NOT NULL,
+  kind VARCHAR(12) NOT NULL,
+  hidden_by INT UNSIGNED NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (osm_id, kind)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

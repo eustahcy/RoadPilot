@@ -388,6 +388,9 @@ function App() {
             await voteAlert(auth.token, w, vote);
           },
           onSnap: (at) => snapRoad(auth.token, at),
+          onBadTurn: async (t) => {
+            await sendReport(auth.token, { kind: "bad_turn", lat: t.lat, lon: t.lon, heading: t.heading, value: null, note: t.note });
+          },
         } : undefined}
         friends={auth ? friends.friends : undefined}
         live={live}
@@ -612,7 +615,7 @@ function App() {
 
 /** Trasa z nawigacji zasila silnik przerw: odcinki wg typu drogi (zaokrąglone do 0,1 km), licznik GPS od zera. */
 function tripFromRoute(trip: AppState["trip"], r: NavRoute): AppState["trip"] {
-  const segments = r.segments.map((x) => ({ type: x.type, km: Math.round(x.km * 10) / 10 })).filter((x) => x.km > 0);
+  const segments = r.segments.map((x) => ({ type: x.type, km: Math.round(x.km * 10) / 10, ...(x.kmh ? { kmh: x.kmh } : {}) })).filter((x) => x.km > 0);
   return { ...trip, dest: r.to, destination: r.to.label, profile: "custom", segments, distance: Math.round(r.lengthKm * 10) / 10, doneKm: 0 };
 }
 

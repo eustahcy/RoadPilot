@@ -242,3 +242,13 @@ describe("odtworzenie dnia z godzinami", () => {
     expect(r.end).toBe(NOW + 5.5 * H);
   });
 });
+
+describe("prędkość odcinka z jazdy kierowców", () => {
+  it("wolniejsza niż ustawiona — liczy się zmierzona; szybsza — nie wyżej niż ustawiona", () => {
+    const speeds: Speeds = { ...DEFAULT_SPEEDS, urban: 40, motorway: 80 };
+    const slow = new Route([{ type: "urban", km: 10, kmh: 20 }], speeds);
+    expect(slow.driveMinutes(0)).toBeCloseTo(30, 6); // 10 km / 20 km/h
+    const fast = new Route([{ type: "motorway", km: 80, kmh: 95 }], speeds);
+    expect(fast.driveMinutes(0)).toBeCloseTo(60, 6); // 80 km / 80 km/h (ustawiona)
+  });
+});

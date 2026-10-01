@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { applyVotes, dropCopiedBridgeHeights, routeAlerts, routeBoxes, routeWarnings } from "./warnings.mjs";
+import { applyConditions, applyVotes, blockingPoints, dropCopiedBridgeHeights, routeAlerts, routeBoxes, routeWarnings } from "./warnings.mjs";
 
 const KM_PER_DEG = 111.32;
 /** Trasa na północ po 19° E od 52° N, punkt co 100 m, 5 km. */
@@ -124,5 +124,26 @@ describe("wysokość na moście przepisana z drogi pod nim (błąd w OSM)", () =
   it("prawdziwe ograniczenie na moście (inna wartość albo nic pod spodem) — zostaje", () => {
     expect(dropCopiedBridgeHeights([estakada, { ...leszczynki, value: 3.2 }])).toHaveLength(2);
     expect(dropCopiedBridgeHeights([estakada])).toEqual([estakada]);
+  });
+});
+
+describe("ograniczenia warunkowe w chwili przejazdu", () => {
+  const night = [{ value: "no", time: [{ days: null, ph: false, ranges: [[1320, 360]] }] }];
+  const dest = [{ value: "none", users: ["destination"] }];
+  const w = (km, extra) => ({ km, source: "osm", id: "w1", kind: "hgv", value: null, raw: "", lat: 52, lon: 19, ...extra });
+  const ctx = (iso, destKm = 100) => ({ timeAt: () => Date.parse(iso), destKm, weightT: 40 });
+  it("zakaz nocny: w nocy obowiązuje (blokuje), w dzień miękka informacja z godzinami", () => {
+    expect(applyConditions([w(50, { cond: night })], ctx("2026-10-01T21:30:00Z"))[0]).toMatchObject({ kind: "hgv", note: "22:00–06:00" });
+    expect(applyConditions([w(50, { cond: night })], ctx("2026-10-01T10:00:00Z"))[0]).toMatchObject({ soft: true, note: "22:00–06:00 — w chwili przejazdu nie obowiązuje" });
+  });
+  it("tonaż z „nie dotyczy dojazdu”: tranzyt — obowiązuje, przy celu — miękko „tylko dojazd”; hgv=destination przy celu też", () => {
+    const wt = (km) => w(km, { kind: "weight", value: 12, cond: dest });
+    expect(applyConditions([wt(50)], ctx("2026-10-01T10:00:00Z"))[0].soft).toBeUndefined();
+    expect(applyConditions([wt(98)], ctx("2026-10-01T10:00:00Z"))[0]).toMatchObject({ soft: true, note: "tylko dojazd — cel w strefie" });
+    expect(applyConditions([w(99, { raw: "destination" })], ctx("2026-10-01T10:00:00Z"))[0].soft).toBe(true);
+    expect(blockingPoints(applyConditions([wt(98), wt(50)], ctx("2026-10-01T10:00:00Z")), 100)).toHaveLength(1);
+    // Strefa dłuższa niż 3 km: ciąg odcinków co ≤ 1,5 km do celu — cały jest dojazdem; odcinek daleko przed nią — tranzyt.
+    const chain = applyConditions([wt(80), wt(95.8), wt(96.6), wt(97.5), wt(98.5)], ctx("2026-10-01T10:00:00Z"));
+    expect(chain.map((x) => !!x.soft)).toEqual([false, true, true, true, true]);
   });
 });

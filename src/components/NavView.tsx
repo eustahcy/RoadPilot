@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { DeadlinePlan } from "../core/deadline";
 import { Friend } from "../core/friends";
 import { Live } from "../core/gps";
-import { legalLimitAt, locate, nextInstruction, speedTone } from "../core/navmatch";
+import { bearingAtKm, legalLimitAt, locate, NAV, nextInstruction, pointAtKm, speedTone } from "../core/navmatch";
 import { Plan } from "../core/plan";
 import { Route } from "../core/route";
 import { fmtDuration } from "../core/scenarios";
@@ -38,7 +38,7 @@ export interface NavViewProps {
   mapVector?: GlVector;
   voice: { supported: boolean; on: boolean; toggle: () => void };
   /** Zgłoszenia: `at` = miejsce przytrzymane na mapie (przyklejone do drogi przez onSnap), bez niego — nasza pozycja. */
-  report?: { onSend: (kind: ReportKind, value: number | null, at?: SnappedRoad) => Promise<void>; onVote: (w: RouteWarning, vote: 1 | -1) => Promise<void>; onSnap: (at: LatLon) => Promise<SnappedRoad | null> };
+  report?: { onSend: (kind: ReportKind, value: number | null, at?: SnappedRoad) => Promise<void>; onVote: (w: RouteWarning, vote: 1 | -1) => Promise<void>; onSnap: (at: LatLon) => Promise<SnappedRoad | null>; /** „Zły manewr”: punkt tuż za manewrem, kierunek wyjazdu i opis manewru. */ onBadTurn?: (t: { lat: number; lon: number; heading: number; note: string }) => Promise<void> };
   friends?: Friend[];
   live: Live | null;
   gpsOn: boolean;
@@ -98,7 +98,10 @@ export function NavView(p: NavViewProps) {
 
   const fresh = p.live && now - p.live.t <= STALE_MS ? p.live : null;
   const speed = fresh?.kmh != null ? Math.round(fresh.kmh) : null;
-  const track = useNavTrack(p.nav ?? NO_NAV, fresh);
+  // Mapa i dopasowanie do trasy: ostatni odczyt do NAV.deadReckonS — w tunelu / bez sygnału przewidujemy ruch po trasie.
+  const lastLive = p.live && now - p.live.t <= NAV.deadReckonS * 1000 ? p.live : null;
+  const weakGps = !!lastLive && now - lastLive.t > NAV.weakGpsS * 1000 && (lastLive.kmh ?? 0) > 5;
+  const track = useNavTrack(p.nav ?? NO_NAV, lastLive);
   const zoomBrowse = (d: number) => browse && setBrowse({ ...browse, zoom: Math.max(MIN_VIEW_ZOOM, Math.min(MAX_VIEW_ZOOM, browse.zoom + d)) });
   // W trakcie jazdy przeglądanie samo wraca do prowadzenia po 20 s bez dotykania mapy (jak w nawigacjach).
   const moving = (speed ?? 0) >= 10;
@@ -172,7 +175,7 @@ export function NavView(p: NavViewProps) {
     <div className={`hud navmode ${p.mapVector?.theme === "day" ? "day" : ""}`}>
       <NavVoice nav={p.nav} track={track} kmh={fresh?.kmh ?? null} enabled={p.voice.on} section={sectionVoice} />
       <div className={`nm-map ${browse ? "browsing" : ""} ${p.mapMode === "2d" ? "flat" : ""}`}>
-        {p.nav && p.mapToken ? <HudRouteMap nav={p.nav} track={track} live={fresh} token={p.mapToken} anchorY={p.mapMode === "2d" ? 0.62 : 0.7} zoomOffset={zoomOffset} flat={p.mapMode === "2d"} friends={p.friends} vector={p.mapVector} browse={browse} onBrowse={setBrowse} onPin={(x) => { setPin(x); setHold(null); }} onHold={(x) => { setHold(x); setPin(null); }} /> : <div className="hud-map empty" />}
+        {p.nav && p.mapToken ? <HudRouteMap nav={p.nav} track={track} live={lastLive} token={p.mapToken} anchorY={p.mapMode === "2d" ? 0.62 : 0.7} zoomOffset={zoomOffset} flat={p.mapMode === "2d"} friends={p.friends} vector={p.mapVector} browse={browse} onBrowse={setBrowse} onPin={(x) => { setPin(x); setHold(null); }} onHold={(x) => { setHold(x); setPin(null); }} /> : <div className="hud-map empty" />}
       </div>
 
       <header className="nm-top">
@@ -252,7 +255,7 @@ export function NavView(p: NavViewProps) {
       <div className="nm-speed">
         <div className="nm-speed-val">
           <strong className={speed === null ? "none" : tone ?? ""}>{speed ?? "—"}</strong>
-          <span>km/h</span>
+          <span>{weakGps ? "GPS słaby" : "km/h"}</span>
         </div>
         {limit !== undefined && <span className="hud-limit nm-limit" aria-label={`Ograniczenie ${limit} km/h`}>{limit}</span>}
         {legal !== undefined && speed !== null && <em className={`nm-speed-bar ${tone ?? ""}`} aria-hidden><i style={{ width: `${Math.min(100, Math.round((speed / legal) * 100))}%` }} /></em>}
@@ -395,6 +398,7 @@ export function NavView(p: NavViewProps) {
         <div className="hud-sheet" onClick={(e) => e.target === e.currentTarget && setReporting(false)}>
           <div className="hud-sheet-body">
             <button className="hud-sheet-close" aria-label="Zamknij" onClick={() => setReporting(false)}>×</button>
+            {!reportAt && route && pos && p.report.onBadTurn && <BadTurn route={route} km={pos.km} onSend={p.report.onBadTurn} onDone={() => setReporting(false)} />}
             <ReportSheet onSend={(kind, value) => p.report!.onSend(kind, value, reportAt ?? undefined)} onClose={() => setReporting(false)} located={reportAt !== null || p.live !== null} place={reportAt ? reportAt.name : undefined} />
           </div>
         </div>
@@ -596,5 +600,33 @@ function HoldCard({ hold, route, myKm, live, onVia, onSnap, onReport, onClose }:
         {route && onVia && <button className={onSnap ? "ghost" : "primary"} disabled={busy || ahead.length >= MAX_VIA} onClick={addVia}>{busy ? "Wyznaczam…" : "Jedź przez ten punkt"}</button>}
       </div>
     </div>
+  );
+}
+
+/** „Zły manewr”: manewr tuż przed nami albo właśnie minięty (−300 m … +500 m) — jednym dotknięciem „tu nie da się skręcić”. */
+function BadTurn({ route, km, onSend, onDone }: { route: NavRoute; km: number; onSend: (t: { lat: number; lon: number; heading: number; note: string }) => Promise<void>; onDone: () => void }) {
+  const [state, setState] = useState<"idle" | "sending" | "sent" | "error">("idle");
+  const ins = route.instructions
+    .filter((i) => i.maneuver !== "DEPART" && !i.maneuver.startsWith("ARRIVE") && i.km >= km - 0.3 && i.km <= km + 0.5)
+    .sort((a, b) => Math.abs(a.km - km) - Math.abs(b.km - km))[0];
+  if (!ins) return null;
+  const send = async () => {
+    // Punkt 30 m za manewrem na trasie i kierunek wyjazdu — tam silnik nie poprowadzi, gdy zgłosi to kilku kierowców.
+    const at = pointAtKm(route.points, ins.km + 0.03);
+    if (!at) return;
+    setState("sending");
+    try {
+      await onSend({ lat: at.lat, lon: at.lon, heading: Math.round(bearingAtKm(route.points, ins.km + 0.03, 0.03) ?? 0), note: ins.text.slice(0, 180) });
+      setState("sent");
+      setTimeout(onDone, 1200);
+    } catch {
+      setState("error");
+    }
+  };
+  return (
+    <button className="bad-turn" disabled={state === "sending" || state === "sent"} onClick={send}>
+      <b>{state === "sent" ? "Dziękujemy — zgłoszone" : state === "error" ? "Nie udało się — spróbuj ponownie" : "Tu nie da się skręcić"}</b>
+      <small>{ins.text}</small>
+    </button>
   );
 }

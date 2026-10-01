@@ -61,9 +61,24 @@ export function spokenDist(km: number) {
 
 const lower = (s: string) => s.charAt(0).toLowerCase() + s.slice(1);
 
-/** Progi zapowiedzi (km) — przy większej prędkości pierwsza wcześniej. */
-function thresholds(kmh: number | null) {
-  return (kmh ?? 0) >= 70 ? [2, 0.5, 0.08] : [0.5, 0.2, 0.05];
+/** Progi zapowiedzi (km): autostrada / droga szybka 2 km, 1 km, 500 m; reszta 500 m, 200 m; ostatni = „teraz”. */
+export function voiceMarks(kmh: number | null) {
+  return (kmh ?? 0) >= 70 ? { marks: [2, 1, 0.5], now: 0.08 } : { marks: [0.5, 0.2], now: 0.05 };
+}
+
+const ORDINAL = ["", "pierwszy", "drugi", "trzeci", "czwarty", "piąty", "szósty", "siódmy", "ósmy"];
+
+/**
+ * Zapowiedź manewru krócej niż zdanie z silnika: zjazd z numerem i kierunkiem z drogowskazu („zjazd 53, kierunek Gdynia”),
+ * rondo z numerem zjazdu („na rondzie drugi zjazd, Morska”); inne — tekst z silnika.
+ */
+export function maneuverSpeech(ins: NavInstruction): string {
+  const toward = ins.signpost?.split(/[,/]/)[0]?.trim();
+  const n = Number(ins.roundaboutExit);
+  if (ins.maneuver.startsWith("ROUNDABOUT") && n > 0) return `na rondzie ${ORDINAL[n] ?? `${n}.`} zjazd${ins.street ? `, ${ins.street}` : toward ? `, kierunek ${toward}` : ""}`;
+  if (ins.exit) return `zjazd ${ins.exit}${toward ? `, kierunek ${toward}` : ""}`;
+  if (/EXIT/.test(ins.maneuver) && toward) return `${ins.maneuver.endsWith("LEFT") ? "zjedź w lewo" : "zjedź w prawo"}, kierunek ${toward}`;
+  return lower(ins.text.replace(/\.$/, ""));
 }
 
 const ALERT_SPEECH: Record<string, string> = {
@@ -97,17 +112,14 @@ export function useNavVoice(enabled: boolean, next: { ins: NavInstruction; inKm:
   useEffect(() => {
     if (!enabled || !voiceSupported() || km === undefined) return;
     if (next) {
-      const [far, mid, now] = thresholds(kmh);
+      const { marks, now } = voiceMarks(kmh);
       const key = `${next.ins.km}`;
-      const text = lower(next.ins.text.replace(/\.$/, ""));
-      let stage: string | null = null;
-      if (next.inKm <= now) stage = "now";
-      else if (next.inKm <= mid) stage = "mid";
-      else if (next.inKm <= far && next.inKm > mid) stage = "far";
-      if (stage && !said.current.has(`${key}:${stage}`)) {
-        // Zapowiedź dalsza wyklucza późniejsze etapy tego samego manewru, jeśli już są „za nami”.
+      const text = maneuverSpeech(next.ins);
+      // Najbliższy próg, który już minęliśmy (2 km → 1 km → 500 m → teraz) — każdy raz.
+      const stage = next.inKm <= now ? "now" : marks.filter((m) => next.inKm <= m).pop();
+      if (stage !== undefined && !said.current.has(`${key}:${stage}`)) {
         said.current.add(`${key}:${stage}`);
-        speak(stage === "now" ? next.ins.text : `Za ${spokenDist(next.inKm)} ${text}.`);
+        speak(stage === "now" ? `${text.charAt(0).toUpperCase()}${text.slice(1)}.` : `Za ${spokenDist(next.inKm)} ${text}.`);
       }
     }
     // Pas ruchu: np. zjazd z pasem, który dopiero się zacznie — „Jedź skrajnie prawym pasem” z wyprzedzeniem.
@@ -127,7 +139,7 @@ export function useNavVoice(enabled: boolean, next: { ins: NavInstruction; inKm:
     for (const w of warnings ?? []) {
       const d = w.km - km;
       const key = `w:${w.source}:${w.id}:${w.kind}`;
-      if (d > 0 && d <= 1 && !said.current.has(key)) {
+      if (d > 0 && d <= 1 && !w.soft && !said.current.has(key)) {
         said.current.add(key);
         speak(isAlert(w) ? alertSpeech(w, d, w.kind === "section" && section ? section(w).limit : w.value) : `Uwaga. ${warningText(w).replace(/(\d),(\d)/g, "$1 przecinek $2").replace(" m", " metra").replace(" t", " ton")} za ${spokenDist(d)}.`);
       }

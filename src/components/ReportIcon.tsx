@@ -116,6 +116,18 @@ const ICONS: Record<string, React.ReactNode> = {
       <path d="M14 36V13h13v23zM17 16v7h7v-7zM27 21h3.5l2.5 2.5v9a2 2 0 0 0 4 0V18l-3.5-3.5" fill="#fff" stroke="#fff" strokeWidth="1.4" strokeLinejoin="round" />
     </>
   ),
+  // Wjazd dla ciężarówek: szlaban w pasy i ciężarówka.
+  gate: (
+    <>
+      <rect x="6" y="6" width="36" height="36" rx="5" fill="#2a8a4a" stroke="#fff" strokeWidth="2" />
+      <path d="M11 16V36" stroke="#fff" strokeWidth="3" strokeLinecap="round" />
+      <rect x="10" y="13" width="28" height="6" rx="1.5" fill="#fff" />
+      <path d="M17 13v6M24 13v6M31 13v6" stroke="#e0342f" strokeWidth="3" />
+      <rect x="18" y="24" width="12" height="8" rx="1" fill="#fff" />
+      <path d="M30 26h4l3 3v3h-7z" fill="#fff" />
+      <circle cx="21" cy="34" r="2" fill="#fff" /><circle cx="33" cy="34" r="2" fill="#fff" />
+    </>
+  ),
   other: (
     <>
       <circle cx="24" cy="24" r="19" fill="none" stroke="#cfdae2" strokeWidth="3" />

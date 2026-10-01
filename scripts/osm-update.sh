@@ -9,6 +9,7 @@ mv poland-latest.osm.pbf.part poland-latest.osm.pbf
 osmium tags-filter poland-latest.osm.pbf \
   nw/maxheight nw/maxheight:physical nw/maxweight nw/maxweightrating nw/maxaxleload nw/maxwidth nw/maxlength \
   w/hgv=no,destination,delivery w/maxspeed:hgv n/barrier=height_restrictor \
+  w/incline w/maxweight:hgv w/maxweight:conditional w/maxweightrating:conditional w/maxweight:hgv:conditional w/hgv:conditional \
   -o truck.osm.pbf --overwrite
 osmium export truck.osm.pbf -f geojsonseq --add-unique-id=type_id --geometry-types=point,linestring -o truck.geojsonseq --overwrite
 # Fotoradary, odcinkowe pomiary prędkości, kamery na czerwonym (relacje enforcement z węzłami from/to/device).

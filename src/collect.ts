@@ -101,7 +101,7 @@ export function useTraceCollector(token: string | null, enabled: boolean, live: 
   }, [enabled, token]);
 }
 
-export type ReportKind = "camera" | "section" | "police" | "itd" | "height" | "weight" | "speed" | "truck_ban" | "closed" | "parking" | "mop" | "fuel" | "other";
+export type ReportKind = "camera" | "section" | "police" | "itd" | "height" | "weight" | "speed" | "truck_ban" | "closed" | "parking" | "mop" | "fuel" | "gate" | "bad_turn" | "other";
 
 /** `quick` — jedno dotknięcie wysyła od razu (w czasie jazdy), bez wyboru i przycisku „Wyślij”. */
 /** `quick` — wysyłane jednym dotknięciem (alerty w jeździe); `place` — miejsce, którego nie ma na mapie (też jednym dotknięciem). */
@@ -118,6 +118,7 @@ export const REPORT_KINDS: { id: ReportKind; label: string; unit?: string; min?:
   { id: "parking", label: "Parking dla ciężarówek", place: true },
   { id: "mop", label: "MOP", place: true },
   { id: "fuel", label: "Stacja paliw", place: true },
+  { id: "gate", label: "Wjazd TIR", place: true },
   { id: "other", label: "Inne" },
 ];
 

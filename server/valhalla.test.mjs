@@ -142,3 +142,24 @@ describe("turnAngle — kąt manewru z kierunków Valhalli", () => {
     expect(turnAngle(10, 190)).toBe(180);
   });
 });
+
+describe("sharpCurves — ciasne łuki drogi", () => {
+  it("łuk o promieniu ~15 m poza manewrem → zakręt; ten sam przy manewrze i prosta — nie", async () => {
+    const { sharpCurves } = await import("./valhalla.mjs");
+    // Prosta 200 m na północ, łuk 90° o promieniu 15 m w prawo, prosta 200 m na wschód.
+    const M = 111_320, lat0 = 52, kx = M * Math.cos((lat0 * Math.PI) / 180);
+    const xy = [];
+    for (let y = 0; y <= 200; y += 10) xy.push([0, y]);
+    for (let a = 5; a <= 90; a += 5) xy.push([15 - 15 * Math.cos((a * Math.PI) / 180), 200 + 15 * Math.sin((a * Math.PI) / 180)]);
+    for (let x = 25; x <= 215; x += 10) xy.push([x, 215]);
+    const pts = xy.map(([x, y]) => ({ latitude: lat0 + y / M, longitude: 19 + x / kx }));
+    const km = [0];
+    for (let i = 1; i < xy.length; i++) km.push(km[i - 1] + Math.hypot(xy[i][0] - xy[i - 1][0], xy[i][1] - xy[i - 1][1]) / 1000);
+    const c = sharpCurves(pts, km, []);
+    expect(c).toHaveLength(1);
+    expect(c[0].radiusM).toBeLessThan(25);
+    expect(c[0].km).toBeGreaterThan(0.19);
+    expect(c[0].km).toBeLessThan(0.23);
+    expect(sharpCurves(pts, km, [{ km: 0.21, maneuver: "TURN_RIGHT" }])).toEqual([]);
+  });
+});

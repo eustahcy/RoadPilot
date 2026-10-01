@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
 import { Live } from "../core/gps";
-import { alongRoute, bearingAtKm, isOffRoute, laneHint, lanesAhead, locate, NAV, NavInstruction, nextInstruction, pointAtKm, RoutePos, routeSlice, speedLimitAt, nextOffRoute, OFF_ROUTE_IDLE, OffRouteState } from "../core/navmatch";
+import { alongRoute, bearingAtKm, isOffRoute, laneHint, lanesAhead, locate, NAV, NavInstruction, nextInstruction, pointAtKm, RoutePos, routeSlice, speedLimitAt, nextOffRoute, OFF_ROUTE_IDLE, OffRouteState, locateTrace, TrackFix, travelHeading, junctionZoom } from "../core/navmatch";
 import { isAhead, jamMatters, jamTone, NavPlace, NavRoute, RoutePoi, TRAFFIC_ON, TrafficSection, warningText } from "../nav";
 import { GlLine, GlMapView, GlMarker, GlVector } from "./GlMap";
 import { LatLon, moveView, useMapGestures } from "./MapView";
@@ -25,6 +25,8 @@ export interface HudNavData {
 export interface NavTrack {
   pos?: RoutePos;
   off: boolean;
+  /** Kierunek jazdy ze śladu (odbiornik od 15 km/h, wolniej z przesunięcia); null = nie wiemy (postój). */
+  heading: number | null;
 }
 
 /**
@@ -34,14 +36,20 @@ export interface NavTrack {
 export function useNavTrack(nav: HudNavData, live: Live | null, accuracyM = 20): NavTrack {
   const hint = useRef<number | undefined>(undefined);
   const offRoute = useRef<OffRouteState>(OFF_ROUTE_IDLE);
+  // Ostatnie odczyty (ślad) — dopasowanie z kierunkiem jazdy i mediana odległości od trasy.
+  const fixes = useRef<{ t: number; f: TrackFix }[]>([]);
+  if (live && fixes.current[fixes.current.length - 1]?.t !== live.t) {
+    fixes.current = [...fixes.current, { t: live.t, f: { lat: live.lat, lon: live.lon, kmh: live.kmh, heading: live.heading } }].slice(-5);
+  }
+  const trail = fixes.current.map((x) => x.f);
   const route = nav.route;
 
   let pos: RoutePos | undefined;
   if (route && live) {
-    pos = locate(route.points, live, hint.current);
+    pos = locateTrace(route.points, trail, hint.current);
     // Zgubiona podpowiedź (np. po postoju w innym miejscu) — szukamy po całej trasie.
     if (!pos || isOffRoute(pos, accuracyM)) {
-      const all = locate(route.points, live);
+      const all = locateTrace(route.points, trail);
       if (all && (!pos || all.offM < pos.offM)) pos = all;
     }
   }
@@ -57,7 +65,7 @@ export function useNavTrack(nav: HudNavData, live: Live | null, accuracyM = 20):
     if (r.reroute) nav.onReroute();
   });
 
-  return { pos, off };
+  return { pos, off, heading: travelHeading(trail) };
 }
 
 /** Od tylu km przed miejscem z ograniczeniem pokazujemy ostrzeżenie. */
@@ -121,7 +129,7 @@ function Arrow({ deg, className }: { deg: number; className?: string }) {
  * Rondo jak w ruchu prawostronnym: wjazd od dołu, jazda przeciwnie do ruchu wskazówek zegara, zjazd w kierunku `deg`
  * (0 = na wprost, 90 = w prawo, −90 = w lewo). Przejechana część ronda pogrubiona, reszta przygaszona.
  */
-function RoundaboutIcon({ deg }: { deg: number }) {
+function RoundaboutIcon({ deg, exit }: { deg: number; exit?: string }) {
   const cx = 12, cy = 10.5, r = 5.4;
   // Zawracanie na rondzie: zjazd tuż obok wjazdu, po lewej (objeżdżamy całe rondo) — grot nie leży na wjeździe.
   if (Math.abs(deg) > 150) deg = -150;
@@ -140,6 +148,7 @@ function RoundaboutIcon({ deg }: { deg: number }) {
       <circle className="ring" cx={cx} cy={cy} r={r} />
       <path d={`M12 22V${cy + r}A${r} ${r} 0 ${t > 180 ? 1 : 0} 0 ${f(X[0])} ${f(X[1])}L${f(base[0])} ${f(base[1])}`} />
       <path className="head" d={`M${f(tip[0])} ${f(tip[1])}L${f(base[0] + nx)} ${f(base[1] + ny)}L${f(base[0] - nx)} ${f(base[1] - ny)}z`} />
+      {exit && <text className="rb-exit" x={cx} y={cy + 2.6} textAnchor="middle">{exit}</text>}
     </>
   );
 }
@@ -153,7 +162,7 @@ export function ManeuverIcon({ ins }: { ins: NavInstruction }) {
   }
   if (ins.maneuver.startsWith("ROUNDABOUT")) {
     const deg = ins.angle ?? (ins.maneuver === "ROUNDABOUT_LEFT" ? -90 : ins.maneuver === "ROUNDABOUT_BACK" ? 180 : ins.maneuver === "ROUNDABOUT_CROSS" ? 0 : 90);
-    return <svg viewBox="-2 -2.5 28 28" aria-hidden><RoundaboutIcon deg={deg} /></svg>;
+    return <svg viewBox="-2 -2.5 28 28" aria-hidden><RoundaboutIcon deg={deg} exit={ins.roundaboutExit} /></svg>;
   }
   return <svg viewBox="0 0 24 24" aria-hidden><Arrow deg={maneuverDeg(ins)} /></svg>;
 }
@@ -241,7 +250,7 @@ export function HudNav({ nav, track, compact, card, section, onManeuvers }: { na
   const limit = speedLimitAt(route.speedLimits, pos.km);
   const arrived = !next || route.lengthKm - pos.km < 0.05;
   // Najbliższe ostrzeżenie przed nami (nasze dane) — pokazujemy od WARN_AHEAD_KM; odcinkowy pomiar do jego końca.
-  const warn = route.warnings?.find((w) => isAhead(w, pos.km) && w.km - pos.km <= WARN_AHEAD_KM && (section === undefined || w.kind !== "section"));
+  const warn = route.warnings?.find((w) => !w.soft && isAhead(w, pos.km) && w.km - pos.km <= WARN_AHEAD_KM && (section === undefined || w.kind !== "section"));
   const inSection = warn?.toKm !== undefined && pos.km >= warn.km;
   // Najbliższe utrudnienie przed nami: blisko (TRAFFIC_AHEAD_KM) każde ważne, dalej (TRAFFIC_FAR_KM) tylko korek / zamknięcie / duże opóźnienie.
   const jam = TRAFFIC_ON && route.traffic?.find((t) => jamMatters(t) && t.toKm > pos.km && (t.km - pos.km <= TRAFFIC_AHEAD_KM || (t.km - pos.km <= TRAFFIC_FAR_KM && farJam(t))));
@@ -341,8 +350,9 @@ const FLAT_ZOOM = -2;
 const SMOOTH = {
   /** Przez tyle ms po nowym odczycie wygaszamy różnicę między przewidywaniem a odczytem (bez skoku). */
   correctMs: 1000,
-  /** Bez odczytu dłużej niż tyle s mapa staje — przewidywanie nie może uciec w siną dal. */
-  maxPredictS: 5,
+  /** Bez odczytu (tunel, słaby GPS) przewidujemy ruch po trasie najwyżej tyle s (i NAV.deadReckonKm); poza trasą krócej. */
+  maxPredictS: NAV.deadReckonS,
+  maxPredictOffS: 8,
 } as const;
 
 interface Shown {
@@ -360,9 +370,9 @@ interface Shown {
  * Zwraca funkcję „gdzie jesteśmy teraz” — MapView woła ją w każdej klatce i przesuwa warstwę bez ponownego renderu
  * (render Reacta 20×/s przerysowywał setki kafelków: migotanie na Androidzie, brak pamięci w Safari).
  */
-function useSmoothPosition(route: NavRoute | null, pos: RoutePos | undefined, off: boolean, live: Live | null): () => Shown | undefined {
+function useSmoothPosition(route: NavRoute | null, pos: RoutePos | undefined, off: boolean, live: Live | null, heading: number | null): () => Shown | undefined {
   // Ostatni odczyt i korekta = to, co pokazywaliśmy w chwili odczytu, minus odczyt (wygaszana do zera).
-  const fix = useRef<{ live: Live; km?: number; at: number; corrKm: number; corrLat: number; corrLon: number } | null>(null);
+  const fix = useRef<{ live: Live; km?: number; heading: number | null; at: number; corrKm: number; corrLat: number; corrLon: number } | null>(null);
   const routeRef = useRef(route);
   routeRef.current = route;
 
@@ -370,16 +380,17 @@ function useSmoothPosition(route: NavRoute | null, pos: RoutePos | undefined, of
     const f = fix.current;
     const r = routeRef.current;
     if (!f) return undefined;
-    const dt = Math.min(SMOOTH.maxPredictS, (performance.now() - f.at) / 1000);
+    const onR = f.km !== undefined && !!r;
+    const dt = Math.min(onR ? SMOOTH.maxPredictS : SMOOTH.maxPredictOffS, (performance.now() - f.at) / 1000);
     const fade = Math.max(0, 1 - (dt * 1000) / SMOOTH.correctMs);
-    const kmMoved = ((f.live.kmh ?? 0) / 3600) * dt;
+    const kmMoved = Math.min(NAV.deadReckonKm, ((f.live.kmh ?? 0) / 3600) * dt);
     if (f.km !== undefined && r) {
       const km = Math.min(r.lengthKm, f.km + kmMoved + f.corrKm * fade);
       const p = pointAtKm(r.points, km)!;
       return { lat: p.lat, lon: p.lon, km, bearing: bearingAtKm(r.points, km, 0.12) } as Shown;
     }
-    // Poza trasą: wzdłuż kierunku z odczytu (1° szerokości ≈ 111,32 km).
-    const h = f.live.heading;
+    // Poza trasą: wzdłuż kierunku jazdy (ze śladu, nie z kompasu przy małej prędkości; 1° szerokości ≈ 111,32 km).
+    const h = f.heading;
     const dLat = h === null ? 0 : (kmMoved * Math.cos((h * Math.PI) / 180)) / 111.32;
     const dLon = h === null ? 0 : (kmMoved * Math.sin((h * Math.PI) / 180)) / (111.32 * Math.cos((f.live.lat * Math.PI) / 180));
     return { lat: f.live.lat + dLat + f.corrLat * fade, lon: f.live.lon + dLon + f.corrLon * fade } as Shown;
@@ -397,6 +408,7 @@ function useSmoothPosition(route: NavRoute | null, pos: RoutePos | undefined, of
     fix.current = {
       live,
       km,
+      heading,
       at: performance.now(),
       corrKm: s?.km !== undefined && km !== undefined ? s.km - km : 0,
       corrLat: s && km === undefined ? s.lat - live.lat : 0,
@@ -563,15 +575,17 @@ export function HudRouteMap({ nav, track, live, token, anchorY = 0.8, zoomOffset
   const lastBearing = useRef(0);
   const zoomRef = useRef<number | null>(null);
   const pos = track.pos;
-  const predict = useSmoothPosition(route, pos, track.off, live);
+  const predict = useSmoothPosition(route, pos, track.off, live, track.heading);
   const smooth = predict();
   const center = smooth ?? live ?? (route ? pointAtKm(route.points, 0) : undefined);
   const routeBearing = smooth?.bearing ?? (route && pos && !track.off ? bearingAtKm(route.points, pos.km, 0.12) : undefined);
-  const bearing = routeBearing ?? live?.heading ?? lastBearing.current;
+  // Kierunek mapy: z trasy, poza nią ze śladu jazdy (kompas przy małej prędkości kręcił mapą); na postoju bez zmian.
+  const bearing = routeBearing ?? track.heading ?? lastBearing.current;
   lastBearing.current = bearing;
-  const arrowTurn = live?.heading != null && (live.kmh ?? 0) >= 5 ? ((live.heading - bearing + 540) % 360) - 180 : 0;
+  const arrowTurn = track.heading !== null && (live?.kmh ?? 0) >= NAV.headingMinKmh ? ((track.heading - bearing + 540) % 360) - 180 : 0;
   // Zoom zmienia się płynnie (bez skakania przy każdej zmianie prędkości).
-  const target = navZoom(live?.kmh ?? null);
+  // Przed manewrem (zwłaszcza rondo, pasy, dwa manewry naraz) mapa sama się przybliża i wraca po jego minięciu.
+  const target = navZoom(live?.kmh ?? null) + (route && pos && !track.off && !browse ? junctionZoom(route.instructions, route.lanes, pos.km) : 0);
   zoomRef.current = zoomRef.current === null ? target : zoomRef.current + (target - zoomRef.current) * 0.15;
   const zoom = Math.max(9, Math.min(18, Math.round(zoomRef.current * 20) / 20 + zoomOffset + (flat ? FLAT_ZOOM : 0)));
 

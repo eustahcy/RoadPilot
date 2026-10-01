@@ -229,6 +229,18 @@ scripts/tiles-build.sh  własne kafelki wektorowe: tilemaker (server/tiles/confi
                    z tagami ograniczeń, building, place; z 6–14, gzip) → katalog VTILES_DIR (z/x/y.pbf) serwowany przez GET /api/vtiles/z/x/y
                    (204 = pusty kafelek) i GET /api/vtiles/meta {available, bounds}; aplikacja używa własnych kafelków tylko w ich zasięgu
 scripts/osm-update.sh  pobranie Polski (lustro openstreetmap.fr — Geofabrik blokuje VPS) → osmium tags-filter → export → import; dane w /opt/roadpilot-osm
+server/conditional.mjs  ograniczenia warunkowe z OSM (`maxweight:conditional`, `hgv:conditional`): parseConditional (godziny, dni, PH = święta PL,
+                   weight<>, destination/delivery), effectiveRestriction; osm_restrictions.cond (JSON); warnings.mjs applyConditions — w chwili przejazdu
+                   (teraz + km / prędkość trasy; aplikacja wysyła lengthKm/travelMin), strefa „tylko dojazd” = ciąg odcinków (≤ 1,5 km przerwy) do celu/startu;
+                   nieobowiązujące = `soft` + `note` (bez objazdu, bez karty i głosu). incline ≥ 8% (osm.mjs), ciasne zakręty valhalla.mjs sharpCurves
+                   (route.curves → nav.ts curveWarnings dla zestawów ≥ 12 m). Wjazd TIR: zgłoszenie „gate” ≤ 400 m od celu = koniec trasy (route.gate).
+server/speeds.mjs  prędkości ciężarówek z gps_points: komórki ~250 m × kierunek (speed_cells, speed-build.mjs), applySpeeds → segments[].kmh
+                   (Route: min(zmierzona, ustawiona)), travelMin, realSpeedShare. server/mapcheck.mjs: suspectPasses (map_suspects, suspects-build.mjs),
+                   osm_overrides (admin ukrywa ograniczenie — findWarnings pomija), badTurnClusters (zgłoszenie „bad_turn” z NavView BadTurn; ≥ 2 kierowców
+                   → exclude_locations w valhallaRoute); Ustawienia → Administracja → Błędy mapy (MapCheckCard, /api/admin/mapcheck, /api/admin/override)
+scripts/weekly-update.sh  timer systemd roadpilot-weekly (niedziela 01:00 UTC): osm-update → Valhalla w /opt/roadpilot-valhalla.new (Metin2 zatrzymany
+                   na czas budowy, zawsze wznawiany) → podmiana + test trasy (błąd = powrót) → kafelki → speed-build, suspects-build → restart API;
+                   log /var/log/roadpilot-weekly.log. Plan i stan: upgrade.md
 scripts/deploy-ftp.sh  `npm run deploy:tuike`: build z VITE_API_URL → FTPS do tuike.pl/roadpilot/ (dane w ~/.config/roadpilot/ftp.env)
 ```
 

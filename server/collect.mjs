@@ -18,6 +18,8 @@ export const REPORT_KINDS = {
   parking: { label: "Parking dla ciężarówek" },
   mop: { label: "MOP — miejsce obsługi podróżnych" },
   fuel: { label: "Stacja paliw" },
+  gate: { label: "Wjazd dla ciężarówek (brama przy celu)" },
+  bad_turn: { label: "Zły manewr — tu nie da się skręcić" },
   other: { label: "Inne" },
 };
 

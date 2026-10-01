@@ -5,6 +5,8 @@ export type RoadType = "motorway" | "expressway" | "rural" | "urban" | "mixed";
 export interface Segment {
   type: RoadType;
   km: number;
+  /** Prędkość ciężarówek zmierzona na tym odcinku (jazda kierowców RoadPilot) — nie wyższa niż ustawiona dla rodzaju drogi. */
+  kmh?: number;
 }
 
 export type Speeds = Record<RoadType, number>;
@@ -97,7 +99,7 @@ export class Route {
       return start;
     });
     this.totalKm = acc;
-    this.speeds = this.segments.map((s) => Math.max(1, speeds[s.type]) / factor / 60);
+    this.speeds = this.segments.map((s) => Math.max(1, s.kmh !== undefined ? Math.min(s.kmh, speeds[s.type]) : speeds[s.type]) / factor / 60);
   }
 
   /** Czas jazdy (min) z pozycji fromKm do toKm. */

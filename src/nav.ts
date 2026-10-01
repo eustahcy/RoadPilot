@@ -7,7 +7,7 @@ export type NavAccess = "guest" | "noPremium" | "premium";
 import { useEffect, useRef, useState } from "react";
 import { api } from "./api";
 import { Segment } from "./core/route";
-import { HERE, locate, pushTrail, RoadSection, TrailPoint, trailM } from "./core/navmatch";
+import { HERE, locate, pointAtKm, pushTrail, RoadSection, TrailPoint, trailM } from "./core/navmatch";
 import { distanceM } from "./core/gps";
 
 export interface Vehicle {
@@ -73,6 +73,12 @@ export interface NavRoute {
   warnings?: RouteWarning[];
   /** Stacje, MOP-y i parkingi przy trasie (pinezki) — dociągane razem z ostrzeżeniami. */
   pois?: RoutePoi[];
+  /** Część trasy (0–1) z czasem z jazdy kierowców RoadPilot (zmierzone prędkości ciężarówek). */
+  realSpeedShare?: number;
+  /** Trasa prowadzi do wjazdu TIR zgłoszonego przez kierowcę (zamiast do punktu celu z wyszukiwarki). */
+  gate?: { lat: number; lon: number };
+  /** Ciasne łuki drogi z geometrii trasy (własny silnik) — ostrzeżenie dla długich zestawów. */
+  curves?: { km: number; radiusM: number }[];
   /** Punkty pośrednie (dodane przytrzymaniem na mapie), w kolejności przejazdu. */
   via?: NavPlace[];
 }
@@ -113,6 +119,10 @@ export interface RouteWarning {
   name: string;
   lat: number;
   lon: number;
+  /** Warunek z OSM („22:00–06:00”, „tylko dojazd — cel w strefie”). */
+  note?: string;
+  /** W chwili przejazdu nie obowiązuje (zakaz w innych godzinach, dojazd do celu) — informacja, bez objazdu i alarmu. */
+  soft?: boolean;
 }
 
 /** Miejsce przy trasie (pinezka na mapie): stacja paliw, MOP z obsługą, MOP, parking TIR — z OSM (server/pois.mjs). */
@@ -140,6 +150,10 @@ export const isAhead = (w: RouteWarning, km: number) => w.km >= km - 0.05 || (w.
 
 /** Opis ostrzeżenia dla kierowcy: „Wiadukt 3,5 m”, „Nacisk osi 10 t”, „Zakaz dla ciężarówek”, „Fotoradar 70 km/h”. */
 export function warningText(w: RouteWarning): string {
+  return w.note ? `${baseWarningText(w)} · ${w.note}` : baseWarningText(w);
+}
+
+function baseWarningText(w: RouteWarning): string {
   const n = w.value === null ? "" : ` ${String(w.value).replace(".", ",")}`;
   const rep = w.source === "report" ? " (zgłoszenie)" : "";
   switch (w.kind) {
@@ -155,6 +169,8 @@ export function warningText(w: RouteWarning): string {
     case "length": return `Długość${n} m`;
     case "hgv": return w.raw === "destination" || w.raw === "delivery" ? "Zakaz tranzytu ciężarówek" : "Zakaz dla ciężarówek";
     case "truck_ban": return "Zakaz dla ciężarówek (zgłoszenie)";
+    case "incline": return `Stromy odcinek${n}%`;
+    case "curve": return `Ciasny zakręt${w.value !== null ? ` (promień ${w.value} m)` : ""}`;
     case "closed": return "Droga zamknięta (zgłoszenie)";
     default: return w.kind;
   }
@@ -162,11 +178,23 @@ export function warningText(w: RouteWarning): string {
 
 const fmtLen = (km: number) => (km < 1 ? `${Math.round(km * 1000)} m` : `${String(Math.round(km * 10) / 10).replace(".", ",")} km`);
 
+/** Od tej długości zestawu (m) ostrzegamy o ciasnych zakrętach. */
+const CURVE_FROM_LENGTH_M = 12;
+
+/** Ciasne zakręty z trasy jako ostrzeżenia (tylko długie zestawy) — dokładane do ostrzeżeń z serwera. */
+function curveWarnings(route: NavRoute, vehicle: Vehicle, from = -Infinity, to = Infinity): RouteWarning[] {
+  if (vehicle.lengthM < CURVE_FROM_LENGTH_M) return [];
+  return (route.curves ?? []).filter((c) => c.km >= from && c.km <= to).map((c) => {
+    const p = pointAtKm(route.points, c.km) ?? { lat: 0, lon: 0 };
+    return { km: c.km, source: "osm" as const, id: `c${Math.round(c.km * 1000)}`, kind: "curve", value: c.radiusM, raw: "", name: "", lat: p.lat, lon: p.lon };
+  });
+}
+
 /** Ostrzeżenia dla trasy z naszej bazy — błąd nie blokuje nawigacji (trasa zostaje bez ostrzeżeń). */
 export async function withWarnings(token: string, route: NavRoute, vehicle: Vehicle): Promise<NavRoute> {
   try {
-    const r = await api<{ warnings: RouteWarning[]; pois?: RoutePoi[] }>("POST", "/nav/warnings", { points: route.points, vehicle, tolls: true }, token);
-    return { ...route, warnings: r.warnings, pois: r.pois ?? [] };
+    const r = await api<{ warnings: RouteWarning[]; pois?: RoutePoi[] }>("POST", "/nav/warnings", { points: route.points, vehicle, tolls: true, lengthKm: route.lengthKm, travelMin: route.travelMin }, token);
+    return { ...route, warnings: [...r.warnings, ...curveWarnings(route, vehicle)].sort((a, b) => a.km - b.km), pois: r.pois ?? [] };
   } catch {
     return route;
   }
@@ -190,9 +218,9 @@ export async function refreshWarnings(token: string, route: NavRoute, km: number
   const points = route.points.filter((p) => p[2] >= lo && p[2] <= hi);
   if (points.length < 2) return null;
   try {
-    const r = await api<{ warnings: RouteWarning[] }>("POST", "/nav/warnings", { points, vehicle, pois: false }, token);
+    const r = await api<{ warnings: RouteWarning[] }>("POST", "/nav/warnings", { points, vehicle, pois: false, lengthKm: route.lengthKm, travelMin: route.travelMin }, token);
     const [a, b] = [points[0][2], points[points.length - 1][2]];
-    return [...(route.warnings ?? []).filter((w) => w.km < a || w.km > b), ...r.warnings].sort((x, y) => x.km - y.km);
+    return [...(route.warnings ?? []).filter((w) => w.km < a || w.km > b), ...r.warnings, ...curveWarnings(route, vehicle, a, b)].sort((x, y) => x.km - y.km);
   } catch {
     return null;
   }

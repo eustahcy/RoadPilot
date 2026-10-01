@@ -21,7 +21,7 @@ const db = await mysql.createConnection({
 await db.beginTransaction();
 await db.query("DELETE FROM osm_restrictions");
 
-const COLS = "(osm_id, kind, value, raw, lat, lon, geom, name, bridge)";
+const COLS = "(osm_id, kind, value, raw, lat, lon, geom, name, bridge, cond)";
 let batch = [];
 let total = 0;
 const flush = async () => {
@@ -34,7 +34,7 @@ const flush = async () => {
 for await (const line of createInterface({ input: createReadStream(file), crlfDelay: Infinity })) {
   if (!line.trim()) continue;
   for (const r of featureRows(JSON.parse(line.replace(/^\x1e/, "")))) {
-    batch.push([r.osmId, r.kind, r.value, r.raw, r.lat, r.lon, r.geom, r.name, r.bridge]);
+    batch.push([r.osmId, r.kind, r.value, r.raw, r.lat, r.lon, r.geom, r.name, r.bridge, r.cond ?? null]);
   }
   if (batch.length >= 2000) await flush();
 }

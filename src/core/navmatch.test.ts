@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { distanceM } from "./gps";
-import { alongRoute, bearingAtKm, HERE, isOffRoute, nextOffRoute, OFF_ROUTE_IDLE, pushTrail, TrailPoint, trailM, laneHint, lanesAhead, locate, NAV, nearestOnRoute, nextInstruction, pointAtKm, RoutePoint, routeSlice, speedLimitAt, speedTone } from "./navmatch";
+import { alongRoute, bearingAtKm, HERE, isOffRoute, junctionZoom, locateTrace, nextOffRoute, travelHeading, OFF_ROUTE_IDLE, pushTrail, TrailPoint, trailM, laneHint, lanesAhead, locate, NAV, nearestOnRoute, nextInstruction, pointAtKm, RoutePoint, routeSlice, speedLimitAt, speedTone } from "./navmatch";
 
 const KM_PER_DEG = distanceM({ lat: 0, lon: 0 }, { lat: 1, lon: 0 }) / 1000;
 /** Trasa na północ po południku 0, punkt co 100 m, 10 km. */
@@ -147,5 +147,39 @@ describe("zjazd z trasy → nowa trasa sama", () => {
   it("powrót na trasę na dłużej niż NAV.backOnRouteMs — odliczanie od nowa", () => {
     const steps = [...Array.from({ length: 5 }, (_, i) => ({ t: i * S, off: true })), ...Array.from({ length: 7 }, (_, i) => ({ t: (5 + i) * S, off: false })), ...Array.from({ length: 5 }, (_, i) => ({ t: (12 + i) * S, off: true }))];
     expect(run(steps)).toEqual([]);
+  });
+});
+
+describe("dopasowanie po śladzie i kierunek jazdy", () => {
+  const M = 111_320;
+  // Trasa: 2 km na północ wzdłuż 19°E, potem z powrotem na południe 30 m obok (pętla / zjazd w drugą stronę).
+  const north = Array.from({ length: 21 }, (_, i) => [52 + (i * 100) / M, 19, i * 0.1] as RoutePoint);
+  const back = Array.from({ length: 21 }, (_, i) => [52 + ((20 - i) * 100) / M, 19 + 30 / (M * Math.cos((52 * Math.PI) / 180)), 2.03 + i * 0.1] as RoutePoint);
+  const route = [...north, ...back];
+  const fix = (m: number, lonM = 0, kmh: number | null = 60, heading: number | null = 0) => ({ lat: 52 + m / M, lon: 19 + lonM / (M * Math.cos((52 * Math.PI) / 180)), kmh, heading });
+
+  it("jadąc na północ 20 m od obu nitek trasy — dopasowanie do nitki w naszym kierunku (km ~0,5, nie ~3,5)", () => {
+    const p = locateTrace(route, [fix(400, 18), fix(450, 18), fix(500, 18)]);
+    expect(p!.km).toBeCloseTo(0.5, 1);
+  });
+  it("pojedynczy odczyt 120 m obok — mediana śladu trzyma na trasie", () => {
+    const p = locateTrace(route, [fix(400, -2), fix(450, -3), fix(500, -120)]);
+    expect(p!.offM).toBeLessThan(10);
+  });
+  it("kierunek: z odbiornika od 15 km/h, wolniej z przesunięcia ≥ 20 m, na postoju brak", () => {
+    expect(travelHeading([fix(0, 0, 50, 10)])).toBe(10);
+    expect(travelHeading([fix(0, 0, 8, 200), fix(30, 0, 8, 200)])).toBeCloseTo(0, 0);
+    expect(travelHeading([fix(0, 0, 2, 200), fix(5, 0, 2, 120)])).toBeNull();
+  });
+});
+
+describe("przybliżenie przed manewrem", () => {
+  const ins = (km: number, maneuver: string, extra = {}) => ({ km, maneuver, text: "", ...extra });
+  it("skręt za 300 m +1, rondo +1,3, prosto i daleko — 0", () => {
+    expect(junctionZoom([ins(1.3, "TURN_RIGHT")], [], 1)).toBe(1);
+    expect(junctionZoom([ins(1.3, "ROUNDABOUT_RIGHT")], [], 1)).toBe(1.3);
+    expect(junctionZoom([ins(1.3, "TURN_RIGHT"), ins(1.5, "TURN_LEFT")], [], 1)).toBe(1.3);
+    expect(junctionZoom([ins(2, "TURN_RIGHT")], [], 1)).toBe(0);
+    expect(junctionZoom([ins(1.2, "STRAIGHT")], [], 1)).toBe(0);
   });
 });

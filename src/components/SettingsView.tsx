@@ -186,6 +186,7 @@ export function SettingsView({ initialCategory, navAccess, state, now, onSetting
           <AdminStatsCard token={account.token} />
           <AdminMap token={account.token} />
           <PremiumKeysCard token={account.token} />
+          <MapCheckCard token={account.token} />
           <AdminSection token={account.token} me={account.user.id} />
         </>
       )}
@@ -572,6 +573,77 @@ const KEY_DAYS: { days: number | null; label: string }[] = [
 ];
 
 const keyDaysText = (days: number | null) => (days === null ? "bez terminu" : days === 1 ? "1 dzień" : `${days} dni`);
+
+interface MapSuspect { osm_id: string; kind: string; value: number | null; users: number; lat: number; lon: number; name: string; hidden: boolean }
+interface BadTurnGroup { lat: number; lon: number; users: number; note: string; confirmed: boolean }
+
+const KIND_PL: Record<string, string> = { height: "wysokość", weight: "masa", hgv: "zakaz dla ciężarówek" };
+const osmLink = (id: string) => `https://www.openstreetmap.org/${({ n: "node", w: "way", r: "relation" } as Record<string, string>)[id[0]]}/${id.slice(1)}`;
+
+/**
+ * Administracja → Błędy mapy: ograniczenia, przez które przejechało kilku kierowców z pojazdem, którego one nie dopuszczają
+ * (zadanie co tydzień), ukryte ograniczenia i zgłoszenia „zły manewr” (od 2 kierowców silnik omija manewr).
+ */
+function MapCheckCard({ token }: { token: string }) {
+  const [data, setData] = useState<{ suspects: MapSuspect[]; hidden: (MapSuspect & { kind: string })[]; badTurns: BadTurnGroup[] } | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const load = () => api<{ suspects: MapSuspect[]; hidden: MapSuspect[]; badTurns: BadTurnGroup[] }>("GET", "/admin/mapcheck", undefined, token).then(setData).catch((e) => setError(e instanceof Error ? e.message : "Błąd"));
+  useEffect(() => {
+    load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token]);
+  const override = async (osmId: string, kind: string, hide: boolean) => {
+    await api("POST", "/admin/override", { osmId, kind, hide }, token).catch((e) => setError(e instanceof Error ? e.message : "Błąd"));
+    load();
+  };
+  return (
+    <section className="card">
+      <div className="eyebrow">Błędy mapy — z jazdy kierowców</div>
+      <p className="muted small">Ograniczenia, przez które przejechało co najmniej 3 kierowców z pojazdem, którego one nie dopuszczają (lista odświeżana co tydzień). Ukryte ograniczenie od razu przestaje zmieniać trasy i ostrzegać; poprawkę warto też zrobić w OpenStreetMap.</p>
+      {error && <p className="auth-error">{error}</p>}
+      {!data ? <p className="muted">Wczytuję…</p> : (
+        <>
+          {data.suspects.length ? (
+            <ul className="mapcheck-list">
+              {data.suspects.map((s) => (
+                <li key={s.osm_id + s.kind}>
+                  <span><b>{KIND_PL[s.kind] ?? s.kind}{s.value !== null ? ` ${String(s.value).replace(".", ",")}` : ""}</b> · {s.name || s.osm_id} · <i>{s.users} kierowców</i></span>
+                  <a href={osmLink(s.osm_id)} target="_blank" rel="noreferrer">OSM</a>
+                  <button className="ghost" onClick={() => override(s.osm_id, s.kind, !s.hidden)}>{s.hidden ? "Przywróć" : "Ukryj"}</button>
+                </li>
+              ))}
+            </ul>
+          ) : <p className="muted small">Brak podejrzanych ograniczeń.</p>}
+          {data.hidden.length > 0 && (
+            <>
+              <div className="eyebrow">Ukryte ograniczenia</div>
+              <ul className="mapcheck-list">
+                {data.hidden.map((s) => (
+                  <li key={s.osm_id + s.kind}>
+                    <span><b>{KIND_PL[s.kind] ?? s.kind}{s.value !== null ? ` ${String(s.value).replace(".", ",")}` : ""}</b> · {s.name || s.osm_id}</span>
+                    <a href={osmLink(s.osm_id)} target="_blank" rel="noreferrer">OSM</a>
+                    <button className="ghost" onClick={() => override(s.osm_id, s.kind, false)}>Przywróć</button>
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
+          <div className="eyebrow">Zgłoszone złe manewry</div>
+          {data.badTurns.length ? (
+            <ul className="mapcheck-list">
+              {data.badTurns.map((t, i) => (
+                <li key={i}>
+                  <span><b>{t.note || "Manewr"}</b> · <i>{t.users} {t.users === 1 ? "kierowca" : "kierowców"}{t.confirmed ? " — omijany" : ""}</i></span>
+                  <a href={`https://www.openstreetmap.org/?mlat=${t.lat}&mlon=${t.lon}#map=18/${t.lat}/${t.lon}`} target="_blank" rel="noreferrer">Mapa</a>
+                </li>
+              ))}
+            </ul>
+          ) : <p className="muted small">Brak zgłoszeń.</p>}
+        </>
+      )}
+    </section>
+  );
+}
 
 /** Administracja: klucze Premium do przekazania (SMS, komunikator) — jednorazowe, na wybraną liczbę dni. */
 function PremiumKeysCard({ token }: { token: string }) {

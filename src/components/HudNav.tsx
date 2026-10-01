@@ -341,7 +341,7 @@ function WarnIcon() {
 /** Zoom zależny od prędkości: w mieście bliżej, na autostradzie dalej — widać drogę kilka km przed nami. */
 function navZoom(kmh: number | null) {
   const v = Math.max(0, Math.min(1, ((kmh ?? 0) - 30) / 60));
-  return 16.3 - v * 1.6;
+  return 17 - v * 1.6;
 }
 
 /** Pochylenie mapy (stopnie) — mocniejsze = dalszy horyzont i większa perspektywa, jak w nawigacjach samochodowych. */
@@ -576,7 +576,6 @@ export interface MapBrowse {
 export function HudRouteMap({ nav, track, live, token, anchorY = 0.8, zoomOffset = 0, flat = false, friends, vector, browse = null, onBrowse, onPin, onHold }: { nav: HudNavData; track: NavTrack; live: Live | null; token: string; anchorY?: number; zoomOffset?: number; /** Mapa 2D: bez pochylenia, bardziej oddalona. */ flat?: boolean; friends?: Friend[]; /** Własny styl mapy (kafelki wektorowe); brak = TomTom. */ vector?: GlVector; browse?: MapBrowse | null; /** Przesunięcie / szczypanie mapy — brak = mapa bez gestów. */ onBrowse?: (b: MapBrowse) => void; /** Dotknięcie pinezki (null = dotknięcie mapy obok). */ onPin?: (p: PinInfo | null) => void; /** Przytrzymanie palca na mapie — miejsce pod palcem. */ onHold?: (p: LatLon) => void }) {
   const route = nav.route;
   const lastBearing = useRef(0);
-  const zoomRef = useRef<number | null>(null);
   const pos = track.pos;
   const predict = useSmoothPosition(route, pos, track.off, live, track.heading);
   const smooth = predict();
@@ -589,8 +588,8 @@ export function HudRouteMap({ nav, track, live, token, anchorY = 0.8, zoomOffset
   // Zoom zmienia się płynnie (bez skakania przy każdej zmianie prędkości).
   // Przed manewrem (zwłaszcza rondo, pasy, dwa manewry naraz) mapa sama się przybliża i wraca po jego minięciu.
   const target = navZoom(live?.kmh ?? null) + (route && pos && !track.off && !browse ? junctionZoom(route.instructions, route.lanes, pos.km) : 0);
-  zoomRef.current = zoomRef.current === null ? target : zoomRef.current + (target - zoomRef.current) * 0.15;
-  const zoom = Math.max(9, Math.min(18, Math.round(zoomRef.current * 20) / 20 + zoomOffset + (flat ? FLAT_ZOOM : 0)));
+  // Płynnie dochodzi GlMapView (smoothZoom) klatka po klatce — tu tylko zadany zoom (render raz na sekundę dawał skoki).
+  const zoom = Math.max(9, Math.min(18.5, Math.round(target * 20) / 20 + zoomOffset + (flat ? FLAT_ZOOM : 0)));
 
   // Gesty: pierwszy ruch palcem przechodzi z prowadzenia do przeglądania (od bieżącej pozycji i kierunku),
   // kolejne przesuwają / przybliżają widok. Bieżący widok w refie — gest i przejście dzieją się w tym samym zdarzeniu.
@@ -711,7 +710,7 @@ export function HudRouteMap({ nav, track, live, token, anchorY = 0.8, zoomOffset
 
   return (
     <div className="hud-map" ref={box} {...(onBrowse ? gestures : {})}>
-      <GlMapView token={token} center={center} zoom={zoom} bearing={bearing} pitch={flat ? 0 : MAP_PITCH} anchorY={anchorY} lines={lines} markers={markers} follow={predict} vector={vector} pickRef={pickRef}>
+      <GlMapView token={token} center={center} zoom={zoom} bearing={bearing} pitch={flat ? 0 : MAP_PITCH} anchorY={anchorY} smoothZoom lines={lines} markers={markers} follow={predict} vector={vector} pickRef={pickRef}>
         <svg className="hud-map-me-wrap" style={{ left: "50%", top: `${anchorY * 100}%` }} viewBox="-30 -34 60 64" aria-hidden>
           <path className="hud-map-me-halo" transform={`rotate(${arrowTurn})`} d="M0 -30 L22 24 L0 12 L-22 24 Z" />
           <path className="hud-map-me" transform={`rotate(${arrowTurn})`} d="M0 -30 L22 24 L0 12 L-22 24 Z" />

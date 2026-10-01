@@ -51,11 +51,15 @@ export interface GlMapProps {
   follow?: () => { lat: number; lon: number; bearing?: number } | undefined;
   /** Własny styl z kafelków wektorowych; brak = kafelki TomTom. */
   vector?: GlVector;
+  /** Zoom dochodzi do zadanego płynnie, klatka po klatce (prowadzenie: zmiana z prędkości, przybliżenie przed manewrem). */
+  smoothZoom?: boolean;
   children?: ReactNode;
   /** Dostaje funkcję: punkt ekranu (px względem ramki) → miejsce na mapie, z bieżącej kamery (też przy pochyleniu). */
   pickRef?: { current: ((x: number, y: number) => LatLon | undefined) | null };
 }
 
+/** Płynny zoom (smoothZoom): stała czasu dochodzenia do zadanego zoomu (ms). */
+const ZOOM_EASE_MS = 450;
 /** Tyle kafelków trzymamy na karcie graficznej (tekstur albo buforów). */
 const TEX_MAX = 160;
 /** Ekrany o dużej gęstości: 2× wystarcza, 3× to 2,25× więcej pikseli do wypełnienia. */
@@ -202,7 +206,7 @@ const LABEL_RANK: Record<VLabel["kind"], number> = { city: 0, town: 1, ref: 2, v
 /** Kąt etykiety wzdłuż drogi na ekranie: zawsze czytelny (nigdy do góry nogami). */
 const readable = (deg: number) => { let a = ((deg % 360) + 540) % 360 - 180; if (a > 90) a -= 180; if (a < -90) a += 180; return a; };
 
-export function GlMapView({ token, center, zoom, bearing = 0, pitch = 0, anchorY = 0.5, lines, markers, follow, vector, children, pickRef }: GlMapProps) {
+export function GlMapView({ token, center, zoom, bearing = 0, pitch = 0, anchorY = 0.5, lines, markers, follow, vector, smoothZoom = false, children, pickRef }: GlMapProps) {
   const box = useRef<HTMLDivElement>(null);
   const canvas = useRef<HTMLCanvasElement>(null);
   const [size, setSize] = useState({ w: 800, h: 500 });
@@ -306,8 +310,8 @@ export function GlMapView({ token, center, zoom, bearing = 0, pitch = 0, anchorY
   const markerPx = useMemo(() => allMarkers.map((m) => { const [x, y] = worldPx(m, z); return { m, x: x - cx, y: y - cy }; }), [allMarkers, z, cx, cy]);
 
   // Wszystko, czego pętla klatek potrzebuje, w jednym ref — render Reacta tylko go podmienia.
-  const frame = useRef({ token, size, z, vz, scale, cx, cy, pxX, pxY, pitch, bearing, anchorY, tiles, backdrop, geometry, markerPx, follow, vector, palette, half, zoom });
-  frame.current = { token, size, z, vz, scale, cx, cy, pxX, pxY, pitch, bearing, anchorY, tiles, backdrop, geometry, markerPx, follow, vector, palette, half, zoom };
+  const frame = useRef({ token, size, z, vz, scale, cx, cy, pxX, pxY, pitch, bearing, anchorY, tiles, backdrop, geometry, markerPx, follow, vector, palette, half, zoom, smoothZoom });
+  frame.current = { token, size, z, vz, scale, cx, cy, pxX, pxY, pitch, bearing, anchorY, tiles, backdrop, geometry, markerPx, follow, vector, palette, half, zoom, smoothZoom };
   const markerEls = useRef(new Map<string, SVGGElement>());
   const bump = useRef(() => setTileGen((g) => g + 1)).current;
 
@@ -418,9 +422,16 @@ export function GlMapView({ token, center, zoom, bearing = 0, pitch = 0, anchorY
     };
 
     let raf = 0;
+    // Zoom pokazywany: przy smoothZoom dochodzi do zadanego wykładniczo (stała czasu ZOOM_EASE_MS), inaczej od razu.
+    const shown = { zoom: NaN, t: 0 };
     const tick = () => {
       raf = requestAnimationFrame(tick);
-      const f = frame.current;
+      const f0 = frame.current;
+      const nowT = performance.now();
+      if (!f0.smoothZoom || Number.isNaN(shown.zoom) || Math.abs(f0.zoom - shown.zoom) > 3) shown.zoom = f0.zoom;
+      else shown.zoom += (f0.zoom - shown.zoom) * (1 - Math.exp(-(nowT - shown.t) / ZOOM_EASE_MS));
+      shown.t = nowT;
+      const f = { ...f0, zoom: shown.zoom, scale: 2 ** (shown.zoom - f0.z) };
       const dpr = Math.min(MAX_DPR, window.devicePixelRatio || 1);
       const W = Math.round(f.size.w * dpr), H = Math.round(f.size.h * dpr);
       if (cv.width !== W || cv.height !== H) { cv.width = W; cv.height = H; }
@@ -456,11 +467,27 @@ export function GlMapView({ token, center, zoom, bearing = 0, pitch = 0, anchorY
       if (f.vector) {
         const p = f.palette;
         const fz = 2 ** (f.z - f.vz);
-        const ready: { t: TileRect; vt: VTileGpu }[] = [];
+        const ready: { t: TileRect; vt: VTileGpu; fz: number }[] = [];
+        // Kafelek jeszcze się wczytuje (zmiana zoomu, nowy obszar) — w jego miejscu rysujemy wczytany kafelek z poziomu wyżej,
+        // zamiast pustki (pod spodem, raz na rodzica).
+        const parents = new Map<string, { t: TileRect; vt: VTileGpu; fz: number }>();
         for (const t of f.tiles) {
           const vt = ensureVec(t.k, f.token, f.vector.vehicle);
-          if (vt) ready.push({ t, vt });
+          if (vt) { ready.push({ t, vt, fz }); continue; }
+          const [lz, x, y] = t.k.split("/").map(Number);
+          for (let d = 1; d <= 3 && lz - d >= VT_MIN_Z; d++) {
+            const pk = `${lz - d}/${x >> d}/${y >> d}`;
+            const pv = vtiles.current.get(pk);
+            if (!pv || pv === "loading") continue;
+            if (!parents.has(pk)) {
+              const size = t.size * 2 ** d;
+              const tx = Math.floor((t.x + f.cx) / size), ty = Math.floor((t.y + f.cy) / size);
+              parents.set(pk, { t: { ...t, k: pk, size, x: tx * size - f.cx, y: ty * size - f.cy }, vt: pv, fz: fz * 2 ** d });
+            }
+            break;
+          }
         }
+        ready.unshift(...parents.values());
         // Kolejność warstw: najpierw wszystkie kafelki jednej warstwy, potem następna — bez szwów na granicach kafelków.
         type Pass = { key: string; color: [number, number, number, number]; hw: number; color2?: [number, number, number, number]; dash?: number; dashOn?: number };
         const passes: Pass[] = [
@@ -482,7 +509,7 @@ export function GlMapView({ token, center, zoom, bearing = 0, pitch = 0, anchorY
           gl.uniform1f(uHw, pass.hw);
           if (pass.dash) { color(uColor2, pass.color2!); gl.uniform1f(uDash, pass.dash); gl.uniform1f(uDashOn, pass.dashOn!); } else gl.uniform1f(uDash, 0);
           const isFill = pass.hw === 0;
-          for (const { t, vt } of ready) {
+          for (const { t, vt, fz } of ready) {
             const batch = vt.batches.find((x) => x.key === pass.key);
             if (!batch) continue;
             bind(vt.buf);

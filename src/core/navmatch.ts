@@ -42,7 +42,7 @@ export const NAV = {
   deadReckonS: 60,
   deadReckonKm: 1.5,
   /** Przybliżenie mapy przed manewrem od tylu km. */
-  junctionZoomKm: 0.4,
+  junctionZoomKm: 0.5,
   /** Tyle s bez odczytu = „GPS słaby” (przewidujemy). */
   weakGpsS: 5,
   /** Tyle czasu poza trasą, zanim wyznaczymy ją od nowa (ms). */
@@ -170,14 +170,14 @@ export function locateTrace(points: RoutePoint[], fixes: TrackFix[], hint?: numb
 }
 
 /**
- * Przybliżenie mapy przed manewrem (poziomy zoomu do dodania): od NAV.junctionZoomKm do manewru +1, przy złożonym miejscu
- * (rondo, pasy do wyboru, kolejny manewr w 300 m) +1,3; za manewrem 0 (wraca płynnie). Prosto / „jedź dalej” — bez zmian.
+ * Przybliżenie mapy przed manewrem (poziomy zoomu do dodania): od NAV.junctionZoomKm do manewru +1,6, przy złożonym miejscu
+ * (rondo, pasy do wyboru, kolejny manewr w 300 m) +2,2; za manewrem 0 (wraca płynnie). Prosto / „jedź dalej” — bez zmian.
  */
 export function junctionZoom(list: NavInstruction[], lanes: LaneSection[], km: number): number {
   const next = nextInstruction(list, km);
   if (!next || next.inKm > NAV.junctionZoomKm || /^(STRAIGHT|FOLLOW|DEPART)$/.test(next.ins.maneuver)) return 0;
   const complex = next.ins.maneuver.startsWith("ROUNDABOUT") || !!next.then || lanes.some((l) => Math.abs(l.km - next.ins.km) <= 0.2);
-  return complex ? 1.3 : 1;
+  return complex ? 2.2 : 1.6;
 }
 
 /** Następny manewr przed nami (pomijamy „wyjedź”) i odległość do niego (km). */

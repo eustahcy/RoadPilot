@@ -175,10 +175,10 @@ describe("dopasowanie po śladzie i kierunek jazdy", () => {
 
 describe("przybliżenie przed manewrem", () => {
   const ins = (km: number, maneuver: string, extra = {}) => ({ km, maneuver, text: "", ...extra });
-  it("skręt za 300 m +1, rondo +1,3, prosto i daleko — 0", () => {
-    expect(junctionZoom([ins(1.3, "TURN_RIGHT")], [], 1)).toBe(1);
-    expect(junctionZoom([ins(1.3, "ROUNDABOUT_RIGHT")], [], 1)).toBe(1.3);
-    expect(junctionZoom([ins(1.3, "TURN_RIGHT"), ins(1.5, "TURN_LEFT")], [], 1)).toBe(1.3);
+  it("skręt za 300 m +1,6, rondo / dwa manewry +2,2, prosto i daleko — 0", () => {
+    expect(junctionZoom([ins(1.3, "TURN_RIGHT")], [], 1)).toBe(1.6);
+    expect(junctionZoom([ins(1.3, "ROUNDABOUT_RIGHT")], [], 1)).toBe(2.2);
+    expect(junctionZoom([ins(1.3, "TURN_RIGHT"), ins(1.5, "TURN_LEFT")], [], 1)).toBe(2.2);
     expect(junctionZoom([ins(2, "TURN_RIGHT")], [], 1)).toBe(0);
     expect(junctionZoom([ins(1.2, "STRAIGHT")], [], 1)).toBe(0);
   });

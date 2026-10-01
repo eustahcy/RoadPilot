@@ -134,7 +134,8 @@ src/components/NavView.tsx  nawigacja jako osobny system (nie HUD): HudRouteMap 
                    przyciski przy prawej krawędzi, „więcej” jako strzałka w dół), tablet (min 744×744 px: kafelki 2×2 obok karty, przyciski pod kartą,
                    pasek prędkości względem limitu i pasek 4,5 h jazdy na kafelku przerwy, przycisk powrotu do pozycji zawsze). Karta manewru: tabliczka
                    z numerem drogi (HudNav roadBadge: A/S/krajowe czerwone, wojewódzkie żółte, E zielone), „›” = lista najbliższych manewrów;
-                   „⋯” = menu (zgłoszenie, postój, dzień, pełny ekran, zakończ nawigację, wyjdź). Karty „szklane” gradientem, bez backdrop-filter;
+                   „⋯” = menu (zgłoszenie, postój, dzień, pełny ekran, zakończ nawigację, wyjdź).
+                   Przycisk 2D/3D nad zoomem (Settings.navMap): 2D = HudRouteMap flat (pitch 0, FLAT_ZOOM −2, trasa na 25 km, bez horyzontu .nm-map.flat). Karty „szklane” gradientem, bez backdrop-filter;
                    strzałki (HudNav arrowGeom/Arrow): trzon + wypełniony grot (.head fill currentColor — kolor przez `color`, nie `stroke`), ostre skręty
                    z trzonem z boku, zawracanie przez lewo; rondo (RoundaboutIcon) przeciwnie do ruchu wskazówek, kąt zjazdu z serwera (valhalla.mjs
                    turnAngle: wjazd 26 → bearing_after manewru 27), przy zawracaniu zjazd po lewej; kąt z trasy przy TURN albo |kąt| ≥ 60°, inaczej ANGLES.

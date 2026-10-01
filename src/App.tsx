@@ -348,6 +348,8 @@ function App() {
   if (state.navOpen) {
     return (
       <NavView
+        mapMode={settings.navMap}
+        onMapMode={(navMap) => setState((s) => ({ ...s, settings: { ...s.settings, navMap } }))}
         nav={navOn ? { route: state.navRoute, dest: navDest, rerouting, onReroute: reroute, onVia: setVia, onEnd: endNav } : undefined}
         planner={navOn && auth ? {
           token: auth.token,

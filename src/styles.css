@@ -1021,6 +1021,9 @@ input[type="number"]::-webkit-inner-spin-button, input[type="number"]::-webkit-o
 .nm-zoom button { height: calc(10 * var(--u)); border: 0; background: none; color: #eef3f6; font-size: calc(5 * var(--u)); font-weight: 700; line-height: 1; }
 .nm-zoom button + button { border-top: 1px solid rgba(140, 175, 195, .25); }
 .nm-recenter:not(.on) { display: none; }
+.nm-mode { font-size: calc(3.4 * var(--u)); font-weight: 900; letter-spacing: .02em; }
+/* Mapa 2D: bez „nieba” i mgiełki horyzontu. */
+.hud.navmode .nm-map.flat::after, .hud.navmode .nm-map.flat::before { display: none; }
 
 /* Prędkość i ograniczenie */
 .nm-speed { display: flex; align-items: center; gap: calc(2.4 * var(--u)); padding: calc(1.4 * var(--u)) calc(2.6 * var(--u)); border-radius: calc(3 * var(--u)); line-height: 1; }

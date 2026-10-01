@@ -56,6 +56,9 @@ export interface NavViewProps {
   /** „Po drodze”: zasięg listy (km) i najbliższe miejsca pod prędkością (Ustawienia → Pojazd i nawigacja). */
   ahead: { km: number; strip: AheadStrip };
   onExit: () => void;
+  /** Mapa 3D (pochylona) / 2D (płaska, oddalona) — zapamiętywane w ustawieniach. */
+  mapMode: "3d" | "2d";
+  onMapMode: (m: "3d" | "2d") => void;
 }
 
 function NavVoice({ nav, track, kmh, enabled, section }: { nav?: HudNavData; track: NavTrack; kmh: number | null; enabled: boolean; section: SectionVoice }) {
@@ -166,8 +169,8 @@ export function NavView(p: NavViewProps) {
   return (
     <div className={`hud navmode ${p.mapVector?.theme === "day" ? "day" : ""}`}>
       <NavVoice nav={p.nav} track={track} kmh={fresh?.kmh ?? null} enabled={p.voice.on} section={sectionVoice} />
-      <div className={`nm-map ${browse ? "browsing" : ""}`}>
-        {p.nav && p.mapToken ? <HudRouteMap nav={p.nav} track={track} live={fresh} token={p.mapToken} anchorY={0.7} zoomOffset={zoomOffset} friends={p.friends} vector={p.mapVector} browse={browse} onBrowse={setBrowse} onPin={(x) => { setPin(x); setHold(null); }} onHold={(x) => { setHold(x); setPin(null); }} /> : <div className="hud-map empty" />}
+      <div className={`nm-map ${browse ? "browsing" : ""} ${p.mapMode === "2d" ? "flat" : ""}`}>
+        {p.nav && p.mapToken ? <HudRouteMap nav={p.nav} track={track} live={fresh} token={p.mapToken} anchorY={p.mapMode === "2d" ? 0.62 : 0.7} zoomOffset={zoomOffset} flat={p.mapMode === "2d"} friends={p.friends} vector={p.mapVector} browse={browse} onBrowse={setBrowse} onPin={(x) => { setPin(x); setHold(null); }} onHold={(x) => { setHold(x); setPin(null); }} /> : <div className="hud-map empty" />}
       </div>
 
       <header className="nm-top">
@@ -231,6 +234,9 @@ export function NavView(p: NavViewProps) {
       </div>
 
       <div className="nm-ctl">
+        <button className="nm-btn nm-mode" onClick={() => p.onMapMode(p.mapMode === "2d" ? "3d" : "2d")} aria-label={p.mapMode === "2d" ? "Mapa 3D (pochylona)" : "Mapa 2D (z góry, oddalona)"}>
+          {p.mapMode === "2d" ? "3D" : "2D"}
+        </button>
         <div className="nm-zoom">
           <button onClick={() => (browse ? zoomBrowse(1) : setZoomOffset((z) => Math.min(2, z + 0.5)))} aria-label="Przybliż">+</button>
           <button onClick={() => (browse ? zoomBrowse(-1) : setZoomOffset((z) => Math.max(-5, z - 0.5)))} aria-label="Oddal">−</button>

@@ -312,6 +312,8 @@ function navZoom(kmh: number | null) {
 
 /** Pochylenie mapy (stopnie) — mocniejsze = dalszy horyzont i większa perspektywa, jak w nawigacjach samochodowych. */
 const MAP_PITCH = 62;
+/** Mapa 2D (płaska, z góry): tyle poziomów zoomu dalej niż w 3D — widać ok. 4× szerzej. */
+const FLAT_ZOOM = -2;
 
 /** Płynny ruch mapy między odczytami GPS. */
 const SMOOTH = {
@@ -534,7 +536,7 @@ export interface MapBrowse {
   bearing: number;
 }
 
-export function HudRouteMap({ nav, track, live, token, anchorY = 0.8, zoomOffset = 0, friends, vector, browse = null, onBrowse, onPin, onHold }: { nav: HudNavData; track: NavTrack; live: Live | null; token: string; anchorY?: number; zoomOffset?: number; friends?: Friend[]; /** Własny styl mapy (kafelki wektorowe); brak = TomTom. */ vector?: GlVector; browse?: MapBrowse | null; /** Przesunięcie / szczypanie mapy — brak = mapa bez gestów. */ onBrowse?: (b: MapBrowse) => void; /** Dotknięcie pinezki (null = dotknięcie mapy obok). */ onPin?: (p: PinInfo | null) => void; /** Przytrzymanie palca na mapie — miejsce pod palcem. */ onHold?: (p: LatLon) => void }) {
+export function HudRouteMap({ nav, track, live, token, anchorY = 0.8, zoomOffset = 0, flat = false, friends, vector, browse = null, onBrowse, onPin, onHold }: { nav: HudNavData; track: NavTrack; live: Live | null; token: string; anchorY?: number; zoomOffset?: number; /** Mapa 2D: bez pochylenia, bardziej oddalona. */ flat?: boolean; friends?: Friend[]; /** Własny styl mapy (kafelki wektorowe); brak = TomTom. */ vector?: GlVector; browse?: MapBrowse | null; /** Przesunięcie / szczypanie mapy — brak = mapa bez gestów. */ onBrowse?: (b: MapBrowse) => void; /** Dotknięcie pinezki (null = dotknięcie mapy obok). */ onPin?: (p: PinInfo | null) => void; /** Przytrzymanie palca na mapie — miejsce pod palcem. */ onHold?: (p: LatLon) => void }) {
   const route = nav.route;
   const lastBearing = useRef(0);
   const zoomRef = useRef<number | null>(null);
@@ -549,7 +551,7 @@ export function HudRouteMap({ nav, track, live, token, anchorY = 0.8, zoomOffset
   // Zoom zmienia się płynnie (bez skakania przy każdej zmianie prędkości).
   const target = navZoom(live?.kmh ?? null);
   zoomRef.current = zoomRef.current === null ? target : zoomRef.current + (target - zoomRef.current) * 0.15;
-  const zoom = Math.max(10, Math.min(18, Math.round(zoomRef.current * 20) / 20 + zoomOffset));
+  const zoom = Math.max(9, Math.min(18, Math.round(zoomRef.current * 20) / 20 + zoomOffset + (flat ? FLAT_ZOOM : 0)));
 
   // Gesty: pierwszy ruch palcem przechodzi z prowadzenia do przeglądania (od bieżącej pozycji i kierunku),
   // kolejne przesuwają / przybliżają widok. Bieżący widok w refie — gest i przejście dzieją się w tym samym zdarzeniu.
@@ -599,7 +601,8 @@ export function HudRouteMap({ nav, track, live, token, anchorY = 0.8, zoomOffset
   if (!center) return <div className="hud-map empty"><span>Czekam na pozycję GPS…</span></div>;
   const km = pos?.km ?? 0;
   // Przy przeglądaniu cała trasa przed nami (co n-ty punkt), w prowadzeniu 12 km.
-  const ahead = route ? (browse ? thinPts(routeSlice(route.points, km, Infinity)) : routeSlice(route.points, km, km + 12)) : [];
+  // W 2D widać dalej — trasa na 25 km.
+  const ahead = route ? (browse ? thinPts(routeSlice(route.points, km, Infinity)) : routeSlice(route.points, km, km + (flat ? 25 : 12))) : [];
   const behind = route && pos ? routeSlice(route.points, Math.max(0, km - 1), km) : [];
   const next = route && pos ? nextInstruction(route.instructions, km) : undefined;
   // Utrudnienia na widocznym kawałku trasy — żółty wolniej, czerwony korek; etykieta z opóźnieniem na początku odcinka.
@@ -669,7 +672,7 @@ export function HudRouteMap({ nav, track, live, token, anchorY = 0.8, zoomOffset
 
   return (
     <div className="hud-map" ref={box} {...(onBrowse ? gestures : {})}>
-      <GlMapView token={token} center={center} zoom={zoom} bearing={bearing} pitch={MAP_PITCH} anchorY={anchorY} lines={lines} markers={markers} follow={predict} vector={vector} pickRef={pickRef}>
+      <GlMapView token={token} center={center} zoom={zoom} bearing={bearing} pitch={flat ? 0 : MAP_PITCH} anchorY={anchorY} lines={lines} markers={markers} follow={predict} vector={vector} pickRef={pickRef}>
         <svg className="hud-map-me-wrap" style={{ left: "50%", top: `${anchorY * 100}%` }} viewBox="-30 -34 60 64" aria-hidden>
           <path className="hud-map-me-halo" transform={`rotate(${arrowTurn})`} d="M0 -30 L22 24 L0 12 L-22 24 Z" />
           <path className="hud-map-me" transform={`rotate(${arrowTurn})`} d="M0 -30 L22 24 L0 12 L-22 24 Z" />

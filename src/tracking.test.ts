@@ -33,6 +33,34 @@ describe("ręczny postój + GPS", () => {
     expect(s.driver.splitBreakTaken).toBe(false);
   });
 
+  it("jazda po mieście ze staniem na światłach co ~125 m kończy przerwę po 200 m jazdy", () => {
+    let s = startStop(parked(0), NOW, 45);
+    for (let m = 0.25; m <= 46; m += 0.25) s = applyFix(s, fix(m, 0));
+    let t = NOW + 46 * MIN, km = 0, endedAt = -1;
+    // Odczyt co 1 s: 15 s jazdy 30 km/h, 10 s stania — wcześniej każde stanie zaczynało liczenie 200 m od nowa.
+    for (let i = 0; i < 600 && endedAt < 0; i++) {
+      t += 1000;
+      const kmh = i % 25 < 15 ? 30 : 0;
+      km += kmh / 3600;
+      s = applyFix(s, { t, lat: km / KM_PER_DEG, lon: 0, accuracy: 10, speed: kmh / 3.6 });
+      if (!s.stop) endedAt = i;
+    }
+    expect(endedAt).toBeGreaterThan(0);
+    expect(km).toBeLessThan(0.25);
+    expect(s.driver.sinceBreakMin).toBeLessThanOrEqual(1);
+  });
+
+  it("spacer z telefonem (6 km/h) na przerwie nie kończy jej", () => {
+    let s = startStop(parked(10), NOW + 10 * MIN, 45);
+    let t = NOW + 10 * MIN, km = 0;
+    for (let i = 0; i < 300; i++) {
+      t += 1000;
+      km += 6 / 3600;
+      s = applyFix(s, { t, lat: km / KM_PER_DEG, lon: 0, accuracy: 10, speed: 6 / 3.6 });
+    }
+    expect(s.stop).not.toBeNull();
+  });
+
   it("pojedynczy fałszywy odczyt ruchu nie kończy przerwy (nie zaczyna jej od nowa)", () => {
     let s = startStop(parked(0), NOW, 45);
     for (let m = 0.25; m <= 20; m += 0.25) s = applyFix(s, fix(m, 0));

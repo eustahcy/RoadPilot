@@ -54,9 +54,10 @@ src/core/          RoadPilot Core — czyste, deterministyczne funkcje TS (bez R
                    reszta = postój: stoimy przed luką / jedziemy teraz → postój na początku (stopEnded), jechaliśmy i stoimy → stopSince = koniec jazdy;
                    GapEstimate do historii, driveEnd = koniec jazdy w kroku
                    nextAutoStop — postój sam po 5 s z prędkością 0–5 km/h (uzbraja się po jeździe)
-                   ruszenie z postoju potwierdzane dopiero po GPS.confirmMoveM (200 m) od miejsca postoju (moveSince) i przy każdym odczycie
-                   ≥ GPS.resumeKmh 10 km/h (prędkość z odbiornika albo z przesunięcia od track.lastFix) — pojedynczy fałszywy odczyt ani spacer
-                   z telefonem (5–6 km/h) nie kończą przerwy; luka na postoju z przesunięciem < GPS.gapMinKm (1 km) to nie jazda
+                   ruszenie z postoju potwierdzane dopiero po GPS.confirmMoveM (200 m) drogi zebranej z odczytów ≥ GPS.resumeKmh 10 km/h
+                   (track.moveKm od moveSince; prędkość z odbiornika albo z przesunięcia od track.lastFix; krok > maxKmh = skok, pomijany);
+                   stanie krótsze niż GPS.resumeHoldMin 3 min (światła) nie zeruje zebranej drogi — wcześniej każde zwolnienie zaczynało
+                   200 m od nowa i w mieście przerwa się nie kończyła; pojedynczy fałszywy odczyt ani spacer z telefonem (5–6 km/h) nie kończą przerwy; luka na postoju z przesunięciem < GPS.gapMinKm (1 km) to nie jazda
   workday.ts       czas pracy (od shiftStart, bez zatrzymania w przerwach): WorkSettings, workStatus, workReminders; 13 h / 15 h z dutyWindow
   history.ts       historia dzienna (DayLog, dzień kalendarzowy lokalnie): recordDrive/recordStop(est)/recordGap/daySummary; DayLog.gaps, .violations
   violations.ts    przekroczenia z GPS: trackViolations (continuous / daily / week / fortnight z liczników przed jazdą, duty = jazda po 13/15 h

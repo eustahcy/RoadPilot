@@ -226,7 +226,11 @@ describe("postój a fałszywy ruch z GPS", () => {
     expect(r.stopEnded).toBeUndefined();
     t = addFix(r.track, fix(10.5, 0)).track; // i znów stoi
     expect(t.stopSince).toBe(NOW);
+    // Krótkie stanie nie zeruje zebranego ruchu (światła), dopiero GPS.resumeHoldMin bez jazdy.
+    for (let m = 10.75; m <= 10.25 + GPS.resumeHoldMin + 0.25; m += 0.25) t = addFix(t, fix(m, 0)).track;
+    expect(t.stopSince).toBe(NOW);
     expect(t.moveSince).toBeNull();
+    expect(t.moveKm).toBe(0);
   });
 
   it("skok pozycji o kilka km na postoju nie jest ruszeniem", () => {

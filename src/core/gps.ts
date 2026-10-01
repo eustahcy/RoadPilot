@@ -30,10 +30,14 @@ export interface GpsTrack {
   samples: { t: number; km: number }[];
   /** Początek bieżącego postoju — null, gdy jedziemy. */
   stopSince: number | null;
-  /** Na postoju: od kiedy odczyty pokazują ruch, jeszcze niepotwierdzony odległością (null/brak = nie ma). */
+  /** Na postoju: od kiedy odczyty pokazują ruch, jeszcze niepotwierdzony drogą (null/brak = nie ma). */
   moveSince?: number | null;
   /** Na postoju: pozycja z ostatniego odczytu — prędkość między odczytami, gdy odbiornik jej nie podaje (kotwica stoi w miejscu postoju). */
   lastFix?: { lat: number; lon: number } | null;
+  /** Na postoju: droga (km) z odczytów z prędkością ≥ resumeKmh od moveSince — ruszenie potwierdza się, gdy dojdzie do confirmMoveM. */
+  moveKm?: number;
+  /** Na postoju: czas ostatniego odczytu z taką prędkością — krótkie stanie (światła) nie zeruje drogi, dłuższe niż resumeHoldMin tak. */
+  lastMoveT?: number | null;
 }
 
 export const GPS = {
@@ -75,9 +79,14 @@ export const GPS = {
   confirmMoveM: 200,
   /**
    * Na postoju ruch liczy się jako ruszenie dopiero od tej prędkości (km/h) — kierowca idący z telefonem (toaleta, sklep na MOP-ie)
-   * ma 5–6 km/h. Każdy odczyt od początku ruchu musi ją mieć, inaczej czekanie na ruszenie zaczyna się od nowa.
+   * ma 5–6 km/h. Do potwierdzenia ruszenia liczy się tylko droga z odczytów z co najmniej tą prędkością.
    */
   resumeKmh: 10,
+  /**
+   * Zatrzymanie krótsze niż tyle minut (światła, skrzyżowanie, korek) nie zeruje drogi zbieranej do potwierdzenia ruszenia —
+   * wcześniej każde zwolnienie poniżej resumeKmh zaczynało liczenie 200 m od nowa i w mieście postój nie kończył się wcale.
+   */
+  resumeHoldMin: 3,
   /** Luka na postoju z przesunięciem mniejszym niż tyle km to spacer / przestawienie auta na parkingu, nie jazda. */
   gapMinKm: 1,
 } as const;
@@ -149,18 +158,20 @@ export function addFix(track: GpsTrack, fix: Fix, opts: { road?: GapRoad | null;
     // Na postoju ruch musi się potwierdzić odległością od miejsca postoju (kotwica stoi w miejscu, dopóki czekamy)
     // i prędkością jak na auto, nie pieszego: z odbiornika, a gdy jej nie podaje — z przesunięcia od poprzedniego odczytu.
     const prev = track.lastFix ?? track.anchor;
-    const stepKmh = fix.speed !== null && Number.isFinite(fix.speed) ? fix.speed * 3.6 : distanceM(prev, fix) / 1000 / (dt / 60);
+    const stepM = distanceM(prev, fix);
+    const stepKmh = fix.speed !== null && Number.isFinite(fix.speed) ? fix.speed * 3.6 : stepM / 1000 / (dt / 60);
     const here = { lat: fix.lat, lon: fix.lon };
-    if (stepKmh < GPS.resumeKmh) return { track: { ...track, lastT: fix.t, moveSince: null, lastFix: here }, km: 0, driveMin: 0, driveEnd: fix.t };
-    const since = track.moveSince ?? track.lastT;
-    // Za szybko jak na drogę od początku ruchu → to skok pozycji, nie ruszenie.
-    const plausible = straight / 1000 / ((fix.t - since) / 60 / MIN) <= GPS.maxKmh;
-    if (straight < GPS.confirmMoveM || !plausible) {
-      return { track: { ...track, lastT: fix.t, moveSince: since, lastFix: here }, km: 0, driveMin: 0, driveEnd: fix.t };
+    if (stepKmh < GPS.resumeKmh) return { track: { ...track, lastT: fix.t, lastFix: here, ...movePending(track, fix.t) }, km: 0, driveMin: 0, driveEnd: fix.t };
+    const pending = movePending(track, fix.t);
+    const since = pending.moveSince ?? track.lastT;
+    // Krok szybszy niż auto → skok pozycji: nie dodajemy go do drogi.
+    const moveKm = (pending.moveKm ?? 0) + (stepM / 1000 / (dt / 60) <= GPS.maxKmh ? stepM / 1000 : 0);
+    if (moveKm * 1000 < GPS.confirmMoveM) {
+      return { track: { ...track, lastT: fix.t, lastFix: here, moveSince: since, moveKm, lastMoveT: fix.t }, km: 0, driveMin: 0, driveEnd: fix.t };
     }
-    // Potwierdzone: jedziemy od pierwszego odczytu z ruchem, droga — od miejsca postoju.
+    // Potwierdzone: jedziemy od pierwszego odczytu z ruchem, droga — zebrana od tego czasu.
     driveMin = (fix.t - since) / MIN;
-    km = straight / 1000;
+    km = moveKm;
   }
 
   let stopSince = track.stopSince;
@@ -174,7 +185,15 @@ export function addFix(track: GpsTrack, fix: Fix, opts: { road?: GapRoad | null;
     stopSince = track.lastT;
   }
 
-  return { track: nextTrack(track, fix, moved, km, stopSince, null), km, driveMin, driveEnd: fix.t, stopEnded };
+  const next = nextTrack(track, fix, moved, km, stopSince, null);
+  // Stanie na światłach w trakcie potwierdzania ruszenia — zebrana droga zostaje (do resumeHoldMin).
+  return { track: stopSince !== null ? { ...next, ...movePending(track, fix.t) } : next, km, driveMin, driveEnd: fix.t, stopEnded };
+}
+
+/** Na postoju: niepotwierdzony jeszcze ruch, jeśli ostatni odczyt z prędkością jazdy był niedawno; inaczej wyzerowany. */
+function movePending(track: GpsTrack, t: number): Pick<GpsTrack, "moveSince" | "moveKm" | "lastMoveT"> {
+  const fresh = track.moveSince != null && track.lastMoveT != null && t - track.lastMoveT <= GPS.resumeHoldMin * MIN;
+  return fresh ? { moveSince: track.moveSince, moveKm: track.moveKm ?? 0, lastMoveT: track.lastMoveT } : { moveSince: null, moveKm: 0, lastMoveT: null };
 }
 
 /**

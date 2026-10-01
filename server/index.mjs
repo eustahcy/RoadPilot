@@ -4,14 +4,16 @@
 // poczta: SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASSWORD, MAIL_FROM_EMAIL, MAIL_FROM_NAME;
 // APP_ORIGINS — adresy, z których działa aplikacja (CORS i linki w e-mailach), np. "https://tuike.pl,https://www.tuike.pl".
 
-import { createHash, randomBytes, scrypt as scryptCb, timingSafeEqual } from "node:crypto";
+import { createHash, randomBytes, randomInt, scrypt as scryptCb, timingSafeEqual } from "node:crypto";
 import { cleanPoints, cleanReport, inPoland } from "./collect.mjs";
 import { HERE_MAX_POINTS, limitHere, parseValhalla, parseValhallaAlternates, roadInfo, traceChunks, tracePoints, traceRequest, valhallaRequest } from "./valhalla.mjs";
 import { ALERT_KINDS, ALERT_TTL_H, applyVotes, blockingPoints, routeAlerts, routeBoxes, routeWarnings } from "./warnings.mjs";
 import { compareReports, REPORT_TO_OSM } from "./compare.mjs";
 import { parseRoutes, parseSearch, ROUTE_TYPES, routeError, routeUrl, searchUrl, validPoint } from "./nav.mjs";
-import { cleanPresence, friendView } from "./friends.mjs";
+import { cleanPresence, friendView, keepReplayedPosAt } from "./friends.mjs";
 import { routePois } from "./pois.mjs";
+import { extendPremium, keyView, makeKey, MAX_KEY_DAYS, normalizeKey } from "./premium.mjs";
+import { gapRequest, gapRoute, pickPlace, pickPoi, PLACE_MAX_KM, POI_AT_M, roadLabel } from "./geo.mjs";
 import { boxAround, cleanParking, distanceM, PARKING_DAILY_MAX, PARKING_RADIUS_M, parkingView } from "./parking.mjs";
 import { createReadStream } from "node:fs";
 import { readFile, stat } from "node:fs/promises";
@@ -259,7 +261,7 @@ function requirePremium(user) {
   if (!hasPremium(user)) throw new HttpError(403, "Nawigacja jest dostępna w RoadPilot Premium.");
 }
 
-const NAV_LIMITS = { search: { max: 120, windowMs: 10 * 60_000 }, route: { max: 30, windowMs: 10 * 60_000 }, here: { max: 600, windowMs: 10 * 60_000 }, nearby: { max: 60, windowMs: 10 * 60_000 } };
+const NAV_LIMITS = { search: { max: 120, windowMs: 10 * 60_000 }, route: { max: 30, windowMs: 10 * 60_000 }, here: { max: 600, windowMs: 10 * 60_000 }, nearby: { max: 60, windowMs: 10 * 60_000 }, gap: { max: 20, windowMs: 10 * 60_000 }, where: { max: 60, windowMs: 10 * 60_000 }, redeem: { max: 10, windowMs: 60 * 60_000 } };
 
 // Limity darmowego planu TomTom (z panelu my.tomtom.com) — nie przekraczamy BUDGET_SHARE z nich.
 // Okres: miesiąc (bezpieczniej) albo dzień — TOMTOM_PERIOD=day, jeśli limity w panelu są dzienne.
@@ -656,8 +658,8 @@ routes["POST /api/nav/warnings"] = async (req, user) => {
 };
 
 /** Stacje paliw, MOP-y i parkingi TIR przy trasie (pinezki na mapie) — z osm_pois, bez kosztów TomTom. */
-/** Promień (km) miejsc wokół pozycji — lista „po drodze” bez wyznaczonej trasy. */
-const NEARBY_KM = 32;
+/** Promień (km) miejsc wokół pozycji — lista „po drodze” bez wyznaczonej trasy (aplikacja podaje km: zasięg z ustawień + zapas). */
+const NEARBY_KM = { default: 32, max: 100 };
 
 /**
  * Stacje, MOP-y i parkingi TIR wokół pozycji (bez trasy). Które są przed nami, liczy aplikacja z kierunku jazdy —
@@ -669,10 +671,59 @@ routes["GET /api/nav/nearby"] = async (req, user) => {
   const u = new URL(req.url, "http://x");
   const at = validPoint({ lat: Number(u.searchParams.get("lat")), lon: Number(u.searchParams.get("lon")) });
   if (!at) throw new HttpError(400, "Brak pozycji.");
-  const dLat = NEARBY_KM / 111;
-  const dLon = NEARBY_KM / (111 * Math.cos((at.lat * Math.PI) / 180));
+  const km = Math.min(NEARBY_KM.max, Math.max(5, Number(u.searchParams.get("km")) || NEARBY_KM.default));
+  const dLat = km / 111;
+  const dLon = km / (111 * Math.cos((at.lat * Math.PI) / 180));
   const [rows] = await db.query("SELECT osm_id, kind, lat, lon, name, truck FROM osm_pois WHERE lat BETWEEN ? AND ? AND lon BETWEEN ? AND ?", [at.lat - dLat, at.lat + dLat, at.lon - dLon, at.lon + dLon]);
   return [200, { pois: rows.map((r) => ({ id: r.osm_id, kind: r.kind, name: r.name, truck: !!r.truck, lat: r.lat, lon: r.lon })) }];
+};
+
+/**
+ * Luka w odczytach GPS (aplikacja zamknięta): droga ciężarówki z ostatniej znanej pozycji do obecnej — km i czas jazdy wg Valhalli.
+ * Z kontem, bez Premium (to dokładność liczników jazdy, nie nawigacja). Poza Polską / bez trasy: { road: null } — aplikacja liczy wtedy
+ * z linii prostej.
+ */
+routes["POST /api/gps/gap"] = async (req, user) => {
+  navThrottle("gap", req);
+  const body = await readJson(req);
+  const from = validPoint({ lat: body.from?.[0], lon: body.from?.[1] });
+  const to = validPoint({ lat: body.to?.[0], lon: body.to?.[1] });
+  if (!from || !to) throw new HttpError(400, "Brak pozycji.");
+  if (!VALHALLA_URL || !inPoland(from.lat, from.lon) || !inPoland(to.lat, to.lon)) return [200, { road: null }];
+  try {
+    const r = await fetch(`${VALHALLA_URL}/route`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(gapRequest(from, to)), signal: AbortSignal.timeout(8_000) });
+    return [200, { road: r.ok ? gapRoute(await r.json()) : null }];
+  } catch {
+    return [200, { road: null }];
+  }
+};
+
+/** Gdzie jest punkt: miejscowość, droga i MOP / stacja obok — do notatki o przekroczeniu w historii. Z kontem; POST, żeby pozycja nie trafiała do logów serwera WWW. */
+routes["POST /api/geo/where"] = async (req, user) => {
+  navThrottle("where", req);
+  const body = await readJson(req);
+  const at = validPoint({ lat: body.lat, lon: body.lon });
+  if (!at) throw new HttpError(400, "Brak pozycji.");
+  const box = (km) => [at.lat - km / 111, at.lat + km / 111, at.lon - km / (111 * Math.cos((at.lat * Math.PI) / 180)), at.lon + km / (111 * Math.cos((at.lat * Math.PI) / 180))];
+  const [places] = await db.query("SELECT name, kind, lat, lon FROM osm_places WHERE lat BETWEEN ? AND ? AND lon BETWEEN ? AND ?", box(PLACE_MAX_KM));
+  const [pois] = await db.query("SELECT name, kind, lat, lon FROM osm_pois WHERE lat BETWEEN ? AND ? AND lon BETWEEN ? AND ?", box(POI_AT_M / 1000));
+  let road = null;
+  if (VALHALLA_URL && inPoland(at.lat, at.lon)) {
+    try {
+      // /locate daje tylko najbliższą krawędź — bez dróg serwisowych (wjazd na MOP, parking), i pytamy też o punkty ~80 m obok:
+      // nazwa z punktu, a gdy jej nie ma — najczęstsza z sąsiednich.
+      const d = 0.0007;
+      const locations = [[0, 0], [d, 0], [-d, 0], [0, d * 1.6], [0, -d * 1.6]].map(([a, b]) => ({ lat: at.lat + a, lon: at.lon + b, search_filter: { min_road_class: "residential" } }));
+      const r = await fetch(`${VALHALLA_URL}/locate`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ locations, costing: "truck", verbose: true }), signal: AbortSignal.timeout(5_000) });
+      const labels = r.ok ? (await r.json()).map((l) => (l?.edges ?? []).filter((e) => e.distance <= 300).map((e) => roadLabel(e.edge_info?.names)).find(Boolean) ?? null) : [];
+      const count = new Map();
+      for (const l of labels.slice(1)) if (l) count.set(l, (count.get(l) ?? 0) + 1);
+      road = labels[0] ?? [...count].sort((x, y) => y[1] - x[1])[0]?.[0] ?? null;
+    } catch {
+      road = null;
+    }
+  }
+  return [200, { place: pickPlace(places, at), road, poi: pickPoi(pois, at) }];
 };
 
 async function findPois(pts) {
@@ -883,6 +934,12 @@ routes["POST /api/presence"] = async (req, user) => {
   } catch (e) {
     throw new HttpError(400, e.message);
   }
+  const [prev] = await db.query("SELECT data FROM presence WHERE user_id = ?", [user.id]);
+  try {
+    if (prev.length) p = keepReplayedPosAt(JSON.parse(prev[0].data), p);
+  } catch {
+    /* uszkodzony wiersz — zapisujemy nowy */
+  }
   await db.query("INSERT INTO presence (user_id, data) VALUES (?, ?) ON DUPLICATE KEY UPDATE data = VALUES(data), updated_at = NOW(3)", [user.id, JSON.stringify(p)]);
   return [200, {}];
 };
@@ -996,6 +1053,62 @@ routes["POST /api/admin/premium"] = async (req, user) => {
   const [rows] = await db.query("SELECT id, email, name, role, premium_until, data_consent_at, created_at FROM users WHERE id = ?", [id]);
   if (!rows.length) throw new HttpError(404, "Nie ma takiego konta.");
   return [200, { user: adminUser(rows[0]) }];
+};
+
+// ── Klucze Premium ──
+
+const KEYS_SQL = "SELECT k.code, k.days, k.note, k.created_at, k.used_at, u.email AS used_email FROM premium_keys k LEFT JOIN users u ON u.id = k.used_by";
+
+/** Nowy klucz: days = liczba dni (1–3650), null = bez terminu; note = dla kogo (tylko w Administracji). */
+routes["POST /api/admin/keys"] = async (req, user) => {
+  requireAdmin(user);
+  const body = await readJson(req);
+  const days = body.days === null ? null : Number(body.days);
+  if (days !== null && !(Number.isInteger(days) && days >= 1 && days <= MAX_KEY_DAYS)) throw new HttpError(400, "Liczba dni: od 1 do 3650.");
+  const note = String(body.note ?? "").trim().slice(0, 120);
+  for (let i = 0; i < 5; i++) {
+    const code = makeKey(randomInt);
+    const [r] = await db.query("INSERT IGNORE INTO premium_keys (code, days, note, created_by) VALUES (?, ?, ?, ?)", [code, days, note, user.id]);
+    if (r.affectedRows) {
+      const [rows] = await db.query(`${KEYS_SQL} WHERE k.code = ?`, [code]);
+      return [201, { key: keyView(rows[0]) }];
+    }
+  }
+  throw new HttpError(500, "Nie udało się wygenerować klucza.");
+};
+
+routes["GET /api/admin/keys"] = async (req, user) => {
+  requireAdmin(user);
+  const [rows] = await db.query(`${KEYS_SQL} ORDER BY k.created_at DESC LIMIT 100`);
+  return [200, { keys: rows.map(keyView) }];
+};
+
+/** Usunięcie niewykorzystanego klucza (np. wysłanego nie temu, komu trzeba). */
+routes["DELETE /api/admin/keys"] = async (req, user) => {
+  requireAdmin(user);
+  const code = normalizeKey((await readJson(req)).key);
+  if (!code) throw new HttpError(400, "Nieprawidłowy klucz.");
+  const [r] = await db.query("DELETE FROM premium_keys WHERE code = ? AND used_by IS NULL", [code]);
+  if (!r.affectedRows) throw new HttpError(409, "Klucz został już użyty albo nie istnieje.");
+  return [200, { ok: true }];
+};
+
+/** Kierowca wpisuje klucz: jednorazowy, dni dokładane do trwającego Premium. */
+routes["POST /api/premium/redeem"] = async (req, user) => {
+  navThrottle("redeem", req);
+  const code = normalizeKey((await readJson(req)).key);
+  if (!code) throw new HttpError(400, "To nie wygląda na klucz RoadPilot (np. RP-7KQM-X2HD).");
+  // Warunkowy UPDATE jest atomowy — ten sam klucz wpisany naraz na dwóch kontach zadziała tylko raz.
+  const [r] = await db.query("UPDATE premium_keys SET used_by = ?, used_at = NOW() WHERE code = ? AND used_by IS NULL", [user.id, code]);
+  if (!r.affectedRows) {
+    const [k] = await db.query("SELECT used_by FROM premium_keys WHERE code = ?", [code]);
+    throw new HttpError(k.length ? 409 : 404, k.length ? "Ten klucz został już użyty." : "Nie ma takiego klucza — sprawdź, czy dobrze przepisany.");
+  }
+  const [[key]] = await db.query("SELECT days FROM premium_keys WHERE code = ?", [code]);
+  const until = extendPremium(user.premium_until, key.days, Date.now());
+  await db.query("UPDATE users SET premium_until = ? WHERE id = ?", [until, user.id]);
+  const [rows] = await db.query("SELECT id, email, name, role, premium_until, data_consent_at FROM users WHERE id = ?", [user.id]);
+  return [200, { user: publicUser(rows[0]), days: key.days }];
 };
 
 // ── Kafelki mapy (TomTom, styl nocny) — przez serwer: klucz nie trafia do telefonu, każdy kafelek w budżecie ──

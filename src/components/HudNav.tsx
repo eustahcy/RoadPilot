@@ -158,6 +158,18 @@ export function ManeuverIcon({ ins }: { ins: NavInstruction }) {
   return <svg viewBox="0 0 24 24" aria-hidden><Arrow deg={maneuverDeg(ins)} /></svg>;
 }
 
+/** Krótki czasownik manewru do kafelka „następny”: „Skręć”, „Zjedź”, „Rondo”… */
+function maneuverVerb(ins: NavInstruction) {
+  const m = ins.maneuver;
+  if (m.startsWith("ARRIVE")) return "Cel";
+  if (m.startsWith("ROUNDABOUT")) return "Rondo";
+  if (m.includes("UTURN")) return "Zawróć";
+  if (m.includes("EXIT")) return "Zjedź";
+  if (m.startsWith("KEEP") || m.startsWith("BEAR")) return m.endsWith("LEFT") ? "Lewa strona" : "Prawa strona";
+  if (m.includes("TURN") || m.startsWith("SHARP")) return "Skręć";
+  return "Prosto";
+}
+
 /** „800 m”, „1,2 km”, „15 km”. */
 export function fmtDist(km: number) {
   if (km < 0.95) return `${Math.max(10, Math.round((km * 1000) / 10) * 10)} m`;
@@ -188,7 +200,7 @@ function detail(ins: NavInstruction) {
 
 /** Panel nawigacji w HUD: następny manewr, pasy ruchu, ograniczenie prędkości; stan „poza trasą” i „brak trasy”. */
 /** `section` — odcinkowy pomiar rysuje NavView (pasek ze średnią); wtedy nie powtarzamy go jako zwykłego ostrzeżenia. */
-export function HudNav({ nav, track, compact, card, section }: { nav: HudNavData; track: NavTrack; compact?: boolean; card?: boolean; section?: React.ReactNode | null }) {
+export function HudNav({ nav, track, compact, card, section, onManeuvers }: { nav: HudNavData; track: NavTrack; compact?: boolean; card?: boolean; section?: React.ReactNode | null; /** Karta: kafelek kolejnego manewru otwiera listę manewrów. */ onManeuvers?: () => void }) {
   const { route } = nav;
   const { pos, off } = track;
   // card — styl Nawigacja: duża zielona strzałka, ograniczenie prędkości jest na mapie.
@@ -234,8 +246,18 @@ export function HudNav({ nav, track, compact, card, section }: { nav: HudNavData
   // Najbliższe utrudnienie przed nami: blisko (TRAFFIC_AHEAD_KM) każde ważne, dalej (TRAFFIC_FAR_KM) tylko korek / zamknięcie / duże opóźnienie.
   const jam = TRAFFIC_ON && route.traffic?.find((t) => jamMatters(t) && t.toKm > pos.km && (t.km - pos.km <= TRAFFIC_AHEAD_KM || (t.km - pos.km <= TRAFFIC_FAR_KM && farJam(t))));
 
+  // Karta (tablet): kafelek z manewrem po najbliższym — „Skręć za 390 m”, dotknięcie = lista manewrów.
+  const after = card && next ? route.instructions.find((x) => x.km > next.ins.km + 0.005 && x.maneuver !== "DEPART") : undefined;
   return (
-    <div className={`${cls} ${warn || section ? "with-warn" : ""} ${jam ? "with-jam" : ""}`}>
+    <div className={`${cls} ${warn || section ? "with-warn" : ""} ${jam ? "with-jam" : ""} ${after ? "with-after" : ""}`}>
+      {after && (
+        <button className="hud-after" onClick={onManeuvers} aria-label="Najbliższe manewry">
+          <ManeuverIcon ins={after} />
+          <b>{maneuverVerb(after)}</b>
+          <small>za {fmtDist(after.km - pos.km)}</small>
+          <svg className="hud-after-more" viewBox="0 0 24 24" aria-hidden><path d="M6 9l6 6 6-6" /></svg>
+        </button>
+      )}
       {arrived ? (
         <div className="hud-man">
           <ManeuverIcon ins={{ km: 0, maneuver: "ARRIVE", text: "" }} />

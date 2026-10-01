@@ -1021,6 +1021,8 @@ input[type="number"]::-webkit-inner-spin-button, input[type="number"]::-webkit-o
 .nm-zoom button { height: calc(10 * var(--u)); border: 0; background: none; color: #eef3f6; font-size: calc(5 * var(--u)); font-weight: 700; line-height: 1; }
 .nm-zoom button + button { border-top: 1px solid rgba(140, 175, 195, .25); }
 .nm-recenter:not(.on) { display: none; }
+/* Tylko tablet: kafelek kolejnego manewru w karcie i pasek postępu trasy na dole. */
+.hud-after, .nm-progress { display: none; }
 .nm-mode { font-size: calc(3.4 * var(--u)); font-weight: 900; letter-spacing: .02em; }
 /* Mapa 2D: bez „nieba” i mgiełki horyzontu. */
 .hud.navmode .nm-map.flat::after, .hud.navmode .nm-map.flat::before { display: none; }
@@ -1102,7 +1104,7 @@ input[type="number"]::-webkit-inner-spin-button, input[type="number"]::-webkit-o
 
 /* Tablet (≥ 744 px w obu wymiarach — iPad pionowo i poziomo): karta manewru u góry z lewej, kafelki 2×2 obok, przyciski pod kartą, prędkość w lewym dole, „po drodze” i mapa w prawym. */
 @media (min-width: 744px) and (min-height: 744px) {
-  .hud.navmode { --u: min(.85vh, .62vw); grid-template-columns: minmax(0, 46%) 1fr auto; grid-template-rows: auto 1fr auto auto;
+  .hud.navmode { --u: min(.74vh, .58vw); grid-template-columns: minmax(0, 46%) 1fr auto; grid-template-rows: auto 1fr auto auto;
     grid-template-areas: "top tiles tiles" "side . ." "side . ctl" "speed . ahead"; gap: calc(1.6 * var(--u)); }
   .nm-side { align-self: start; justify-self: start; }
   .nm-ctl { justify-self: end; }
@@ -1111,7 +1113,7 @@ input[type="number"]::-webkit-inner-spin-button, input[type="number"]::-webkit-o
   .nm-ahead-go { display: block; }
   .nm-speed { padding-bottom: calc(3 * var(--u)); }
   .nm-speed-bar { display: block; }
-  .nm-speed strong { font-size: calc(14 * var(--u)); }
+  .nm-speed strong { font-size: calc(12.5 * var(--u)); }
   .nm-tiles { align-self: start; grid-template-columns: 1fr 1fr; gap: calc(1.4 * var(--u)); background: none; border: 0; box-shadow: none; }
   .nm-tiles > .nm-tile { display: flex; border: 1px solid var(--nm-edge); border-radius: calc(2.6 * var(--u)); background: var(--nm-glass); box-shadow: 0 10px 28px rgba(0, 0, 0, .38), inset 0 1px 0 rgba(255, 255, 255, .07); padding: calc(2 * var(--u)) calc(2.4 * var(--u)) calc(2.6 * var(--u)); }
   .nm-tiles-handle { display: none; }
@@ -1120,6 +1122,43 @@ input[type="number"]::-webkit-inner-spin-button, input[type="number"]::-webkit-o
   .nm-tile b { order: 1; }
   .nm-tile i { order: 3; }
   .nm-tile-bar { display: block; }
+  .hud.navmode { grid-template-rows: auto 1fr auto auto; grid-template-areas: "top tiles tiles" "side . ctl" "speed . ahead" "progress progress progress"; }
+  .nm-card-more { display: none; }
+  /* Górny pas (karta manewru i kafelki) na czarnym tle, mapa dopiero pod nim — w siatce od 2. wiersza, do krawędzi ekranu. */
+  .hud.navmode { background: #05080b; }
+  .hud.navmode .nm-map { position: relative; inset: auto; grid-area: 2 / 1 / -1 / -1; margin: 0 calc(-2 * var(--u) - env(safe-area-inset-right)) calc(-1.6 * var(--u) - env(safe-area-inset-bottom)) calc(-2 * var(--u) - env(safe-area-inset-left)); overflow: hidden; }
+  /* Karta: po lewej kafelek kolejnego manewru (na całą wysokość), obok manewr, pasy i ostrzeżenia. */
+  .nm-top .hud-nav.card.with-after { display: grid; grid-template-columns: auto minmax(0, 1fr); column-gap: calc(2.2 * var(--u)); row-gap: calc(.8 * var(--u)); align-items: center; padding: calc(1.6 * var(--u)) calc(2.4 * var(--u)) calc(1.6 * var(--u)) calc(1.6 * var(--u)); }
+  .nm-top .hud-nav.card.with-after > * { grid-column: 2; min-width: 0; }
+  .nm-top .hud-nav.card.with-after > .hud-after { grid-column: 1; grid-row: 1 / span 3; align-self: stretch; }
+  .nm-top .hud-nav.card .hud-lanes-guide { justify-items: start; }
+  /* Przyciski mniejsze niż na telefonie — kolumna 6 przycisków mieści się między kartą a prędkością. */
+  .nm-btn, .nm-zoom { width: calc(8 * var(--u)); }
+  .nm-btn { height: calc(8 * var(--u)); }
+  .nm-zoom button { height: calc(8 * var(--u)); }
+  .nm-btn .hud-ico { width: calc(3.8 * var(--u)); height: calc(3.8 * var(--u)); }
+  .nm-side, .nm-ctl { gap: calc(1 * var(--u)); }
+  .nm-mode { font-size: calc(2.8 * var(--u)); }
+  .hud-after { display: grid; justify-items: center; align-content: center; gap: calc(.4 * var(--u)); min-width: calc(13 * var(--u)); padding: calc(1.4 * var(--u)) calc(1.4 * var(--u)); border-radius: calc(2.4 * var(--u)); background: linear-gradient(180deg, rgba(34, 110, 64, .6), rgba(14, 58, 34, .7)); border: 1px solid rgba(68, 240, 124, .5); color: var(--hud-green); font: inherit; }
+  .hud-after svg { width: calc(6 * var(--u)); height: calc(6 * var(--u)); fill: none; stroke: currentColor; stroke-width: 2.8; stroke-linecap: round; stroke-linejoin: round; }
+  .hud-after svg .head { fill: currentColor; stroke-width: 1.2; }
+  .hud-after svg .ring { opacity: .4; stroke-width: 2; }
+  .hud-after b { font-size: calc(2.6 * var(--u)); font-weight: 800; white-space: nowrap; }
+  .hud-after small { font-size: calc(2.2 * var(--u)); color: #d6f5df; white-space: nowrap; }
+  .hud-after .hud-after-more { width: calc(3.4 * var(--u)); height: calc(3.4 * var(--u)); opacity: .8; }
+  .nm-progress { grid-area: progress; display: flex; align-items: center; position: relative; z-index: 2; padding: calc(1.2 * var(--u)) calc(2.6 * var(--u)); border-radius: calc(2.6 * var(--u)); background: var(--nm-glass); border: 1px solid var(--nm-edge); box-shadow: 0 10px 28px rgba(0, 0, 0, .38), inset 0 1px 0 rgba(255, 255, 255, .07); color: #eef3f6; }
+  .nm-progress-item { display: flex; align-items: center; gap: calc(1.6 * var(--u)); padding-right: calc(3 * var(--u)); margin-right: calc(3 * var(--u)); border-right: 1px solid rgba(140, 175, 195, .2); }
+  .nm-progress-item .hud-ico { width: calc(4.6 * var(--u)); height: calc(4.6 * var(--u)); color: #dfe7ee; }
+  .nm-progress-item > span { display: grid; line-height: 1.1; }
+  .nm-progress-item b { font-size: calc(3.8 * var(--u)); font-weight: 850; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .nm-progress-item small { color: var(--hud-dim); font-size: calc(2.1 * var(--u)); white-space: nowrap; }
+  .nm-progress-item.bad b { color: var(--red); }
+  .nm-progress-track { flex: 1; min-width: 0; display: grid; justify-items: center; gap: calc(.9 * var(--u)); }
+  .nm-progress-bar { position: relative; width: 100%; height: calc(.9 * var(--u)); border-radius: 99px; background: rgba(140, 175, 195, .25); }
+  .nm-progress-bar i { position: absolute; left: 0; top: 0; bottom: 0; border-radius: inherit; background: var(--hud-green); box-shadow: 0 0 calc(1 * var(--u)) rgba(68, 240, 124, .45); }
+  .nm-progress-bar em { position: absolute; top: 50%; width: calc(2 * var(--u)); height: calc(2 * var(--u)); margin: calc(-1 * var(--u)) 0 0 calc(-1 * var(--u)); border-radius: 50%; background: #0d1820; border: 2px solid #cfdae2; }
+  .nm-progress-bar em.stop { border-color: var(--amber); }
+  .nm-progress-track small { color: var(--hud-dim); font-size: calc(2.1 * var(--u)); }
 }
 
 .nav-trip { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 10px 0 4px; }

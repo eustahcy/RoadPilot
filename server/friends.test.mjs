@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { cleanPresence, friendView, PRESENCE_TTL_MS } from "./friends.mjs";
+import { cleanPresence, friendView, LAST_SEEN_MAX_MS, PRESENCE_TTL_MS } from "./friends.mjs";
 
 const now = 1_800_000_000_000;
 
@@ -28,10 +28,11 @@ describe("friendView", () => {
     expect(friendView(base, 1, now)).toMatchObject({ id: 2, name: "kolega", relation: "invited", presence: null });
     expect(friendView(base, 2, now)).toMatchObject({ id: 1, relation: "pending" });
   });
-  it("obecność tylko po akceptacji i tylko świeża", () => {
+  it("obecność tylko po akceptacji; stara jako offline (ostatnia znana), bardzo stara znika", () => {
     const acc = { ...base, accepted_at: "2026-09-30 10:00:00", presence: JSON.stringify({ lat: 1, lon: 2, status: "driving" }), presence_at: new Date(now - 60_000) };
     expect(friendView(acc, 1, now).presence).toEqual({ lat: 1, lon: 2, status: "driving", at: now - 60_000 });
-    expect(friendView({ ...acc, presence_at: new Date(now - PRESENCE_TTL_MS - 1) }, 1, now).presence).toBeNull();
+    expect(friendView({ ...acc, presence_at: new Date(now - PRESENCE_TTL_MS - 1) }, 1, now).presence).toEqual({ lat: 1, lon: 2, status: "driving", at: now - PRESENCE_TTL_MS - 1, offline: true });
+    expect(friendView({ ...acc, presence_at: new Date(now - LAST_SEEN_MAX_MS - 1) }, 1, now).presence).toBeNull();
     expect(friendView({ ...acc, accepted_at: null }, 1, now).presence).toBeNull();
   });
 });

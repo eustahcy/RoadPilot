@@ -99,6 +99,21 @@ export function nearestStation<T extends { lat: number; lon: number } = Station>
   return bestAhead ?? best;
 }
 
+/**
+ * Miejsca przed nami w linii prostej (bez trasy): do `maxKm`, w stożku ±STATIONS.aheadDeg od kierunku jazdy,
+ * od najbliższego. Bez kierunku (stoimy od początku) — wszystkie w promieniu.
+ */
+export function placesAhead<T extends { lat: number; lon: number }>(list: T[], pos: { lat: number; lon: number }, heading: number | null, maxKm: number): { item: T; km: number }[] {
+  const out: { item: T; km: number }[] = [];
+  for (const item of list) {
+    const km = distanceM(pos, item) / 1000;
+    if (km > maxKm) continue;
+    if (heading !== null && angleDiff(bearingDeg(pos, item), heading) > STATIONS.aheadDeg) continue;
+    out.push({ item, km });
+  }
+  return out.sort((a, b) => a.km - b.km);
+}
+
 function angleDiff(a: number, b: number) {
   const d = Math.abs(a - b) % 360;
   return d > 180 ? 360 - d : d;

@@ -72,6 +72,8 @@ src/core/navmatch.ts  prowadzenie: pointAtKm, bearingAtKm, routeSlice, locate (r
                    speedLimitAt trzyma ostatni limit do NAV.limitCarryKm za końcem odcinka (luki w danych TomTom); speedTone ok/warn/over (NAV.overWarnKmh = 5)
                    legalLimitAt = min(znak, TRUCK_SPEED[rodzaj drogi z NavRoute.roads]) — wyższy znak ciężarówki nie dotyczy (ignoredSign)
                    bez trasy / poza nią: pushTrail (ślad GPS, HERE) → nav.ts useLimitHere → POST /api/nav/here (trace_attributes map_snap, limitHere)
+                   „Po drodze” (NavView AheadSheet, przycisk P): MOP-y / parkingi TIR / stacje do AHEAD_KM 30 km — z trasą route.pois (km po trasie, poiVisible),
+                   bez trasy GET /api/nav/nearby (osm_pois w promieniu NEARBY_KM) → nav.ts useNearbyPois → core/stations placesAhead (kierunek ±aheadDeg, linia prosta)
 src/components/SectionControl.tsx  useSectionRun (stan odcinka z odczytów GPS), sectionView (zapowiedź / w trakcie / podsumowanie), SectionPanel w karcie HudNav (prop section)
 src/components/MapView.tsx  useMapGestures (1 palec = przesuwanie, 2 = szczypanie, kółko; tłumi klik po przeciągnięciu) + moveView (punkt pod palcem
                    zostaje pod palcem, z obrotem i przybliżeniem pochylenia; testy src/mapGestures.test.ts) — MapView z onMove, RouteCompare, HudRouteMap
@@ -104,7 +106,7 @@ src/floating.ts    pływające okienko: canvas → captureStream → <video> →
 src/install.ts     useInstall: beforeinstallprompt łapane przy wczytaniu modułu, isStandalone; InstallButton.tsx = przycisk + instrukcja iOS
 src/launch.ts      platform() z userAgent, launch(): otwiera link z apps.ts (iOS: po 1,5 s bez przejścia → strona)
 src/nearby.ts      HUD: useStations, useParkings, useRoads (Overpass, z serwerem zapasowym) i useWeather (Open-Meteo)
-src/App.tsx        jedyne miejsce łączące stan z silnikiem (useMemo); activePlan = wybór kierowcy (AppState.choice) → plan pod rozładunek → zalecany; zakładki: Plan/Trasa/Nawigacja/Tachograf/Historia/Ustawienia;
+src/App.tsx        jedyne miejsce łączące stan z silnikiem (useMemo); activePlan = wybór kierowcy (AppState.choice) → plan pod rozładunek → zalecany; zakładki na pasku: Plan/Trasa/Nawigacja (zielona bańka na środku)/Historia/Ustawienia — Tachograf (tab "driver") jest w Trasie (przełącznik .subtabs);
                    gdy state.hud — renderuje tylko HudView; gdy state.navOpen — tylko NavView (zakładka „Nawigacja” = osobny ekran na cały ekran)
 src/components/NavView.tsx  nawigacja jako osobny system (nie HUD): HudRouteMap + HudNav (karta manewru), głos, ostrzeżenia, wyszukiwanie celu, zgłoszenia, postój;
                    HUD dostaje trasę tylko jako dane (navRoute: km po trasie do MOP-u/znajomych, limit do koloru prędkości)
@@ -119,8 +121,8 @@ src/friends.ts     useFriends: GET /api/friends co 30 s (gdy widoczna), POST /ap
                    + ≥1 zaakceptowany znajomy; wyłączenie → POST {off:true} kasuje obecność. Friends.tsx = karta na Planie, Ustawienia → Znajomi
                    (status + „Gdzie jest”: MapView z pozycją przy Premium, inaczej link do map), kafelek HUD
 public/sw.js       service worker (cache "roadpilot-vN"): nawigacja network-first, assets cache-first, /api/ zawsze z sieci
-server/friends.mjs   znajomi: cleanPresence (walidacja obecności, pozycja do 1e-4°), friendView (relation accepted/invited/pending, obecność tylko
-                   świeża ≤ PRESENCE_TTL 10 min); tabele friends (user_id zaprasza friend_id, accepted_at) i presence (JSON, 1 wiersz na konto);
+server/friends.mjs   znajomi: cleanPresence (walidacja obecności, pozycja do 1e-4°), friendView (relation accepted/invited/pending, obecność ≤
+                   PRESENCE_TTL 10 min = na żywo; starsza do 7 dni z offline: true = ostatnia pozycja, szara strzałka na mapie); tabele friends (user_id zaprasza friend_id, accepted_at) i presence (JSON, 1 wiersz na konto);
                    /api/friends (GET), /api/friends/invite|accept (POST), DELETE /api/friends, POST /api/presence — wszystkie z kontem
 server/            RoadPilot API: index.mjs (node:http + mysql2), schema.sql; nav.mjs = TomTom (routeUrl, parseRoute, parseSearch) + nav.test.mjs;
                    /api/nav/* tylko Premium (users.premium_until / role=admin) + limit na IP + dzienny limit na konto + budżet TomTom

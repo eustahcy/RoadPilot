@@ -1,8 +1,10 @@
 // Znajomi: sprawdzanie danych obecności wysyłanych przez aplikację i składanie widoku znajomego dla drugiej strony.
 // Bez bazy — czyste funkcje (testy w friends.test.mjs); zapytania SQL są w index.mjs.
 
-/** Po tylu ms bez odświeżenia obecność jest nieaktualna (aplikacja zamknięta, brak sieci). */
+/** Po tylu ms bez odświeżenia obecność jest nieaktualna (aplikacja zamknięta, brak sieci) — znajomy widzi ją jako „ostatnio”. */
 export const PRESENCE_TTL_MS = 10 * 60_000;
+/** Ostatnią pozycję pokazujemy najwyżej tyle po zamknięciu aplikacji. */
+export const LAST_SEEN_MAX_MS = 7 * 86_400_000;
 
 export const PRESENCE_STATUSES = new Set(["driving", "standing", "break", "rest", "dayEnd"]);
 
@@ -44,16 +46,17 @@ export function cleanPresence(body, now) {
 /**
  * Wiersz z bazy (users + friends + presence) → znajomy w odpowiedzi API.
  * `relation`: accepted = widzimy się nawzajem; invited = my zaprosiliśmy, czeka; pending = zaprosili nas, do akceptacji.
- * Obecność tylko dla zaakceptowanych i tylko świeża — inaczej null.
+ * Obecność tylko dla zaakceptowanych; starsza niż PRESENCE_TTL_MS ma offline: true (ostatnia znana), starsza niż LAST_SEEN_MAX_MS → null.
+ * Wyłączenie udostępniania kasuje obecność, więc wtedy też null.
  */
 export function friendView(row, me, now) {
   const relation = row.accepted_at ? "accepted" : row.user_id === me ? "invited" : "pending";
   let presence = null;
   if (relation === "accepted" && row.presence) {
     const at = new Date(row.presence_at).getTime();
-    if (now - at <= PRESENCE_TTL_MS) {
+    if (now - at <= LAST_SEEN_MAX_MS) {
       try {
-        presence = { ...JSON.parse(row.presence), at };
+        presence = { ...JSON.parse(row.presence), at, ...(now - at > PRESENCE_TTL_MS ? { offline: true } : {}) };
       } catch {
         presence = null;
       }

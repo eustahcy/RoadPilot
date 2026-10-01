@@ -299,3 +299,26 @@ export function useLimitHere(token: string | undefined, live: { lat: number; lon
 
   return here && live && distanceM(here, live) <= HERE.validM ? here : null;
 }
+
+/** Stacja / MOP / parking TIR wokół pozycji (bez trasy) — z bazy OSM na serwerze. */
+export type NearbyPoi = Pick<RoutePoi, "id" | "kind" | "name" | "truck" | "lat" | "lon">;
+
+/** Pobieramy ponownie po tylu km jazdy (serwer zwraca ok. 32 km wokół, lista sięga 30 km przed nami). */
+const NEARBY_REFETCH_KM = 8;
+
+/** Miejsca wokół pozycji do listy „Po drodze” bez trasy (Premium); błąd / brak sieci — ponowna próba po NEARBY_REFETCH_KM. */
+export function useNearbyPois(token: string | undefined, live: { lat: number; lon: number; t: number } | null, enabled: boolean): NearbyPoi[] | null {
+  const [pois, setPois] = useState<NearbyPoi[] | null>(null);
+  const at = useRef<{ lat: number; lon: number } | null>(null);
+  const on = enabled && !!token;
+  useEffect(() => {
+    if (!on || !live) return;
+    if (at.current && distanceM(at.current, live) < NEARBY_REFETCH_KM * 1000) return;
+    at.current = { lat: live.lat, lon: live.lon };
+    api<{ pois: NearbyPoi[] }>("GET", `/nav/nearby?lat=${live.lat.toFixed(4)}&lon=${live.lon.toFixed(4)}`, undefined, token)
+      .then((r) => setPois(r.pois))
+      .catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [on, live?.t, token]);
+  return on ? pois : null;
+}

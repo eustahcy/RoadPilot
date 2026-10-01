@@ -259,7 +259,7 @@ function requirePremium(user) {
   if (!hasPremium(user)) throw new HttpError(403, "Nawigacja jest dostępna w RoadPilot Premium.");
 }
 
-const NAV_LIMITS = { search: { max: 120, windowMs: 10 * 60_000 }, route: { max: 30, windowMs: 10 * 60_000 }, here: { max: 600, windowMs: 10 * 60_000 } };
+const NAV_LIMITS = { search: { max: 120, windowMs: 10 * 60_000 }, route: { max: 30, windowMs: 10 * 60_000 }, here: { max: 600, windowMs: 10 * 60_000 }, nearby: { max: 60, windowMs: 10 * 60_000 } };
 
 // Limity darmowego planu TomTom (z panelu my.tomtom.com) — nie przekraczamy BUDGET_SHARE z nich.
 // Okres: miesiąc (bezpieczniej) albo dzień — TOMTOM_PERIOD=day, jeśli limity w panelu są dzienne.
@@ -656,6 +656,25 @@ routes["POST /api/nav/warnings"] = async (req, user) => {
 };
 
 /** Stacje paliw, MOP-y i parkingi TIR przy trasie (pinezki na mapie) — z osm_pois, bez kosztów TomTom. */
+/** Promień (km) miejsc wokół pozycji — lista „po drodze” bez wyznaczonej trasy. */
+const NEARBY_KM = 32;
+
+/**
+ * Stacje, MOP-y i parkingi TIR wokół pozycji (bez trasy). Które są przed nami, liczy aplikacja z kierunku jazdy —
+ * pobiera raz na kilka km, a filtr kierunku zmienia się z każdym odczytem.
+ */
+routes["GET /api/nav/nearby"] = async (req, user) => {
+  requirePremium(user);
+  navThrottle("nearby", req);
+  const u = new URL(req.url, "http://x");
+  const at = validPoint({ lat: Number(u.searchParams.get("lat")), lon: Number(u.searchParams.get("lon")) });
+  if (!at) throw new HttpError(400, "Brak pozycji.");
+  const dLat = NEARBY_KM / 111;
+  const dLon = NEARBY_KM / (111 * Math.cos((at.lat * Math.PI) / 180));
+  const [rows] = await db.query("SELECT osm_id, kind, lat, lon, name, truck FROM osm_pois WHERE lat BETWEEN ? AND ? AND lon BETWEEN ? AND ?", [at.lat - dLat, at.lat + dLat, at.lon - dLon, at.lon + dLon]);
+  return [200, { pois: rows.map((r) => ({ id: r.osm_id, kind: r.kind, name: r.name, truck: !!r.truck, lat: r.lat, lon: r.lon })) }];
+};
+
 async function findPois(pts) {
   const out = [];
   for (const box of routeBoxes(pts, 25, 0.004)) {

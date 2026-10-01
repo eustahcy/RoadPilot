@@ -39,8 +39,21 @@ export interface Friend {
   email: string;
   /** accepted = widzimy się; invited = my zaprosiliśmy, czeka; pending = zaprosili nas, do akceptacji. */
   relation: "accepted" | "invited" | "pending";
-  /** null = brak świeżego sygnału (aplikacja zamknięta, GPS lub udostępnianie wyłączone). */
-  presence: (Presence & { at: number }) | null;
+  /** null = brak sygnału (udostępnianie wyłączone albo ostatni sygnał sprzed ponad tygodnia). */
+  presence: FriendPresence | null;
+}
+
+/** Obecność z serwera: `at` = kiedy przyszła; offline = ponad 10 min bez sygnału (aplikacja zamknięta, brak sieci) — to ostatnia znana pozycja. */
+export type FriendPresence = Presence & { at: number; offline?: boolean };
+
+/** „przed chwilą”, „35 min temu”, „3 h temu”, „wczoraj”, „4 dni temu”. */
+export function fmtAgo(ms: number): string {
+  const min = Math.max(0, ms) / 60_000;
+  if (min < 1.5) return "przed chwilą";
+  if (min < 60) return `${Math.round(min)} min temu`;
+  if (min < 24 * 60) return `${Math.floor(min / 60)} h temu`;
+  const days = Math.floor(min / (24 * 60));
+  return days === 1 ? "wczoraj" : `${days} dni temu`;
 }
 
 /** Poniżej tej prędkości uznajemy, że stoi (bez oznaczonego postoju). */
@@ -78,6 +91,8 @@ export const STATUS_LABEL: Record<PresenceStatus, string> = {
 };
 
 export interface FriendInfo {
+  /** Brak sygnału — pozycja i status to ostatnie znane. */
+  offline?: boolean;
   /** Odległość od nas (km) — po trasie, gdy znajomy jest na naszej trasie (onRoute), inaczej w linii prostej; undefined bez własnej pozycji. */
   km?: number;
   onRoute?: boolean;
@@ -91,11 +106,13 @@ export interface FriendInfo {
 }
 
 /** Opis znajomego do listy i kafelka. `me` = nasza pozycja (może jej nie być), `route` = nasza trasa (km po niej, gdy znajomy przy niej). */
-export function describeFriend(p: Presence & { at: number }, me: { lat: number; lon: number } | null, now: number, route?: MyRoute): FriendInfo {
+export function describeFriend(p: FriendPresence, me: { lat: number; lon: number } | null, now: number, route?: MyRoute): FriendInfo {
   const along = route ? alongRoute(route.points, p, route.km) : undefined;
   const km = along ? Math.abs(along.km) : me ? distanceM(me, p) / 1000 : undefined;
   const onRoute = along ? true : me ? false : undefined;
   const ahead = along ? along.km >= 0 : undefined;
+  // Bez sygnału czas postoju / jazdy liczony do „teraz” byłby zmyślony — tylko kiedy był ostatni sygnał.
+  if (p.offline) return { km, onRoute, ahead, offline: true, status: "Brak sygnału", duration: `ostatnio ${fmtAgo(now - p.at)}` };
   const elapsed = p.since !== null ? Math.max(0, (now - p.since) / 60_000) : undefined;
   let duration = "";
   let tone: FriendInfo["tone"];
@@ -111,11 +128,14 @@ export function describeFriend(p: Presence & { at: number }, me: { lat: number; 
   return { km, onRoute, ahead, status: STATUS_LABEL[p.status], duration, tone };
 }
 
-/** Najbliższy znajomy z sygnałem — do kafelka HUD. Z trasą: najpierw po trasie (w obie strony), reszta w linii prostej. */
+/** Najbliższy znajomy z sygnałem — do kafelka HUD. Z trasą: najpierw po trasie (w obie strony), reszta w linii prostej.
+ *  Znajomi bez sygnału (ostatnia pozycja) tylko wtedy, gdy nikt nie nadaje. */
 export function nearestFriend(friends: Friend[], me: { lat: number; lon: number } | null, route?: MyRoute): { friend: Friend; km?: number } | undefined {
+  const withPos = friends.filter((f) => f.relation === "accepted" && f.presence);
+  const live = withPos.filter((f) => !f.presence!.offline);
   let best: { friend: Friend; km?: number } | undefined;
-  for (const f of friends) {
-    if (f.relation !== "accepted" || !f.presence) continue;
+  for (const f of live.length ? live : withPos) {
+    if (!f.presence) continue;
     const along = route ? alongRoute(route.points, f.presence, route.km) : undefined;
     const km = along ? Math.abs(along.km) : me ? distanceM(me, f.presence) / 1000 : undefined;
     if (!best || (km !== undefined && (best.km === undefined || km < best.km))) best = { friend: f, km };

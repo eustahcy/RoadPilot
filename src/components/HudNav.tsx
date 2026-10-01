@@ -4,7 +4,7 @@ import { alongRoute, bearingAtKm, isOffRoute, lanesAhead, locate, NAV, NavInstru
 import { isAhead, jamMatters, jamTone, NavPlace, NavRoute, RoutePoi, TrafficSection, warningText } from "../nav";
 import { GlLine, GlMapView, GlMarker, GlVector } from "./GlMap";
 import { LatLon, moveView, useMapGestures } from "./MapView";
-import { Friend, STATUS_LABEL } from "../core/friends";
+import { fmtAgo, Friend, STATUS_LABEL } from "../core/friends";
 import { fmtDuration } from "../core/scenarios";
 import { distanceM } from "../core/gps";
 
@@ -382,7 +382,7 @@ export interface PinInfo {
   viaIndex?: number;
 }
 
-const POI_TITLE: Record<RoutePoi["kind"], string> = { fuel: "Stacja paliw", services: "MOP ze stacją i barem", mop: "MOP — miejsce odpoczynku", parking: "Parking dla ciężarówek" };
+export const POI_TITLE: Record<RoutePoi["kind"], string> = { fuel: "Stacja paliw", services: "MOP ze stacją i barem", mop: "MOP — miejsce odpoczynku", parking: "Parking dla ciężarówek" };
 
 /** Stacje / MOP-y / parkingi, fotoradary / odcinki i punkty pośrednie na kawałku trasy [fromKm, toKm] → znaczniki mapy; `gapKm` — min. odstęp. */
 function routePins(route: NavRoute, fromKm: number, toKm: number, gapKm = 0): { markers: GlMarker[]; info: PinInfo[] } {
@@ -442,7 +442,7 @@ function routePins(route: NavRoute, fromKm: number, toKm: number, gapKm = 0): { 
 }
 
 /** Na autostradzie i ekspresówce miejsce po lewej jest dla przeciwnego kierunku — nie zjedziemy tam. */
-function poiVisible(route: NavRoute, p: RoutePoi) {
+export function poiVisible(route: NavRoute, p: RoutePoi) {
   if (p.side === "right") return true;
   const t = roadTypeAt(route, p.km);
   return t !== "motorway" && t !== "expressway";
@@ -535,7 +535,7 @@ export function HudRouteMap({ nav, track, live, token, anchorY = 0.8, zoomOffset
     lastLabel = j.t.km;
     return true;
   });
-  // Znajomi z sygnałem: punkt + imię i km od nas (bez limitu odległości — mapa i tak pokazuje tylko okolicę).
+  // Znajomi: punkt + imię i km od nas (bez sygnału — szara strzałka w ostatniej pozycji) (bez limitu odległości — mapa i tak pokazuje tylko okolicę).
   // Km po trasie, gdy znajomy jest przy naszej trasie; inaczej w linii prostej.
   const mates = (friends ?? []).filter((f) => f.relation === "accepted" && f.presence).map((f) => {
     const along = route && pos && !track.off ? alongRoute(route.points, f.presence!, pos.km) : undefined;
@@ -566,14 +566,14 @@ export function HudRouteMap({ nav, track, live, token, anchorY = 0.8, zoomOffset
   pinInfo.current = new Map(pins.info.map((p) => [p.key, p]));
   for (const { f, p, km: fkm } of mates) {
     const moving = p.status === "driving";
-    // Etykieta: imię · km od nas · prędkość (w ruchu) albo rodzaj postoju i ile trwa.
-    const extra = moving ? (p.kmh !== null ? `${p.kmh} km/h` : "") : `${STATUS_LABEL[p.status].toLowerCase()}${p.since !== null ? ` ${fmtDuration(Math.max(0, ((live?.t ?? Date.now()) - p.since) / 60_000))}` : ""}`;
+    // Etykieta: imię · km od nas · prędkość (w ruchu) albo rodzaj postoju i ile trwa; bez sygnału — kiedy był ostatni.
+    const extra = p.offline ? fmtAgo((live?.t ?? Date.now()) - p.at) : moving ? (p.kmh !== null ? `${p.kmh} km/h` : "") : `${STATUS_LABEL[p.status].toLowerCase()}${p.since !== null ? ` ${fmtDuration(Math.max(0, ((live?.t ?? Date.now()) - p.since) / 60_000))}` : ""}`;
     const text = [f.name, fkm !== undefined ? `${fkm < 10 ? fkm.toFixed(1).replace(".", ",") : Math.round(fkm)} km` : "", extra].filter(Boolean).join(" · ");
     const w = text.length * 7.6 + 16;
     const heading = moving && p.heading !== null ? p.heading : null;
     // Strzałka obrócona o kierunek znajomego względem kierunku mapy (u góry jest nasz kierunek jazdy); etykieta zawsze prosto.
-    markers.push({ key: `fa${f.id}`, lat: p.lat, lon: p.lon, rotate: heading === null ? undefined : (b) => heading - b, node: <path className={`hud-map-friend-arrow ${moving ? "" : "stopped"}`} d="M0 -24 L17 19 L0 10 L-17 19 Z" /> });
-    markers.push({ key: `f${f.id}`, lat: p.lat, lon: p.lon, node: <g className="hud-map-friend"><rect x={-w / 2} y={-48} width={w} height={22} rx={11} /><text x={0} y={-32}>{text}</text></g> });
+    markers.push({ key: `fa${f.id}`, lat: p.lat, lon: p.lon, rotate: heading === null ? undefined : (b) => heading - b, node: <path className={`hud-map-friend-arrow ${p.offline ? "offline" : moving ? "" : "stopped"}`} d="M0 -24 L17 19 L0 10 L-17 19 Z" /> });
+    markers.push({ key: `f${f.id}`, lat: p.lat, lon: p.lon, node: <g className={`hud-map-friend ${p.offline ? "offline" : ""}`}><rect x={-w / 2} y={-48} width={w} height={22} rx={11} /><text x={0} y={-32}>{text}</text></g> });
   }
 
   if (browse) {

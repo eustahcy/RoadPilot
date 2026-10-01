@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { bearingDeg, distanceM, Fix, nextLive } from "./gps";
 import { serviceStatus } from "./service";
-import { nearestStation, parseOverpass, parseParkings, Station } from "./stations";
+import { nearestStation, parseOverpass, parseParkings, Station, placesAhead } from "./stations";
 import { describeWeather, isHazard } from "./weather";
 
 const NOW = Date.UTC(2026, 8, 30, 12, 0);
@@ -111,5 +111,21 @@ describe("parkingi i MOP-y", () => {
     ] });
     expect(p.map((x) => [x.kind, x.name])).toEqual([["mop", "MOP Wiskitki"], ["services", "MOP"], ["truck", "Parking TIR"]]);
     expect(nearestStation(p, { lat: 52.15, lon: 21 }, 0)?.station.id).toBe("node/3");
+  });
+});
+
+describe("placesAhead", () => {
+  const pos = { lat: 52, lon: 19 };
+  const north = { lat: 52.1, lon: 19 }; // ~11 km przed nami
+  const south = { lat: 51.95, lon: 19 }; // za nami
+  const far = { lat: 52.4, lon: 19 }; // ~44 km
+  const nearNorth = { lat: 52.03, lon: 19.01 };
+  it("tylko przed nami (±70°) i do maxKm, od najbliższego", () => {
+    const r = placesAhead([north, south, far, nearNorth], pos, 0, 30);
+    expect(r.map((x) => x.item)).toEqual([nearNorth, north]);
+    expect(r[1].km).toBeCloseTo(11.1, 0);
+  });
+  it("bez kierunku — wszystkie w promieniu", () => {
+    expect(placesAhead([north, south, far], pos, null, 30)).toHaveLength(2);
   });
 });

@@ -7,12 +7,13 @@ import { Plan } from "../core/plan";
 import { Route } from "../core/route";
 import { fmtDuration } from "../core/scenarios";
 import { fmtClock, fmtKm } from "../format";
-import { insertVia, isAhead, NavPlace, NavRoute, RouteWarning, useLimitHere, viaAhead, warningText } from "../nav";
+import { insertVia, isAhead, NavPlace, NavRoute, RoutePoi, RouteWarning, useLimitHere, useNearbyPois, viaAhead, warningText } from "../nav";
+import { placesAhead } from "../core/stations";
 import { GpsStatus, useWakeLock } from "../tracking";
 import { SectionVoice, useNavVoice } from "../voice";
 import { AlertVote } from "./AlertVote";
 import { GlVector } from "./GlMap";
-import { HudNav, HudNavData, HudRouteMap, MapBrowse, NavTrack, PinInfo, useNavTrack } from "./HudNav";
+import { HudNav, HudNavData, HudRouteMap, MapBrowse, NavTrack, PinInfo, POI_TITLE, poiVisible, useNavTrack } from "./HudNav";
 import { LatLon, MAX_VIEW_ZOOM, MIN_VIEW_ZOOM } from "./MapView";
 import { HudPlanner, HudRoutePicker } from "./HudRoutePicker";
 import { arrivalInfo, fullscreenSupported, Icon, isStop, routeRefs, STALE_MS, toggleFullscreen, useFullscreen, useTick } from "./HudView";
@@ -68,6 +69,7 @@ export function NavView(p: NavViewProps) {
   const [sheet, setSheet] = useState(false);
   const [reporting, setReporting] = useState(false);
   const [warnList, setWarnList] = useState(false);
+  const [aheadList, setAheadList] = useState(false);
   const [planning, setPlanning] = useState(false);
   const [zoomOffset, setZoomOffset] = useState(0);
   /** Mapa przesunięta palcem — null = prowadzenie (mapa jedzie za nami). */
@@ -97,6 +99,8 @@ export function NavView(p: NavViewProps) {
   // Ograniczenie z trasy; bez trasy albo poza nią — z drogi, którą jedziemy (ślad GPS dopasowany na serwerze).
   const onRoute = !!route && !!pos && !track.off;
   const here = useLimitHere(p.mapToken, fresh, !onRoute);
+  // Lista „Po drodze” bez trasy: miejsca wokół pobieramy dopiero po otwarciu listy.
+  const nearby = useNearbyPois(p.mapToken, fresh, aheadList && !onRoute);
   const limit = onRoute ? legalLimitAt(route, pos.km, p.truck)?.kmh : here ? legalLimitAt(here, Math.max(0, here.km - 0.005), p.truck)?.kmh : undefined;
   const legal = limit !== undefined && p.vehicleMaxKmh !== undefined ? Math.min(limit, p.vehicleMaxKmh) : limit ?? p.vehicleMaxKmh;
   const tone = speedTone(speed, legal);
@@ -180,6 +184,9 @@ export function NavView(p: NavViewProps) {
           <Icon name="warning" />
           {upcoming.length > 0 && <em>{upcoming.length}</em>}
         </button>
+        <button className="nm-btn" onClick={() => setAheadList(true)} aria-label="Po drodze: MOP-y, parkingi i stacje">
+          <Icon name="parking" />
+        </button>
         {p.report && (
           <button className="nm-btn report" onClick={() => { setReporting(true); setMenu(false); }} aria-label="Zgłoś na drodze">
             <Icon name="flag" />
@@ -250,6 +257,23 @@ export function NavView(p: NavViewProps) {
           </div>
         </div>
       )}
+      {aheadList && (
+        <AheadSheet
+          items={onRoute
+            ? route.pois?.filter((x) => x.km > pos.km && x.km <= pos.km + AHEAD_KM && poiVisible(route, x)).map((x) => ({ poi: x, km: x.km - pos.km, side: x.side, onRoute: true })) ?? []
+            : nearby && fresh ? placesAhead(nearby, fresh, fresh.heading, AHEAD_KM).map(({ item, km }) => ({ poi: item, km, onRoute: false })) : null}
+          premium={!!p.mapToken}
+          gps={!!fresh}
+          onShow={onRoute ? (x) => {
+            const poi = x as RoutePoi;
+            setPin({ key: `p${poi.id}`, kind: poi.kind, title: POI_TITLE[poi.kind], name: poi.name, details: [`${poi.side === "right" ? "Po prawej" : "Po lewej"} stronie, ok. ${Math.round(poi.offM / 10) * 10} m od trasy`], km: poi.km, lat: poi.lat, lon: poi.lon });
+            setHold(null);
+            setBrowse({ center: { lat: poi.lat, lon: poi.lon }, zoom: 15, bearing: 0 });
+            setAheadList(false);
+          } : undefined}
+          onClose={() => setAheadList(false)}
+        />
+      )}
       {p.report && route && !track.off && <AlertVote warnings={route.warnings} km={pos?.km} onVote={p.report.onVote} />}
       {sheet && (
         <div className="hud-sheet" onClick={(e) => e.target === e.currentTarget && setSheet(false)}>
@@ -301,6 +325,78 @@ const MAX_VIA = 5;
  * Karta nad mapą: co to za pinezka i jak daleko — albo propozycja punktu pośredniego po przytrzymaniu mapy.
  * Miejsce z pinezki (stacja, MOP) też można dodać do trasy; punkt pośredni — usunąć.
  */
+/** Lista „Po drodze” sięga tyle km przed nas. */
+const AHEAD_KM = 30;
+/** Najwięcej pozycji na liście (stacji bywa kilkadziesiąt). */
+const AHEAD_MAX = 40;
+
+type AheadFilter = "all" | "mop" | "parking" | "fuel";
+const AHEAD_FILTERS: { id: AheadFilter; label: string; kinds: RoutePoi["kind"][] }[] = [
+  { id: "all", label: "Wszystko", kinds: ["services", "mop", "parking", "fuel"] },
+  { id: "mop", label: "MOP", kinds: ["services", "mop"] },
+  { id: "parking", label: "Parkingi", kinds: ["parking"] },
+  { id: "fuel", label: "Stacje", kinds: ["fuel", "services"] },
+];
+const AHEAD_KIND: Record<RoutePoi["kind"], string> = { services: "MOP ze stacją", mop: "MOP", parking: "Parking TIR", fuel: "Stacja paliw" };
+
+/** Blisko z dokładnością do 0,1 km („1,4 km”), dalej pełne km. */
+const fmtAheadKm = (km: number) => (km < 10 ? `${km.toFixed(1).replace(".", ",")} km` : fmtKm(km));
+
+interface AheadItem {
+  poi: Pick<RoutePoi, "id" | "kind" | "name" | "truck" | "lat" | "lon">;
+  /** Po trasie albo (bez trasy) w linii prostej. */
+  km: number;
+  side?: "left" | "right";
+  onRoute: boolean;
+}
+
+/** MOP-y, parkingi TIR i stacje do AHEAD_KM przed nami — po trasie, a bez niej w kierunku jazdy (w linii prostej). */
+function AheadSheet({ items, premium, gps, onShow, onClose }: { items: AheadItem[] | null; premium: boolean; gps: boolean; onShow?: (p: AheadItem["poi"]) => void; onClose: () => void }) {
+  const [filter, setFilter] = useState<AheadFilter>("all");
+  const kinds = AHEAD_FILTERS.find((f) => f.id === filter)!.kinds;
+  const shown = items?.filter((x) => kinds.includes(x.poi.kind)).slice(0, AHEAD_MAX);
+  const straight = items?.some((x) => !x.onRoute);
+  return (
+    <div className="hud-sheet" onClick={(e) => e.target === e.currentTarget && onClose()}>
+      <div className="hud-sheet-body">
+        <button className="hud-sheet-close" aria-label="Zamknij" onClick={onClose}>×</button>
+        <div className="stop-label">Po drodze — {AHEAD_KM} km przed Tobą{straight ? " (w linii prostej, bez trasy)" : ""}</div>
+        <div className="nm-ahead-filters" role="radiogroup" aria-label="Rodzaj miejsc">
+          {AHEAD_FILTERS.map((f) => (
+            <button key={f.id} role="radio" aria-checked={filter === f.id} className={filter === f.id ? "active" : ""} onClick={() => setFilter(f.id)}>{f.label}</button>
+          ))}
+        </div>
+        {!premium ? (
+          <p className="muted">Lista miejsc po drodze jest dostępna w RoadPilot Premium.</p>
+        ) : shown === undefined ? (
+          <p className="muted">{gps ? "Wczytuję miejsca w pobliżu…" : "Czekam na pozycję GPS…"}</p>
+        ) : shown.length ? (
+          <ul className="nm-ahead-list">
+            {shown.map((x) => {
+              const sub = [x.poi.name ? AHEAD_KIND[x.poi.kind] : "", x.side ? (x.side === "right" ? "po prawej" : "po lewej") : "", x.poi.truck && x.poi.kind !== "parking" ? "dla TIR" : ""].filter(Boolean).join(" · ");
+              const body = (
+                <>
+                  <i className={`nm-ahead-ico k-${x.poi.kind}`} aria-hidden>
+                    {x.poi.kind === "fuel" ? <svg viewBox="-12 -12 24 24"><path d="M-7 8V-8h9v16zM-5 -6v5h5v-5zM2 -3h2.5l2 2v7a1.5 1.5 0 0 0 3 0V-5l-3-3" fill="#fff" stroke="#fff" strokeWidth="1.2" strokeLinejoin="round" /></svg> : "P"}
+                  </i>
+                  <span className="nm-ahead-name">
+                    <b>{x.poi.name || AHEAD_KIND[x.poi.kind]}</b>
+                    {sub && <small>{sub}</small>}
+                  </span>
+                  <strong className="nm-ahead-km">{fmtAheadKm(x.km)}</strong>
+                </>
+              );
+              return <li key={x.poi.id}>{onShow ? <button onClick={() => onShow(x.poi)}>{body}</button> : <div>{body}</div>}</li>;
+            })}
+          </ul>
+        ) : (
+          <p className="muted">Brak takich miejsc w ciągu {AHEAD_KM} km (dane OpenStreetMap, Polska).</p>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function PinCard({ pin, hold, route, myKm, live, onVia, onClose }: { pin: PinInfo | null; hold: LatLon | null; route: NavRoute; myKm: number | undefined; live: Live | null; onVia: (via: NavPlace[]) => Promise<void>; onClose: () => void }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);

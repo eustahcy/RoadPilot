@@ -6,7 +6,7 @@
 
 import { createHash, randomBytes, scrypt as scryptCb, timingSafeEqual } from "node:crypto";
 import { cleanPoints, cleanReport, inPoland } from "./collect.mjs";
-import { parseValhalla, parseValhallaAlternates, roadInfo, traceChunks, traceRequest, valhallaRequest } from "./valhalla.mjs";
+import { HERE_MAX_POINTS, limitHere, parseValhalla, parseValhallaAlternates, roadInfo, traceChunks, tracePoints, traceRequest, valhallaRequest } from "./valhalla.mjs";
 import { ALERT_KINDS, ALERT_TTL_H, applyVotes, blockingPoints, routeAlerts, routeBoxes, routeWarnings } from "./warnings.mjs";
 import { compareReports, REPORT_TO_OSM } from "./compare.mjs";
 import { parseRoutes, parseSearch, ROUTE_TYPES, routeError, routeUrl, searchUrl, validPoint } from "./nav.mjs";
@@ -259,7 +259,7 @@ function requirePremium(user) {
   if (!hasPremium(user)) throw new HttpError(403, "Nawigacja jest dostępna w RoadPilot Premium.");
 }
 
-const NAV_LIMITS = { search: { max: 120, windowMs: 10 * 60_000 }, route: { max: 30, windowMs: 10 * 60_000 } };
+const NAV_LIMITS = { search: { max: 120, windowMs: 10 * 60_000 }, route: { max: 30, windowMs: 10 * 60_000 }, here: { max: 600, windowMs: 10 * 60_000 } };
 
 // Limity darmowego planu TomTom (z panelu my.tomtom.com) — nie przekraczamy BUDGET_SHARE z nich.
 // Okres: miesiąc (bezpieczniej) albo dzień — TOMTOM_PERIOD=day, jeśli limity w panelu są dzienne.
@@ -444,6 +444,30 @@ const distinct = (main, alts) => alts
  * Trasa dla ciężarówki: silnik wybrany przez kierowcę ("tomtom" / "roadpilot"). Własny działa tylko w Polsce;
  * gdy TomTom jest niedostępny lub wyczerpał limit 80% — w Polsce przechodzimy na własny silnik.
  */
+/**
+ * Ograniczenie prędkości tam, gdzie jedziemy, bez wyznaczonej trasy: ślad z ostatnich odczytów GPS → trace_attributes
+ * (własna Valhalla, tylko Polska). Odpowiedź w formacie trasy (speedLimits, roads), `km` = nasza pozycja na śladzie.
+ */
+routes["POST /api/nav/here"] = async (req, user) => {
+  requirePremium(user);
+  navThrottle("here", req);
+  if (!VALHALLA_URL) throw new HttpError(503, "Brak własnego silnika map na serwerze.");
+  const body = await readJson(req);
+  const list = Array.isArray(body.points) ? body.points.slice(-HERE_MAX_POINTS).map((p) => validPoint({ lat: p?.[0], lon: p?.[1] })) : [];
+  if (list.length < 2 || list.some((p) => !p)) throw new HttpError(400, "Za mało punktów śladu.");
+  if (!list.every((p) => inPoland(p.lat, p.lon))) return [200, { km: 0, speedLimits: [], roads: [] }];
+  const pts = tracePoints(list.map((p) => [p.lat, p.lon]));
+  let r;
+  try {
+    r = await fetch(`${VALHALLA_URL}/trace_attributes`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(traceRequest(pts, true)), signal: AbortSignal.timeout(8_000) });
+  } catch {
+    throw new HttpError(502, "Brak połączenia z silnikiem map.");
+  }
+  // 400 = śladu nie da się dopasować do drogi (parking, teren poza drogami) — po prostu brak ograniczenia.
+  if (!r.ok) return [200, { km: 0, speedLimits: [], roads: [] }];
+  return [200, limitHere(pts, (await r.json()).edges ?? [], await loadZones())];
+};
+
 const MAX_VIA = 5;
 
 routes["POST /api/nav/route"] = async (req, user) => {

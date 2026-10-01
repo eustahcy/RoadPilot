@@ -4,9 +4,10 @@
 /** Dostęp do nawigacji: konto z Premium (admin ma zawsze). */
 export type NavAccess = "guest" | "noPremium" | "premium";
 
+import { useEffect, useRef, useState } from "react";
 import { api } from "./api";
 import { Segment } from "./core/route";
-import { locate, RoadSection } from "./core/navmatch";
+import { HERE, locate, pushTrail, RoadSection, TrailPoint, trailM } from "./core/navmatch";
 import { distanceM } from "./core/gps";
 
 export interface Vehicle {
@@ -246,4 +247,55 @@ export function currentPosition(): Promise<{ lat: number; lon: number }> {
       { enableHighAccuracy: true, timeout: 15_000, maximumAge: 60_000 },
     );
   });
+}
+
+/** Ograniczenie i rodzaj drogi tam, gdzie jedziemy (bez trasy) — w formacie trasy, `km` = nasza pozycja na śladzie. */
+export interface LimitHere {
+  speedLimits: NavRoute["speedLimits"];
+  roads: RoadSection[];
+  km: number;
+  /** Miejsce zapytania — dalej niż HERE.validM od niego odpowiedź już nie obowiązuje. */
+  lat: number;
+  lon: number;
+}
+
+/**
+ * Ograniczenie bez wyznaczonej trasy: zbiera ślad z odczytów GPS i co HERE.askEveryM pyta serwer (Premium).
+ * Wyłączone (np. jedziemy po trasie) — ślad i odpowiedź się zerują, żeby po powrocie nie pokazać starego znaku.
+ */
+export function useLimitHere(token: string | undefined, live: { lat: number; lon: number; t: number } | null, enabled: boolean): LimitHere | null {
+  const [here, setHere] = useState<LimitHere | null>(null);
+  const trail = useRef<TrailPoint[]>([]);
+  const asked = useRef<{ lat: number; lon: number } | null>(null);
+  const busy = useRef(false);
+  const on = enabled && !!token;
+
+  useEffect(() => {
+    if (on) return;
+    trail.current = [];
+    asked.current = null;
+    setHere(null);
+  }, [on]);
+
+  useEffect(() => {
+    if (!on || !live) return;
+    trail.current = pushTrail(trail.current, live);
+    const pts = trail.current;
+    if (busy.current || pts.length < 2 || trailM(pts) < HERE.minM) return;
+    if (asked.current && distanceM(asked.current, live) < HERE.askEveryM) return;
+    const at = { lat: live.lat, lon: live.lon };
+    asked.current = at;
+    busy.current = true;
+    api<Omit<LimitHere, "lat" | "lon">>("POST", "/nav/here", { points: pts }, token)
+      .then((r) => setHere({ ...r, ...at }))
+      // Bez sieci / błąd — spróbujemy po kolejnych HERE.askEveryM.
+      .catch(() => {})
+      .finally(() => {
+        busy.current = false;
+      });
+    // live jako obiekt zmienia się z każdym odczytem — wystarczy czas odczytu
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [on, live?.t, token]);
+
+  return here && live && distanceM(here, live) <= HERE.validM ? here : null;
 }

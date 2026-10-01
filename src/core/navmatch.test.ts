@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { distanceM } from "./gps";
-import { alongRoute, bearingAtKm, isOffRoute, lanesAhead, locate, NAV, nearestOnRoute, nextInstruction, pointAtKm, RoutePoint, routeSlice, speedLimitAt, speedTone } from "./navmatch";
+import { alongRoute, bearingAtKm, HERE, isOffRoute, pushTrail, TrailPoint, trailM, lanesAhead, locate, NAV, nearestOnRoute, nextInstruction, pointAtKm, RoutePoint, routeSlice, speedLimitAt, speedTone } from "./navmatch";
 
 const KM_PER_DEG = distanceM({ lat: 0, lon: 0 }, { lat: 1, lon: 0 }) / 1000;
 /** Trasa na północ po południku 0, punkt co 100 m, 10 km. */
@@ -91,5 +91,18 @@ describe("odległość po trasie", () => {
     expect(n.item.id).toBe("blisko");
     expect(n.km).toBeCloseTo(2.5, 2);
     expect(nearestOnRoute([items[0]], route, 3)).toBeUndefined();
+  });
+});
+
+describe("pushTrail", () => {
+  it("punkty co HERE.stepM, ślad przycięty do HERE.keepM", () => {
+    let t: TrailPoint[] = [];
+    // Co ~11 m na północ: co drugi-trzeci odczyt trafia do śladu.
+    for (let i = 0; i < 100; i++) t = pushTrail(t, { lat: 52 + i * 0.0001, lon: 19 });
+    expect(t.length).toBeGreaterThan(2);
+    for (let i = 1; i < t.length; i++) expect(distanceM({ lat: t[i - 1][0], lon: t[i - 1][1] }, { lat: t[i][0], lon: t[i][1] })).toBeGreaterThanOrEqual(HERE.stepM);
+    expect(trailM(t)).toBeLessThan(HERE.keepM + 40);
+    expect(trailM(t)).toBeGreaterThan(HERE.keepM - 40);
+    expect(t.at(-1)![0]).toBeGreaterThan(52.0095);
   });
 });

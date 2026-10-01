@@ -7,7 +7,7 @@ import { Plan } from "../core/plan";
 import { Route } from "../core/route";
 import { fmtDuration } from "../core/scenarios";
 import { fmtClock, fmtKm } from "../format";
-import { insertVia, isAhead, NavPlace, NavRoute, RouteWarning, viaAhead, warningText } from "../nav";
+import { insertVia, isAhead, NavPlace, NavRoute, RouteWarning, useLimitHere, viaAhead, warningText } from "../nav";
 import { GpsStatus, useWakeLock } from "../tracking";
 import { SectionVoice, useNavVoice } from "../voice";
 import { AlertVote } from "./AlertVote";
@@ -94,7 +94,10 @@ export function NavView(p: NavViewProps) {
   const route = p.nav?.route ?? null;
   const pos = track.pos;
   const next = route && pos && !track.off ? nextInstruction(route.instructions, pos.km) : undefined;
-  const limit = route && pos ? legalLimitAt(route, pos.km, p.truck)?.kmh : undefined;
+  // Ograniczenie z trasy; bez trasy albo poza nią — z drogi, którą jedziemy (ślad GPS dopasowany na serwerze).
+  const onRoute = !!route && !!pos && !track.off;
+  const here = useLimitHere(p.mapToken, fresh, !onRoute);
+  const limit = onRoute ? legalLimitAt(route, pos.km, p.truck)?.kmh : here ? legalLimitAt(here, Math.max(0, here.km - 0.005), p.truck)?.kmh : undefined;
   const legal = limit !== undefined && p.vehicleMaxKmh !== undefined ? Math.min(limit, p.vehicleMaxKmh) : limit ?? p.vehicleMaxKmh;
   const tone = speedTone(speed, legal);
   const sectionRun = useSectionRun(route, pos, track.off, fresh?.t, p.truck).run;

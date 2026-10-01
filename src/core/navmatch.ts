@@ -1,6 +1,7 @@
 // Prowadzenie po trasie z nawigacji: gdzie na trasie jesteśmy, następny manewr, pasy i ograniczenie prędkości.
 // Czyste funkcje — geometria trasy: [lat, lon, km od startu] (server/nav.mjs → parseRoute).
 
+import { distanceM } from "./gps";
 import { TRUCK_SPEED } from "./rules";
 
 export type RoutePoint = [number, number, number];
@@ -219,4 +220,41 @@ export function nearestOnRoute<T extends { lat: number; lon: number }>(items: T[
     if (a && a.km >= 0 && (!best || a.km < best.km)) best = { item, km: a.km };
   }
   return best;
+}
+
+// ── Ograniczenie bez trasy ────────────────────────────────────────────────────────────────────────────
+// Bez wyznaczonej trasy (albo poza nią) serwer dopasowuje do mapy ślad z ostatnich odczytów (/api/nav/here) —
+// kolejność punktów daje kierunek jazdy, więc droga obok czy wiadukt nie mylą.
+
+export const HERE = {
+  /** Punkty śladu co najmniej co tyle metrów. */
+  stepM: 25,
+  /** Długość śladu (m) — wystarczy do dopasowania, a pozycja nie trafia na serwer z dłuższej historii. */
+  keepM: 400,
+  /** Najwięcej punktów śladu. */
+  maxPoints: 20,
+  /** Ślad musi mieć tyle metrów, żeby było co dopasować. */
+  minM: 60,
+  /** Pytamy ponownie po tylu metrach jazdy. */
+  askEveryM: 150,
+  /** Odpowiedź ważna, dopóki nie odjedziemy dalej niż tyle metrów od miejsca zapytania. */
+  validM: 600,
+} as const;
+
+export type TrailPoint = [lat: number, lon: number];
+
+/** Dokłada odczyt do śladu (co HERE.stepM) i przycina ślad od początku do HERE.keepM / HERE.maxPoints. */
+export function pushTrail(trail: TrailPoint[], p: { lat: number; lon: number }): TrailPoint[] {
+  const last = trail[trail.length - 1];
+  if (last && distanceM({ lat: last[0], lon: last[1] }, p) < HERE.stepM) return trail;
+  const out = [...trail, [p.lat, p.lon] as TrailPoint].slice(-HERE.maxPoints);
+  while (out.length > 2 && trailM(out.slice(1)) >= HERE.keepM) out.shift();
+  return out;
+}
+
+/** Długość śladu (m). */
+export function trailM(trail: TrailPoint[]): number {
+  let m = 0;
+  for (let i = 1; i < trail.length; i++) m += distanceM({ lat: trail[i - 1][0], lon: trail[i - 1][1] }, { lat: trail[i][0], lon: trail[i][1] });
+  return m;
 }

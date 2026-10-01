@@ -160,11 +160,12 @@ export function traceChunks(points, maxKm = TRACE_CHUNK_KM) {
   return out.map((pts) => ({ fromKm: pts[0][2], toKm: pts[pts.length - 1][2], pts }));
 }
 
-export function traceRequest(pts) {
+/** `gps` — ślad z odczytów GPS (szum kilku–kilkunastu metrów): dopasowanie map_snap zamiast przejścia po geometrii trasy. */
+export function traceRequest(pts, gps = false) {
   return {
     shape: pts.map(([lat, lon]) => ({ lat, lon })),
     costing: "truck",
-    shape_match: "walk_or_snap",
+    shape_match: gps ? "map_snap" : "walk_or_snap",
     filters: { attributes: ["edge.way_id", "edge.length", "edge.speed_limit", "edge.road_class", "edge.density"], action: "include" },
   };
 }
@@ -212,4 +213,28 @@ export function roadInfo(chunks, zones) {
     speedLimits: merge("kmh").map(({ km, toKm, v }) => ({ km, toKm, kmh: v })),
     roads: merge("kind").map(({ km, toKm, v }) => ({ km, toKm, kind: v })),
   };
+}
+
+// ── Ograniczenie „tu i teraz” bez wyznaczonej trasy ─────────────────────────────────────────────────
+// Ostatnie odczyty GPS (kilkaset metrów jazdy) dopasowujemy do mapy tak samo jak trasę — kierunek wynika z kolejności
+// punktów, więc wiadukt czy jezdnia obok nie mylą. Ograniczenie bierzemy z końca śladu (miejsce, w którym jesteśmy).
+
+/** Najwięcej punktów śladu w jednym zapytaniu. */
+export const HERE_MAX_POINTS = 30;
+
+/** [[lat, lon], …] → punkty [lat, lon, km] z narastającą odległością. */
+export function tracePoints(list) {
+  const out = [];
+  for (const [lat, lon] of list) {
+    const prev = out[out.length - 1];
+    const km = prev ? prev[2] + distanceKm({ latitude: prev[0], longitude: prev[1] }, { latitude: lat, longitude: lon }) : 0;
+    out.push([lat, lon, km]);
+  }
+  return out;
+}
+
+/** Krawędzie dopasowanego śladu → ograniczenia i rodzaj drogi na nim; `km` = koniec śladu (nasza pozycja). */
+export function limitHere(pts, edges, zones) {
+  const km = pts[pts.length - 1][2];
+  return { km: round(km, 3), ...roadInfo([{ fromKm: 0, toKm: km, edges }], zones) };
 }

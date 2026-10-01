@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { decodePolyline6, parseValhalla, roadInfo, traceChunks, valhallaRequest } from "./valhalla.mjs";
+import { decodePolyline6, limitHere, parseValhalla, roadInfo, traceChunks, tracePoints, traceRequest, valhallaRequest } from "./valhalla.mjs";
 
 /** Koder polyline6 — do zbudowania odpowiedzi testowej. */
 function encode(points) {
@@ -78,5 +78,19 @@ describe("ograniczenia i obszar zabudowany z trace_attributes", () => {
     const r = roadInfo([{ fromKm: 0, toKm: 7, edges }], zones);
     expect(r.roads).toEqual([{ km: 0, toKm: 3, kind: "urban" }, { km: 3, toKm: 5, kind: "rural" }, { km: 5, toKm: 7, kind: "motorway" }]);
     expect(r.speedLimits).toEqual([{ km: 0, toKm: 1, kmh: 50 }, { km: 1, toKm: 2, kmh: 70 }, { km: 2, toKm: 3, kmh: 50 }, { km: 3, toKm: 4, kmh: 90 }, { km: 5, toKm: 7, kmh: 140 }]);
+  });
+});
+
+describe("limitHere", () => {
+  it("ślad GPS → km narastająco, dopasowanie map_snap, ograniczenie do końca śladu", () => {
+    const pts = tracePoints([[52, 19], [52.001, 19], [52.002, 19]]);
+    expect(pts[2][2]).toBeCloseTo(0.222, 2);
+    expect(traceRequest(pts, true).shape_match).toBe("map_snap");
+    expect(traceRequest(pts).shape_match).toBe("walk_or_snap");
+    const edges = [{ way_id: 1, length: 0.1, speed_limit: 90, road_class: "primary" }, { way_id: 2, length: 0.12, speed_limit: 50, road_class: "primary" }];
+    const r = limitHere(pts, edges, new Map([[2, "u"]]));
+    expect(r.km).toBeCloseTo(0.222, 2);
+    expect(r.speedLimits.at(-1).kmh).toBe(50);
+    expect(r.roads.at(-1).kind).toBe("urban");
   });
 });

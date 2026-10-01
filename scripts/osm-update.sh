@@ -14,8 +14,8 @@ osmium export truck.osm.pbf -f geojsonseq --add-unique-id=type_id --geometry-typ
 # Fotoradary, odcinkowe pomiary prędkości, kamery na czerwonym (relacje enforcement z węzłami from/to/device).
 osmium tags-filter poland-latest.osm.pbf n/highway=speed_camera r/type=enforcement -o enforcement.osm.pbf --overwrite
 osmium cat enforcement.osm.pbf -f opl -o enforcement.opl --overwrite
-# Pinezki przy trasie: stacje paliw, MOP-y i parkingi (parkingi bez hgv odrzuca poi-import.mjs).
-osmium tags-filter poland-latest.osm.pbf nwr/amenity=fuel,parking nwr/highway=rest_area,services -o pois.osm.pbf --overwrite
+# Pinezki przy trasie: stacje paliw, MOP-y, parkingi (parkingi bez hgv odrzuca poi-import.mjs) i bramki (punkty poboru opłat).
+osmium tags-filter poland-latest.osm.pbf nwr/amenity=fuel,parking nwr/highway=rest_area,services n/barrier=toll_booth -o pois.osm.pbf --overwrite
 osmium export pois.osm.pbf -f geojsonseq --add-unique-id=type_id --geometry-types=point,polygon -o pois.geojsonseq --overwrite
 # Miejscowości do opisu miejsca przekroczenia w historii („Stryków, A2, MOP Niesułków”).
 osmium tags-filter poland-latest.osm.pbf n/place=city,town,village,suburb -o places.osm.pbf --overwrite

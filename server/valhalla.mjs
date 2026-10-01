@@ -2,6 +2,7 @@
 // odpowiedzi na ten sam format co trasa TomTom (parseRoute) — HUD, ostrzeżenia i plan przerw działają bez zmian.
 
 import { distanceKm } from "./nav.mjs";
+import { nearest } from "./warnings.mjs";
 
 /** Polyline6 (Valhalla) → [{ latitude, longitude }]. */
 export function decodePolyline6(s) {
@@ -70,6 +71,12 @@ function roadType(km, s) {
   return kmh >= 68 ? "motorway" : kmh < 38 ? "urban" : "rural";
 }
 
+/** Różnica kierunków (°) → skręt w prawo dodatni, w lewo ujemny, w zakresie −180…180. */
+export const turnAngle = (before, after) => {
+  const d = (((after - before) % 360) + 540) % 360 - 180;
+  return d === -180 ? 180 : d;
+};
+
 /** Trasy alternatywne z odpowiedzi Valhalla (pole `alternates`). */
 export function parseValhallaAlternates(json) {
   return (json?.alternates ?? []).map((a) => parseValhalla(a)).filter(Boolean);
@@ -88,7 +95,8 @@ export function parseValhalla(json) {
 
   const segments = [];
   const instructions = [];
-  for (const m of leg.maneuvers ?? []) {
+  const mans = leg.maneuvers ?? [];
+  for (const [mi, m] of mans.entries()) {
     const type = roadType(m.length ?? 0, m.time ?? 0);
     const last = segments[segments.length - 1];
     if ((m.length ?? 0) > 0) {
@@ -106,6 +114,11 @@ export function parseValhalla(json) {
       ...(toward ? { signpost: toward } : {}),
       ...(exit ? { exit } : {}),
       ...(m.roundabout_exit_count ? { roundaboutExit: String(m.roundabout_exit_count) } : {}),
+      ...(() => {
+        // Kąt manewru (° w prawo, −180…180) z kierunku przed i po — do strzałki; na rondzie: wjazd → kierunek po zjeździe (następny manewr 27).
+        const after = m.type === 26 ? mans.slice(mi + 1).find((x) => x.type === 27)?.bearing_after : m.bearing_after;
+        return Number.isFinite(m.bearing_before) && Number.isFinite(after) ? { angle: turnAngle(m.bearing_before, after) } : {};
+      })(),
     });
   }
 
@@ -131,6 +144,63 @@ export function parseValhalla(json) {
     speedLimits: [],
     traffic: [],
   };
+}
+
+// ── Pasy ruchu (asystent pasa) ──────────────────────────────────────────────────────────────────────
+// Valhalla podaje pasy tylko w formacie OSRM: na skrzyżowaniu lista pasów z kierunkami (z tagów OSM turn:lanes),
+// `valid` = pasem da się jechać trasą, `valid_indication` = którą strzałką. Zamieniamy to na format TomTom (LaneSection).
+
+/** Skrzyżowanie dalej od trasy niż tyle metrów pomijamy (inny fragment / błąd dopasowania). */
+const LANE_NEAR_M = 30;
+/** Szukanie skrzyżowania na trasie: tyle punktów naprzód od poprzedniego (punkty co ≥ 50 m) — bez skoku na równoległą jezdnię. */
+const LANE_WINDOW = 400;
+/** Więcej pasów niż tyle = plac poboru opłat, nie skrzyżowanie. */
+const LANE_MAX = 5;
+/** Manewr z trasy tyle km przed / za skrzyżowaniem z pasami = pasy dotyczą tego manewru. */
+const LANE_MANEUVER_KM = { before: 0.15, after: 0.3 };
+
+const LANE_DIR = { straight: "STRAIGHT", none: "STRAIGHT", "slight right": "SLIGHT_RIGHT", right: "RIGHT", "sharp right": "SHARP_RIGHT", "slight left": "SLIGHT_LEFT", left: "LEFT", "sharp left": "SHARP_LEFT", uturn: "U_TURN" };
+const laneDir = (d) => LANE_DIR[d] ?? "STRAIGHT";
+
+/**
+ * Odpowiedź Valhalla w formacie OSRM (`idx` = która trasa) → pasy na trasie [{ km, toKm, lanes: [{ dirs, follow? }] }].
+ * Tylko skrzyżowania, na których trzeba wybrać pas: skręcamy / zjeżdżamy, pas „prosto” nie prowadzi trasą, w tym miejscu
+ * jest manewr z trasy (`instructions`, np. „trzymaj się lewej” na rozjeździe) albo odchodzą co najmniej dwa pasy.
+ */
+export function osrmLanes(json, points, idx = 0, instructions = []) {
+  const out = [];
+  let from = 0;
+  for (const leg of json?.routes?.[idx]?.legs ?? []) {
+    for (const step of leg.steps ?? []) {
+      for (const it of step.intersections ?? []) {
+        const lanes = it.lanes;
+        // 6+ pasów w jednym kierunku to w Polsce plac poboru opłat (budki) — tam podpowiedź „lewymi pasami” myli.
+        if (!Array.isArray(lanes) || lanes.length < 2 || lanes.length > LANE_MAX || lanes.every((l) => l.valid) || !lanes.some((l) => l.valid)) continue;
+        const [lon, lat] = it.location ?? [];
+        if (!Number.isFinite(lat) || !Number.isFinite(lon)) continue;
+        const hit = nearest(points, lat, lon, from, from + LANE_WINDOW);
+        if (hit.d > LANE_NEAR_M) continue;
+        from = Math.max(0, hit.i - 1);
+        const km = round(hit.km, 3);
+        const mapped = lanes.map((l) => {
+          const dirs = [...new Set((l.indications ?? []).map(laneDir))];
+          const follow = l.valid ? laneDir(l.valid_indication ?? l.indications?.[0] ?? "straight") : undefined;
+          return { dirs: dirs.length ? dirs : ["STRAIGHT"], ...(follow ? { follow } : {}) };
+        });
+        // Mijamy jeden pas zjazdu / do skrętu, a każdy pas „prosto” prowadzi trasą, i nie ma tu manewru — nie ma czego podpowiadać
+        // (na autostradzie co zjazd). Rozjazd (≥ 2 pasy odchodzą, np. S6 → S7) albo manewr z trasy pokazujemy zawsze.
+        const passing = mapped.every((l) => (l.follow ? l.follow === "STRAIGHT" : !l.dirs.includes("STRAIGHT")));
+        const split = mapped.filter((l) => !l.follow).length >= 2;
+        const atManeuver = instructions.some((i) => i.km >= km - LANE_MANEUVER_KM.before && i.km <= km + LANE_MANEUVER_KM.after && !/^(DEPART|STRAIGHT|FOLLOW)$/.test(i.maneuver));
+        if (passing && !split && !atManeuver) continue;
+        // To samo miejsce drugi raz (kilka skrzyżowań tuż obok, ten sam układ pasów).
+        const last = out[out.length - 1];
+        if (last && km - last.km < 0.05 && JSON.stringify(last.lanes) === JSON.stringify(mapped)) continue;
+        out.push({ km, toKm: km, lanes: mapped });
+      }
+    }
+  }
+  return out;
 }
 
 // ── Ograniczenia prędkości i obszar zabudowany na trasie (trace_attributes) ─────────────────────────

@@ -6,8 +6,8 @@
 
 import { createHash, randomBytes, randomInt, scrypt as scryptCb, timingSafeEqual } from "node:crypto";
 import { cleanPoints, cleanReport, inPoland } from "./collect.mjs";
-import { HERE_MAX_POINTS, limitHere, parseValhalla, parseValhallaAlternates, roadInfo, traceChunks, tracePoints, traceRequest, valhallaRequest } from "./valhalla.mjs";
-import { ALERT_KINDS, ALERT_TTL_H, applyVotes, blockingPoints, routeAlerts, routeBoxes, routeWarnings } from "./warnings.mjs";
+import { HERE_MAX_POINTS, limitHere, osrmLanes, parseValhalla, parseValhallaAlternates, roadInfo, traceChunks, tracePoints, traceRequest, valhallaRequest } from "./valhalla.mjs";
+import { ALERT_KINDS, ALERT_TTL_H, applyVotes, blockingPoints, dropCopiedBridgeHeights, routeAlerts, routeBoxes, routeWarnings } from "./warnings.mjs";
 import { compareReports, REPORT_TO_OSM } from "./compare.mjs";
 import { parseRoutes, parseSearch, ROUTE_TYPES, routeError, routeUrl, searchUrl, validPoint } from "./nav.mjs";
 import { cleanPresence, friendView, keepReplayedPosAt } from "./friends.mjs";
@@ -370,9 +370,31 @@ function loadZones() {
   return zones;
 }
 
-/** Trasa Valhalla + ograniczenia ze znaków i rodzaj drogi (trace_attributes po kawałkach); błąd = trasa bez nich. */
-async function withRoadInfo(route) {
-  if (!route) return route;
+/**
+ * Pasy ruchu do trasy Valhalla: to samo zapytanie w formacie OSRM (tylko tam Valhalla podaje pasy); `idx` = która trasa
+ * (0 = główna, 1… = alternatywy). Błąd = trasa bez pasów.
+ */
+async function withLanes(route, q, idx = 0) {
+  if (!route || !q) return route;
+  try {
+    const r = await fetch(`${VALHALLA_URL}/route`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...q, format: "osrm" }), signal: AbortSignal.timeout(30_000) });
+    if (!r.ok) throw new Error(`route osrm ${r.status}`);
+    return { ...route, lanes: osrmLanes(await r.json(), route.points, idx, route.instructions) };
+  } catch (e) {
+    console.error(`Pasy ruchu (Valhalla): ${e.message}`);
+    return route;
+  }
+}
+
+/** Trasa Valhalla + ograniczenia ze znaków i rodzaj drogi (trace_attributes po kawałkach) + pasy; błąd = trasa bez nich. */
+async function withRoadInfo(found) {
+  if (!found) return found;
+  const { _q, _idx, ...plain } = found;
+  const [route, laned] = await Promise.all([roadInfoFor(plain), withLanes(plain, _q, _idx)]);
+  return { ...route, lanes: laned.lanes };
+}
+
+async function roadInfoFor(route) {
   try {
     const chunks = await Promise.all(traceChunks(route.points).map(async (c) => {
       const r = await fetch(`${VALHALLA_URL}/trace_attributes`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(traceRequest(c.pts)), signal: AbortSignal.timeout(20_000) });
@@ -393,7 +415,9 @@ async function valhallaOnce(from, to, vehicle, exclude, routeType = "fastest", v
   } catch {
     return null;
   }
-  return r.ok ? parseValhalla(await r.json().catch(() => null)) : null;
+  const route = r.ok ? parseValhalla(await r.json().catch(() => null)) : null;
+  // Zapytanie zostaje przy trasie — withRoadInfo dociąga z nim pasy ruchu.
+  return route && { ...route, _q: valhallaRequest(from, to, vehicle, exclude, 0, routeType, via) };
 }
 
 /**
@@ -430,8 +454,9 @@ async function valhallaRoute(from, to, vehicle, routeType = "fastest", via = [])
 /** Trasy alternatywne z Valhalli (bez omijania ograniczeń — kierowca widzi ostrzeżenia przy porównaniu). */
 async function valhallaAlternates(from, to, vehicle, routeType = "fastest") {
   try {
-    const r = await fetch(`${VALHALLA_URL}/route`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(valhallaRequest(from, to, vehicle, [], 2, routeType)), signal: AbortSignal.timeout(30_000) });
-    return r.ok ? Promise.all(parseValhallaAlternates(await r.json().catch(() => null)).map(withRoadInfo)) : [];
+    const q = valhallaRequest(from, to, vehicle, [], 2, routeType);
+    const r = await fetch(`${VALHALLA_URL}/route`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(q), signal: AbortSignal.timeout(30_000) });
+    return r.ok ? Promise.all(parseValhallaAlternates(await r.json().catch(() => null)).map((a, i) => withRoadInfo({ ...a, _q: q, _idx: i + 1 }))) : [];
   } catch {
     return [];
   }
@@ -597,7 +622,7 @@ async function findWarnings(pts, vehicle, alerts = true) {
   for (const box of routeBoxes(pts)) {
     const area = [box.minLat, box.maxLat, box.minLon, box.maxLon];
     const [osm] = await db.query(
-      `SELECT 'osm' AS source, osm_id AS id, kind, value, raw, lat, lon, geom, name FROM osm_restrictions
+      `SELECT 'osm' AS source, osm_id AS id, kind, value, raw, lat, lon, geom, name, bridge FROM osm_restrictions
        WHERE lat BETWEEN ? AND ? AND lon BETWEEN ? AND ? AND (
          (kind = 'height' AND value < ?) OR (kind = 'weight' AND value < ?) OR (kind = 'axle' AND value < ?) OR
          (kind = 'width' AND value < ?) OR (kind = 'length' AND value < ?) OR kind = 'hgv')`,
@@ -610,7 +635,8 @@ async function findWarnings(pts, vehicle, alerts = true) {
          (kind = 'closed' AND created_at > NOW() - INTERVAL 14 DAY))`,
       [...area, vehicle.heightM, vehicle.weightKg / 1000],
     );
-    const rows = [...osm, ...rep].map((r) => ({ ...r, geom: typeof r.geom === "string" ? JSON.parse(r.geom) : r.geom }));
+    // Wysokość na moście przepisana z drogi pod nim (błąd w OSM) — nie ostrzega i nie zmienia trasy.
+    const rows = dropCopiedBridgeHeights([...osm, ...rep].map((r) => ({ ...r, geom: typeof r.geom === "string" ? JSON.parse(r.geom) : r.geom })));
     warnings.push(...routeWarnings(pts, rows, vehicle, box));
     if (!alerts) continue;
     const [cams] = await db.query(
@@ -661,7 +687,7 @@ routes["POST /api/nav/warnings"] = async (req, user) => {
   const vehicle = parseVehicle(body.vehicle);
   const pts = Array.isArray(body.points) ? body.points.filter((p) => Array.isArray(p) && p.length >= 3 && p.every(Number.isFinite)).slice(0, 20000) : [];
   if (pts.length < 2) throw new HttpError(400, "Brak trasy.");
-  return [200, { warnings: await findWarnings(pts, vehicle), pois: body.pois === false ? undefined : await findPois(pts) }];
+  return [200, { warnings: await findWarnings(pts, vehicle), pois: body.pois === false ? undefined : await findPois(pts, body.tolls === true) }];
 };
 
 /** Najwięcej prostokątów TomTom na jedno odświeżenie (trasa przed nami ~150 km to zwykle 1–3). */
@@ -704,7 +730,7 @@ routes["POST /api/nav/traffic"] = async (req, user) => {
   return [200, { traffic: incidentSections(pts, incidents) }];
 };
 
-/** Stacje paliw, MOP-y i parkingi TIR przy trasie (pinezki na mapie) — z osm_pois, bez kosztów TomTom. */
+/** Stacje paliw, MOP-y, parkingi TIR i bramki przy trasie (pinezki na mapie) — z osm_pois, bez kosztów TomTom. */
 /** Promień (km) miejsc wokół pozycji — lista „po drodze” bez wyznaczonej trasy (aplikacja podaje km: zasięg z ustawień + zapas). */
 const NEARBY_KM = { default: 32, max: 100 };
 
@@ -721,7 +747,10 @@ routes["GET /api/nav/nearby"] = async (req, user) => {
   const km = Math.min(NEARBY_KM.max, Math.max(5, Number(u.searchParams.get("km")) || NEARBY_KM.default));
   const dLat = km / 111;
   const dLon = km / (111 * Math.cos((at.lat * Math.PI) / 180));
-  const [rows] = await db.query("SELECT osm_id, kind, lat, lon, name, truck FROM osm_pois WHERE lat BETWEEN ? AND ? AND lon BETWEEN ? AND ?", [at.lat - dLat, at.lat + dLat, at.lon - dLon, at.lon + dLon]);
+  const area = [at.lat - dLat, at.lat + dLat, at.lon - dLon, at.lon + dLon];
+  const [osm] = await db.query("SELECT osm_id, kind, lat, lon, name, truck FROM osm_pois WHERE kind <> 'toll' AND lat BETWEEN ? AND ? AND lon BETWEEN ? AND ?", area);
+  const [reported] = await db.query(REPORTED_POIS, area);
+  const rows = [...osm, ...reported];
   return [200, { pois: rows.map((r) => ({ id: r.osm_id, kind: r.kind, name: r.name, truck: !!r.truck, lat: r.lat, lon: r.lon })) }];
 };
 
@@ -753,7 +782,7 @@ routes["POST /api/geo/where"] = async (req, user) => {
   if (!at) throw new HttpError(400, "Brak pozycji.");
   const box = (km) => [at.lat - km / 111, at.lat + km / 111, at.lon - km / (111 * Math.cos((at.lat * Math.PI) / 180)), at.lon + km / (111 * Math.cos((at.lat * Math.PI) / 180))];
   const [places] = await db.query("SELECT name, kind, lat, lon FROM osm_places WHERE lat BETWEEN ? AND ? AND lon BETWEEN ? AND ?", box(PLACE_MAX_KM));
-  const [pois] = await db.query("SELECT name, kind, lat, lon FROM osm_pois WHERE lat BETWEEN ? AND ? AND lon BETWEEN ? AND ?", box(POI_AT_M / 1000));
+  const [pois] = await db.query("SELECT name, kind, lat, lon FROM osm_pois WHERE kind <> 'toll' AND lat BETWEEN ? AND ? AND lon BETWEEN ? AND ?", box(POI_AT_M / 1000));
   let road = null;
   if (VALHALLA_URL && inPoland(at.lat, at.lon)) {
     try {
@@ -797,11 +826,18 @@ routes["POST /api/geo/snap"] = async (req, user) => {
   }
 };
 
-async function findPois(pts) {
+/** Miejsca zgłoszone przez kierowców (parking / MOP / stacja, których nie ma w OSM) jako wiersze jak osm_pois — id „r…”. */
+const REPORTED_POIS = "SELECT CONCAT('r', id) AS osm_id, kind, lat, lon, 'Zgłoszenie kierowcy' AS name, kind = 'parking' AS truck FROM road_reports WHERE kind IN ('parking', 'mop', 'fuel') AND lat BETWEEN ? AND ? AND lon BETWEEN ? AND ?";
+
+/** `tolls` — także bramki (kind toll); prosi o nie tylko aplikacja, która je rysuje (starsza pokazałaby je jako parking). */
+async function findPois(pts, tolls = false) {
   const out = [];
   for (const box of routeBoxes(pts, 25, 0.004)) {
-    const [rows] = await db.query("SELECT osm_id, kind, lat, lon, name, truck FROM osm_pois WHERE lat BETWEEN ? AND ? AND lon BETWEEN ? AND ?", [box.minLat, box.maxLat, box.minLon, box.maxLon]);
-    out.push(...routePois(pts, rows, box));
+    const area = [box.minLat, box.maxLat, box.minLon, box.maxLon];
+    const [rows] = await db.query("SELECT osm_id, kind, lat, lon, name, truck FROM osm_pois WHERE lat BETWEEN ? AND ? AND lon BETWEEN ? AND ?", area);
+    const [reported] = await db.query(REPORTED_POIS, area);
+    // OSM przed zgłoszeniami: to samo miejsce z obu źródeł zostaje jako pinezka z OSM (routePois łączy bliskie miejsca tego rodzaju).
+    out.push(...routePois(pts, [...(tolls ? rows : rows.filter((r) => r.kind !== "toll")), ...reported.map((r) => ({ ...r, truck: Number(r.truck) }))], box));
   }
   // Sąsiednie prostokąty zachodzą na siebie — to samo miejsce tylko raz.
   const seen = new Set();

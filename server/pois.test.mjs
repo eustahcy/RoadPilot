@@ -36,6 +36,17 @@ describe("routePois", () => {
     expect(p[0].offM).toBeGreaterThan(50);
   });
 
+  it("bramki: tylko na naszej jezdni, kilka budek jednego placu = jedna pinezka, nie łączą się z MOP-em", () => {
+    const rows = [
+      { osm_id: "t1", kind: "toll", name: "", truck: 0, lat: 52.03, lon: 19 },
+      { osm_id: "t2", kind: "toll", name: "", truck: 0, lat: 52.0301, lon: 19.00005 }, // druga budka tego placu (~3 m)
+      { osm_id: "t3", kind: "toll", name: "", truck: 0, lat: 52.06, lon: 19.0004 }, // ~27 m — druga jezdnia
+      { osm_id: "m", kind: "mop", name: "MOP", truck: 0, lat: 52.0302, lon: 19.001 },
+    ];
+    expect(routePois(route, rows).map((x) => x.kind)).toEqual(["toll", "mop"]);
+    expect(poiRow({ id: "n5", properties: { barrier: "toll_booth", name: "Bramki Gliwice" }, geometry: { type: "Point", coordinates: [18.7, 50.3] } })).toMatchObject({ kind: "toll", name: "Bramki Gliwice" });
+  });
+
   it("MOP ze stacją i parkingiem w jednym miejscu → jedna pinezka MOP", () => {
     const rows = [
       { osm_id: "s", kind: "services", name: "MOP", truck: 0, lat: 52.03, lon: 19.001 },

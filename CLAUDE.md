@@ -99,13 +99,18 @@ src/components/GlMap.tsx  mapa HUD w WebGL (GlMapView): kafelki rastrowe TomTom 
                    macierz co dawniej w CSS (translate·perspective·rotateX·rotateZ), follow() = pozycja co klatkę (rAF); znaczniki = kilka
                    elementów SVG w układzie ekranu przestawianych atrybutem transform. Zastąpiła pochylanie warstwy HTML (CSS 3D), której
                    Chrome na Androidzie nie nadążał rasteryzować (migotanie, niedomalowane karty), a Safari na iOS wyczerpywało pamięć
-src/components/HudNav.tsx  useNavTrack (pozycja na trasie, poza trasą → onReroute po 15 s; brak trasy w urządzeniu, a jest cel → od razu; max 1/min),
+src/components/HudNav.tsx  useNavTrack (pozycja na trasie; zjazd z trasy → core/navmatch nextOffRoute: nowa trasa po NAV.rerouteAfterMs 8 s, dalej niż
+                   offRouteFarM 200 m od razu, powrót liczy się po backOnRouteMs 5 s — odczyty przy progu nie zerują odliczania; brak trasy w urządzeniu,
+                   a jest cel → od razu; kolejna próba po rerouteEveryMs 20 s; zegar urządzenia, nie czas odczytu GPS),
                    HudNav (manewr + pasy + ograniczenie), HudRouteMap (ekran Nawigacji: GlMapView pochylona MAP_PITCH 62° z horyzontem (gradient .nm-map::after/::before),
                    kierunek jazdy w górę, trasa, zielona strzałka = my na 70% wysokości; zoom od prędkości)
                    useSmoothPosition — jak w nawigacjach: między odczytami GPS przewidujemy ruch z ostatniej prędkości (po trasie / wzdłuż kierunku),
                    nowy odczyt koryguje płynnie przez 1 s (SMOOTH). Zwraca funkcję predict() → MapView.follow woła ją w każdej klatce (rAF) i zapisuje
                    transform warstwy wprost w DOM — bez setState (render 20×/s przerysowywał kafelki: migotanie na Androidzie, crash Safari)
-src/collect.ts     mapa RoadPilot (za zgodą users.data_consent_at): useTraceCollector (ślad co 5 s / 60 m, >8 km/h, tylko PL, bufor w localStorage
+src/collect.ts     zgłoszenia REPORT_KINDS: quick (fotoradar, odcinek, policja, ITD — jedno dotknięcie), place (parking / mop / fuel — „Brakuje na mapie”,
+                   jedno dotknięcie; serwer REPORTED_POIS dokłada je do pinezek trasy i /api/nav/nearby jako „Zgłoszenie kierowcy”, id „r…”);
+                   przycisk „Zgłoś” w Nawigacji pod „P”;
+                   mapa RoadPilot (za zgodą users.data_consent_at): useTraceCollector (ślad co 5 s / 60 m, >8 km/h, tylko PL, bufor w localStorage
                    "roadpilot:trace", wysyłka co 5 min / 400 pkt), sendReport, setConsent, deleteMyMapData; MapConsent.tsx, ReportSheet.tsx
 src/voice.ts       komunikaty głosowe (Web Speech, pl-PL): useNavVoice — manewry (progi zależne od prędkości) i ostrzeżenia ≤ 1 km; spokenDist
 src/nav.ts         nawigacja (beta): Vehicle, NavPlace, NavRoute, RouteType (fastest/shortest/eco → Settings.routeType, POST /api/nav/route);
@@ -123,6 +128,17 @@ src/nearby.ts      HUD: useStations, useParkings, useRoads (Overpass, z serwerem
 src/App.tsx        jedyne miejsce łączące stan z silnikiem (useMemo); activePlan = wybór kierowcy (AppState.choice) → plan pod rozładunek → zalecany; zakładki na pasku: Plan/Trasa/Nawigacja (zielona bańka na środku)/Historia/Ustawienia — Tachograf (tab "driver") jest w Trasie (przełącznik .subtabs);
                    gdy state.hud — renderuje tylko HudView; gdy state.navOpen — tylko NavView (zakładka „Nawigacja” = osobny ekran na cały ekran)
 src/components/NavView.tsx  nawigacja jako osobny system (nie HUD): HudRouteMap + HudNav (karta manewru), głos, ostrzeżenia, wyszukiwanie celu, zgłoszenia, postój;
+                   układ wg makiet (2026-10-01, tylko VPS): jedna siatka CSS (.hud.navmode grid-template-areas: top / tiles / side / ctl / speed / ahead),
+                   trzy warianty bez przełącznika w ustawieniach — telefon pionowo (kafelki „do celu” + „przyjazd”, przerwa i trasa po dotknięciu uchwytu),
+                   telefon poziomo (orientation: landscape, max-height 599px: karta w lewej kolumnie, prędkość + „po drodze” pod nią, 4 kafelki paskiem na dole,
+                   przyciski przy prawej krawędzi, „więcej” jako strzałka w dół), tablet (min 744×744 px: kafelki 2×2 obok karty, przyciski pod kartą,
+                   pasek prędkości względem limitu i pasek 4,5 h jazdy na kafelku przerwy, przycisk powrotu do pozycji zawsze). Karta manewru: tabliczka
+                   z numerem drogi (HudNav roadBadge: A/S/krajowe czerwone, wojewódzkie żółte, E zielone), „›” = lista najbliższych manewrów;
+                   „⋯” = menu (zgłoszenie, postój, dzień, pełny ekran, zakończ nawigację, wyjdź). Karty „szklane” gradientem, bez backdrop-filter;
+                   strzałki (HudNav arrowGeom/Arrow): trzon + wypełniony grot (.head fill currentColor — kolor przez `color`, nie `stroke`), ostre skręty
+                   z trzonem z boku, zawracanie przez lewo; rondo (RoundaboutIcon) przeciwnie do ruchu wskazówek, kąt zjazdu z serwera (valhalla.mjs
+                   turnAngle: wjazd 26 → bearing_after manewru 27), przy zawracaniu zjazd po lewej; kąt z trasy przy TURN albo |kąt| ≥ 60°, inaczej ANGLES.
+                   Ograniczenie: z trasy (legalLimitAt), a gdy trasa nie ma danych w tym miejscu — z drogi pod kołami (useLimitHere), jak bez trasy
                    HUD dostaje trasę tylko jako dane (navRoute: km po trasie do MOP-u/znajomych, limit do koloru prędkości)
 src/components/    widoki; HudView.tsx = tryb HUD; fields.tsx = NumberField, OptionalNumberField, DurationField, Toggle, Stepper
 src/api.ts         zapytania do API, token sesji (localStorage "roadpilot:auth"), tryb bez konta ("roadpilot:guest")
@@ -151,6 +167,9 @@ server/            RoadPilot API: index.mjs (node:http + mysql2), schema.sql; na
                    SMTP simply.com do resetu hasła, APP_ORIGINS = CORS + linki w e-mailach); zależności: mysql2, nodemailer
 server/warnings.mjs  ostrzeżenia na trasie z osm_restrictions + road_reports (routeBoxes → zapytania po prostokątach, routeWarnings:
                    punkt ≤ 20 m, odcinek musi biec wzdłuż trasy — most nad drogą nie ostrzega); POST /api/nav/warnings (bez kosztów TomTom)
+                   dropCopiedBridgeHeights: maxheight na moście (osm_restrictions.bridge) pomijany, gdy ≤ 40 m obok jest droga bez mostu z tą samą
+                   wartością — błąd OSM „wysokość wiaduktu przepisana na most” (Estakada Kwiatkowskiego w Gdyni 3,5 m jak Leszczynki pod nią);
+                   działa też na objazdy silnika RoadPilot (findWarnings → blockingPoints)
 server/traffic.mjs  KORKI WYŁĄCZONE (2026-10-01, licencja/limity TomTom): front `TRAFFIC_ON = false` (nav.ts) — bez odświeżania i bez pokazywania,
                    serwer bez `TRAFFIC_ENABLED=1` → /api/nav/traffic 503, a trasa TomTom bez `traffic`. Kod zostaje: korki dla obu silników: trafficBoxes (routeBoxes sklejane do ≤ 9000 km² — limit TomTom 10 000), incidentSections
                    (zdarzenia TomTom kategorii TRAFFIC_CATEGORIES → { km, toKm, delayMin, level, cause } jak parseRoute; początek, środek i koniec ≤ 50 m
@@ -158,6 +177,13 @@ server/traffic.mjs  KORKI WYŁĄCZONE (2026-10-01, licencja/limity TomTom): fron
                    App: refreshTraffic (nav.ts, TRAFFIC_REFRESH 5 min / 150 km, NavRoute.trafficAt), własny silnik od razu po wyznaczeniu
 server/compare.mjs   zgłoszenia kierowców vs OSM (missing / diff / match / info, potwierdzenia); GET /api/admin/compare
 server/valhalla.mjs  własny silnik tras (Valhalla, OSM Polska, VALHALLA_URL): valhallaRequest (truck), parseValhalla → format jak parseRoute;
+                   pasy ruchu: osrmLanes — to samo zapytanie z format "osrm" (withLanes w index.mjs, równolegle z trace_attributes): skrzyżowania z lanes
+                   (indications, valid, valid_indication = follow) → LaneSection jak TomTom; pomijane: mijany pojedynczy pas zjazdu (każdy pas „prosto” prowadzi,
+                   bez manewru z trasy w LANE_MANEUVER_KM i bez rozjazdu ≥ 2 pasów — rozjazd S6/S7 musi być widoczny),
+                   > LANE_MAX 5 pasów (plac poboru opłat), powtórka w tym samym miejscu. Asystent pasa: core/navmatch laneHint („Jedź skrajnie
+                   prawym pasem” — pas zjazdowy, którego jeszcze nie ma, osiągniemy z prawego), lanesAhead od NAV.lanesAheadKm 2 km, głos
+                   (voice.ts LANE_SAY_KM 1,2 km autostrada / 0,35 km); bramki: osm_pois kind "toll" (barrier=toll_booth, TOLL_NEAR_M 12 m — tylko nasza
+                   jezdnia), wysyłane tylko gdy aplikacja prosi (warnings {tolls:true}); karta: baner od NAV.tollAheadKm 3 km, głos „Za 1 km bramki”
                    /api/nav/route: zawsze własny silnik w PL (wybór silnika usunięty z aplikacji 2026-10-01); TomTom tylko awaryjnie — poza PL albo gdy Valhalla nie da trasy; valhallaRoute sprawdza trasę
                    findWarnings i przy twardym konflikcie (oś, masa, wysokość, szer., dł., zakaz) liczy od nowa z exclude_locations
                    w punkcie przejazdu (blockingPoints, max MAX_DETOURS); routeWarnings: odcinek ≥2 pkt i 60% przy trasie, kierunek ±30°

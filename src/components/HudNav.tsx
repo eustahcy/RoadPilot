@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
 import { Live } from "../core/gps";
-import { alongRoute, bearingAtKm, isOffRoute, lanesAhead, locate, NAV, NavInstruction, nextInstruction, pointAtKm, RoutePos, routeSlice, speedLimitAt } from "../core/navmatch";
+import { alongRoute, bearingAtKm, isOffRoute, laneHint, lanesAhead, locate, NAV, NavInstruction, nextInstruction, pointAtKm, RoutePos, routeSlice, speedLimitAt, nextOffRoute, OFF_ROUTE_IDLE, OffRouteState } from "../core/navmatch";
 import { isAhead, jamMatters, jamTone, NavPlace, NavRoute, RoutePoi, TRAFFIC_ON, TrafficSection, warningText } from "../nav";
 import { GlLine, GlMapView, GlMarker, GlVector } from "./GlMap";
 import { LatLon, moveView, useMapGestures } from "./MapView";
@@ -33,8 +33,7 @@ export interface NavTrack {
  */
 export function useNavTrack(nav: HudNavData, live: Live | null, accuracyM = 20): NavTrack {
   const hint = useRef<number | undefined>(undefined);
-  const offSince = useRef<number | null>(null);
-  const lastReroute = useRef(0);
+  const offRoute = useRef<OffRouteState>(OFF_ROUTE_IDLE);
   const route = nav.route;
 
   let pos: RoutePos | undefined;
@@ -50,19 +49,12 @@ export function useNavTrack(nav: HudNavData, live: Live | null, accuracyM = 20):
 
   useEffect(() => {
     if (pos && !off) hint.current = pos.idx;
-    const now = live?.t ?? Date.now();
-    // Brak trasy w tym urządzeniu, a jest cel i pozycja — wyznaczamy od razu (raz na NAV.rerouteEveryMs).
-    const missing = !route && nav.dest && live;
-    if (!off && !missing) {
-      offSince.current = null;
-      return;
-    }
-    offSince.current ??= now;
-    const wait = missing ? 0 : NAV.rerouteAfterMs;
-    if (!nav.rerouting && now - offSince.current >= wait && Date.now() - lastReroute.current >= NAV.rerouteEveryMs) {
-      lastReroute.current = Date.now();
-      nav.onReroute();
-    }
+    // Zegar urządzenia (nie czas odczytu GPS — iPhone potrafi podać stary): poza trasą od NAV.rerouteAfterMs, daleko od razu.
+    // Brak trasy w tym urządzeniu, a jest cel i pozycja — też od razu.
+    const missing = !route && !!nav.dest && !!live;
+    const r = nextOffRoute(offRoute.current, { off, offM: pos?.offM, missing, now: Date.now(), rerouting: nav.rerouting });
+    offRoute.current = r.state;
+    if (r.reroute) nav.onReroute();
   });
 
   return { pos, off };
@@ -97,31 +89,73 @@ const LANE_ANGLES: Record<string, number> = {
   STRAIGHT: 0, SLIGHT_RIGHT: 40, RIGHT: 90, SHARP_RIGHT: 135, SLIGHT_LEFT: -40, LEFT: -90, SHARP_LEFT: -135, U_TURN: 180,
 };
 
-/** Strzałka: pionowy trzon z dołu, łuk w stronę manewru i grot. */
-function arrowPath(deg: number) {
-  if (Math.abs(deg) >= 170) return "M8 21V10a4 4 0 0 1 8 0v7M13 14l3 3 3-3";
+/**
+ * Strzałka w kierunku `deg` (0 = prosto, dodatnie w prawo; viewBox 24): trzon z dołu łukiem w stronę manewru i wypełniony grot.
+ * Zawracanie — przez lewo (ruch prawostronny).
+ */
+function arrowGeom(deg: number): { shaft: string; head: string } {
+  if (Math.abs(deg) >= 170) return { shaft: "M15 22V10a4 4 0 0 0-8 0v4", head: "M7 20.5L2.8 14h8.4z" };
+  // Ostry skręt: trzon z boku, łuk górą i grot w dół — inaczej szeroki grot wchodzi na trzon. W lewo = lustro.
+  if (Math.abs(deg) > 110) {
+    const m = (x: number) => (deg > 0 ? x : 24 - x);
+    return { shaft: `M${m(7)} 22V8C${m(7)} 2 ${m(14)} 1.5 ${m(15.2)} 8.4`, head: `M${m(19)} 13L${m(12)} 10.6L${m(18.4)} 6.2z` };
+  }
   const a = (deg * Math.PI) / 180;
-  const cx = 12, cy = 11, r = 7;
-  const ex = cx + r * Math.sin(a);
-  const ey = cy - r * Math.cos(a);
-  // Grot: dwie krótkie linie cofnięte o ±28° od kierunku.
-  const head = (d: number) => `${(ex - 4 * Math.sin(a + d)).toFixed(2)} ${(ey + 4 * Math.cos(a + d)).toFixed(2)}`;
-  return `M12 22V${cy}Q12 ${cy - 3} ${ex.toFixed(2)} ${ey.toFixed(2)}M${head(0.5)}L${ex.toFixed(2)} ${ey.toFixed(2)}L${head(-0.5)}`;
+  const dx = Math.sin(a), dy = -Math.cos(a);
+  // Ostre skręty zaczynają łuk wyżej — grot nie wchodzi na trzon.
+  const cy = Math.abs(deg) > 100 ? 8 : 11;
+  const tip = [12 + 9 * dx, cy + 9 * dy];
+  const base = [tip[0] - 5.5 * dx, tip[1] - 5.5 * dy];
+  const [nx, ny] = [-dy * 4.5, dx * 4.5];
+  const f = (x: number) => x.toFixed(2);
+  const shaft = Math.abs(deg) < 4 ? `M12 22V${f(base[1] + 0.5)}` : `M12 22V${cy + 3}Q12 ${cy} ${f(base[0] - dx * 0.5)} ${f(base[1] - dy * 0.5)}`;
+  return { shaft, head: `M${f(tip[0])} ${f(tip[1])}L${f(base[0] + nx)} ${f(base[1] + ny)}L${f(base[0] - nx)} ${f(base[1] - ny)}z` };
 }
 
-function ManeuverIcon({ ins }: { ins: NavInstruction }) {
+function Arrow({ deg, className }: { deg: number; className?: string }) {
+  const g = arrowGeom(deg);
+  return <g className={className}><path d={g.shaft} /><path className="head" d={g.head} /></g>;
+}
+
+/**
+ * Rondo jak w ruchu prawostronnym: wjazd od dołu, jazda przeciwnie do ruchu wskazówek zegara, zjazd w kierunku `deg`
+ * (0 = na wprost, 90 = w prawo, −90 = w lewo). Przejechana część ronda pogrubiona, reszta przygaszona.
+ */
+function RoundaboutIcon({ deg }: { deg: number }) {
+  const cx = 12, cy = 10.5, r = 5.4;
+  // Zawracanie na rondzie: zjazd tuż obok wjazdu, po lewej (objeżdżamy całe rondo) — grot nie leży na wjeździe.
+  if (Math.abs(deg) > 150) deg = -150;
+  const e = (deg * Math.PI) / 180;
+  const [dx, dy] = [Math.sin(e), -Math.cos(e)];
+  // Kąt przejechany od wjazdu (dół ronda), przeciwnie do ruchu wskazówek: zjazd w prawo 90°, prosto 180°, w lewo 270°.
+  let t = (((180 - deg) % 360) + 360) % 360;
+  if (t < 20) t = 340;
+  const X = [cx + r * dx, cy + r * dy];
+  const tip = [cx + 12.2 * dx, cy + 12.2 * dy];
+  const base = [cx + 8 * dx, cy + 8 * dy];
+  const [nx, ny] = [-dy * 3.4, dx * 3.4];
+  const f = (x: number) => x.toFixed(2);
+  return (
+    <>
+      <circle className="ring" cx={cx} cy={cy} r={r} />
+      <path d={`M12 22V${cy + r}A${r} ${r} 0 ${t > 180 ? 1 : 0} 0 ${f(X[0])} ${f(X[1])}L${f(base[0])} ${f(base[1])}`} />
+      <path className="head" d={`M${f(tip[0])} ${f(tip[1])}L${f(base[0] + nx)} ${f(base[1] + ny)}L${f(base[0] - nx)} ${f(base[1] - ny)}z`} />
+    </>
+  );
+}
+
+/** Kąt do strzałki: prawdziwy kąt manewru przy skrętach i dużych odbiciach, inaczej typowy dla rodzaju (rozwidlenia, zjazdy). */
+const maneuverDeg = (ins: NavInstruction) => (ins.angle !== undefined && (ins.maneuver.includes("TURN") || Math.abs(ins.angle) >= 60) ? ins.angle : ANGLES[ins.maneuver] ?? 0);
+
+export function ManeuverIcon({ ins }: { ins: NavInstruction }) {
   if (ins.maneuver.startsWith("ARRIVE") || ins.maneuver === "WAYPOINT_REACHED") {
-    return <svg viewBox="0 0 24 24" aria-hidden><path d="M5 21V4M5 4h14v9H5M9 4v9M13 4v9M17 4v9M5 8.5h14" /></svg>;
+    return <svg viewBox="0 0 24 24" aria-hidden><path d="M6 22V3" /><path className="head" d="M6 3.5c3-1.6 5.5 1.4 8.5 0s4.5-.8 4.5-.8v8.6s-1.5-.7-4.5.8-5.5-1.6-8.5 0z" /></svg>;
   }
   if (ins.maneuver.startsWith("ROUNDABOUT")) {
-    return (
-      <svg viewBox="0 0 24 24" aria-hidden>
-        <path d="M12 22v-6M12 16a4 4 0 1 1 3.5-2" />
-        <path d={arrowPath(ins.angle ?? 90).replace(/^M12 22V11/, "M15.5 14")} />
-      </svg>
-    );
+    const deg = ins.angle ?? (ins.maneuver === "ROUNDABOUT_LEFT" ? -90 : ins.maneuver === "ROUNDABOUT_BACK" ? 180 : ins.maneuver === "ROUNDABOUT_CROSS" ? 0 : 90);
+    return <svg viewBox="-2 -2.5 28 28" aria-hidden><RoundaboutIcon deg={deg} /></svg>;
   }
-  return <svg viewBox="0 0 24 24" aria-hidden><path d={arrowPath(ins.angle !== undefined && ins.maneuver.includes("TURN") ? ins.angle : ANGLES[ins.maneuver] ?? 0)} /></svg>;
+  return <svg viewBox="0 0 24 24" aria-hidden><Arrow deg={maneuverDeg(ins)} /></svg>;
 }
 
 /** „800 m”, „1,2 km”, „15 km”. */
@@ -131,6 +165,19 @@ export function fmtDist(km: number) {
 }
 
 /** Krótki opis manewru: zjazd, kierunek z drogowskazu, ulica — bez powtarzania całego zdania TomTom. */
+/**
+ * Numer drogi z początku nazwy („A4”, „S52/E 77”, „DK 79”, „708”) → tabliczka jak na znakach: A / S / krajowe czerwone,
+ * wojewódzkie (3 cyfry, DW) żółte, europejskie zielone. Reszta nazwy (np. „Autostrada Wolności”) obok.
+ */
+export function roadBadge(name: string | undefined): { ref: string; kind: "red" | "yellow" | "green"; rest: string } | undefined {
+  const m = /^\s*((?:A|S)\s?\d{1,2}|DK\s?\d{1,3}|DW\s?\d{3}|E\s?\d{2,3}|\d{1,3})\b[\s/;,·-]*(.*)$/.exec(name ?? "");
+  if (!m) return undefined;
+  const ref = m[1].replace(/\s/, "").replace(/^D[KW]/, (x) => `${x} `);
+  const num = /\d+/.exec(ref)![0];
+  const kind = ref.startsWith("E") ? "green" : ref.startsWith("DW") || (/^\d+$/.test(ref) && num.length === 3) ? "yellow" : "red";
+  return { ref, kind, rest: m[2].replace(/^E\s?\d{2,3}\b[\s/;,·-]*/, "").trim() };
+}
+
 function detail(ins: NavInstruction) {
   const parts: string[] = [];
   if (ins.roundaboutExit) parts.push(`${ins.roundaboutExit}. zjazd`);
@@ -176,6 +223,9 @@ export function HudNav({ nav, track, compact, card, section }: { nav: HudNavData
 
   const next = nextInstruction(route.instructions, pos.km);
   const lanes = lanesAhead(route.lanes, pos.km);
+  const hint = lanes && laneHint(lanes);
+  // Bramki przed nami (OSM barrier=toll_booth na naszej jezdni) — od NAV.tollAheadKm.
+  const toll = route.pois?.find((p) => p.kind === "toll" && p.km > pos.km - 0.05 && p.km - pos.km <= NAV.tollAheadKm);
   const limit = speedLimitAt(route.speedLimits, pos.km);
   const arrived = !next || route.lengthKm - pos.km < 0.05;
   // Najbliższe ostrzeżenie przed nami (nasze dane) — pokazujemy od WARN_AHEAD_KM; odcinkowy pomiar do jego końca.
@@ -196,23 +246,27 @@ export function HudNav({ nav, track, compact, card, section }: { nav: HudNavData
           <ManeuverIcon ins={next!.ins} />
           <span>
             <b>{fmtDist(next!.inKm)}{next!.ins.exit && <em className="hud-exit">zjazd {next!.ins.exit}</em>}</b>
-            <small>{detail(next!.ins)}</small>
+            {card && roadBadge(next!.ins.signpost ? undefined : next!.ins.street) ? (() => {
+              const r = roadBadge(next!.ins.street)!;
+              return <small className="hud-road"><em className={`road-badge ${r.kind}`}>{r.ref}</em>{r.rest && <span>{r.rest}</span>}</small>;
+            })() : <small>{detail(next!.ins)}</small>}
             {next!.then && <small className="hud-then">następnie: {detail(next!.then)}</small>}
           </span>
         </div>
       )}
       {lanes && (
-        <div className="hud-lanes-guide" aria-label="Pasy ruchu">
+        <div className={`hud-lanes-guide ${hint ? `hint-${hint.side}` : ""}`} aria-label="Pasy ruchu">
           <div className="hud-lane-row">
             {lanes.lanes.map((l, i) => (
               <span key={i} className={`hud-lane ${l.follow ? "on" : ""}`}>
                 <svg viewBox="0 0 24 24" aria-hidden>
-                  {(l.dirs.length ? l.dirs : ["STRAIGHT"]).map((d) => <path key={d} className={l.follow === d ? "go" : ""} d={arrowPath(LANE_ANGLES[d] ?? 0)} />)}
+                  {/* Strzałka, którą jedziemy, na wierzchu. */}
+                  {(l.dirs.length ? l.dirs : ["STRAIGHT"]).slice().sort((x, y) => Number(x === l.follow) - Number(y === l.follow)).map((d) => <Arrow key={d} className={l.follow === d ? "go" : ""} deg={LANE_ANGLES[d] ?? 0} />)}
                 </svg>
               </span>
             ))}
           </div>
-          <small>{lanes.inKm > 0.05 ? `pasy za ${fmtDist(lanes.inKm)}` : "wybierz pas"}</small>
+          <small>{hint ? <b>{hint.text}</b> : null}{lanes.inKm > 0.05 ? `${hint ? " · " : ""}za ${fmtDist(lanes.inKm)}` : hint ? "" : "wybierz pas"}</small>
         </div>
       )}
       {limit !== undefined && !card && (
@@ -223,6 +277,12 @@ export function HudNav({ nav, track, compact, card, section }: { nav: HudNavData
         <div className={`hud-warn ${inSection || warn.km - pos.km <= 0.5 ? "near" : ""}`} role="alert">
           <b><WarnIcon /> {warningText(warn)}</b>
           <small>{inSection ? `do końca odcinka ${fmtDist(warn.toKm! - pos.km)}` : `za ${fmtDist(Math.max(0, warn.km - pos.km))}`}{warn.name ? ` · ${warn.name}` : ""}</small>
+        </div>
+      )}
+      {toll && (
+        <div className={`hud-warn hud-toll ${toll.km - pos.km <= 0.5 ? "near" : ""}`} role="status">
+          <b><TollIcon /> Bramki</b>
+          <small>{toll.km > pos.km ? `za ${fmtDist(toll.km - pos.km)}` : "teraz"}{toll.name ? ` · ${toll.name}` : ""}</small>
         </div>
       )}
       {jam && (
@@ -355,6 +415,8 @@ function Pin({ id, fill, stroke = "#fff", children }: { id: string; fill: string
 }
 
 const PIN_P = <text x="0" y="6.5" textAnchor="middle" fontSize="19" fontWeight="900" fill="#fff" fontFamily="Inter, system-ui, sans-serif">P</text>;
+/** Bramki: szlaban (belka w pasy) na słupku. */
+const PIN_TOLL = <g><path d="M-8 8V-6" stroke="#fff" strokeWidth="3" strokeLinecap="round" /><rect x="-8" y="-8" width="17" height="5" rx="1.5" fill="#fff" /><path d="M-3 -8v5M3 -8v5" stroke="#e8322c" strokeWidth="2.4" /></g>;
 const PIN_FUEL = <path d="M-7 8V-8h9v16zM-5 -6v5h5v-5zM2 -3h2.5l2 2v7a1.5 1.5 0 0 0 3 0V-5l-3-3" fill="#fff" stroke="#fff" strokeWidth="1.2" strokeLinejoin="round" />;
 const PIN_CAMERA = <><rect x="-9" y="-5" width="14" height="10" rx="2" fill="#1b2229" /><path d="M5 -2l5-3v10l-5-3z" fill="#1b2229" /><circle cx="-2" cy="0" r="2.6" fill="#fff" /></>;
 /** Odcinkowy pomiar: dwie kreski z odcinkiem między nimi i „km/h” ukryte w prostym symbolu |—|. */
@@ -386,7 +448,18 @@ export interface PinInfo {
   viaIndex?: number;
 }
 
-export const POI_TITLE: Record<RoutePoi["kind"], string> = { fuel: "Stacja paliw", services: "MOP ze stacją i barem", mop: "MOP — miejsce odpoczynku", parking: "Parking dla ciężarówek" };
+/** Szlaban do baneru bramek na karcie. */
+function TollIcon() {
+  return (
+    <svg className="hud-toll-ico" viewBox="0 0 24 24" aria-hidden>
+      <path d="M4 21V6" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" />
+      <rect x="3" y="5" width="18" height="5" rx="1.5" fill="none" stroke="currentColor" strokeWidth="2" />
+      <path d="M9 5v5M15 5v5" stroke="currentColor" strokeWidth="2" />
+    </svg>
+  );
+}
+
+export const POI_TITLE: Record<RoutePoi["kind"], string> = { fuel: "Stacja paliw", services: "MOP ze stacją i barem", mop: "MOP — miejsce odpoczynku", parking: "Parking dla ciężarówek", toll: "Bramki — punkt poboru opłat" };
 
 /** Stacje / MOP-y / parkingi, fotoradary / odcinki i punkty pośrednie na kawałku trasy [fromKm, toKm] → znaczniki mapy; `gapKm` — min. odstęp. */
 function routePins(route: NavRoute, fromKm: number, toKm: number, gapKm = 0): { markers: GlMarker[]; info: PinInfo[] } {
@@ -419,7 +492,9 @@ function routePins(route: NavRoute, fromKm: number, toKm: number, gapKm = 0): { 
     if (!inRange(p.km) || !poiVisible(route, p)) continue;
     const key = `p${p.id}`;
     const details = [`${p.side === "right" ? "Po prawej" : "Po lewej"} stronie, ok. ${Math.round(p.offM / 10) * 10} m od trasy`, ...(p.truck && p.kind !== "parking" ? ["Oznaczone dla ciężarówek"] : [])];
-    const node = p.kind === "fuel"
+    const node = p.kind === "toll"
+      ? <Pin id={key} fill="#6d4bd1">{PIN_TOLL}</Pin>
+      : p.kind === "fuel"
       ? <Pin id={key} fill="#e07a1f">{PIN_FUEL}</Pin>
       : <Pin id={key} fill="#2f6fd6">{PIN_P}{p.kind === "services" && <circle cx="11" cy="-11" r="5" fill="#e07a1f" stroke="#fff" strokeWidth="1.5" />}</Pin>;
     add({ key, kind: p.kind, title: POI_TITLE[p.kind], name: p.name, details, km: p.km, lat: p.lat, lon: p.lon }, 1, node);

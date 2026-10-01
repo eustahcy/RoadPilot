@@ -1,4 +1,4 @@
-// Miejsca przy trasie do pinezek na mapie: stacje paliw, MOP-y i parkingi dla ciężarówek (OpenStreetMap, Polska).
+// Miejsca przy trasie do pinezek na mapie: stacje paliw, MOP-y, parkingi dla ciężarówek i bramki (OpenStreetMap, Polska).
 // Import: scripts/osm-update.sh → osmium export → server/poi-import.mjs → tabela osm_pois. Czyste funkcje, testy w pois.test.mjs.
 
 import { nearest } from "./warnings.mjs";
@@ -7,6 +7,8 @@ import { nearest } from "./warnings.mjs";
 export const POI_NEAR_M = 250;
 /** Stacja paliw musi być bliżej — w mieście 250 m to już stacje przy sąsiednich ulicach. */
 export const FUEL_NEAR_M = 150;
+/** Bramka (barrier=toll_booth) to węzeł na samej jezdni — dalej niż tyle metrów jest na drugiej jezdni albo innej drodze. */
+export const TOLL_NEAR_M = 12;
 /** Ten sam rodzaj w odstępie mniejszym niż tyle km to jedno miejsce (np. stacja i jej wiata, MOP i parking na nim). */
 const SAME_KM = 0.3;
 
@@ -27,13 +29,15 @@ function point(g) {
 
 /**
  * Obiekt z `osmium export` (geojsonseq, --add-unique-id=type_id) → wiersz osm_pois albo null.
- * kind: fuel (stacja paliw), services (MOP ze stacją / barem), mop (miejsce odpoczynku), parking (parking dla ciężarówek).
+ * kind: fuel (stacja paliw), services (MOP ze stacją / barem), mop (miejsce odpoczynku), parking (parking dla ciężarówek),
+ * toll (bramki — punkt poboru opłat).
  */
 export function poiRow(f) {
   const t = f?.properties ?? {};
   if (t.hgv === "no" || t.access === "private" || t.access === "no") return null;
   let kind;
-  if (t.amenity === "fuel") kind = "fuel";
+  if (t.barrier === "toll_booth") kind = "toll";
+  else if (t.amenity === "fuel") kind = "fuel";
   else if (t.highway === "services") kind = "services";
   else if (t.highway === "rest_area") kind = "mop";
   else if (t.amenity === "parking" && (t.hgv === "yes" || t.hgv === "designated" || t.parking === "truck")) kind = "parking";
@@ -55,7 +59,7 @@ export function routePois(route, rows, box) {
   const out = [];
   for (const r of rows) {
     const hit = nearest(route, r.lat, r.lon, from, to);
-    if (hit.d > (r.kind === "fuel" ? FUEL_NEAR_M : POI_NEAR_M)) continue;
+    if (hit.d > (r.kind === "toll" ? TOLL_NEAR_M : r.kind === "fuel" ? FUEL_NEAR_M : POI_NEAR_M)) continue;
     const [a, b] = [route[hit.i], route[Math.min(route.length - 1, hit.i + 1)]];
     const kx = Math.cos((a[0] * Math.PI) / 180);
     // Iloczyn wektorowy (kierunek odcinka × wektor do miejsca): ujemny = po prawej (oś y na północ, x na wschód).
@@ -65,8 +69,9 @@ export function routePois(route, rows, box) {
   out.sort((x, y) => x.km - y.km);
   // MOP ze stacją i parkingiem to jedno miejsce: zostaje „ważniejszy” rodzaj, bliżej trasy.
   // Stacja na MOP-ie z obsługą też znika — pinezka MOP-u ma znaczek stacji.
-  const rank = { services: 0, mop: 1, parking: 2, fuel: 3 };
-  const group = (k) => (k === "fuel" ? "fuel" : "rest");
+  const rank = { services: 0, mop: 1, parking: 2, fuel: 3, toll: 4 };
+  // Bramki osobno — kilka budek jednego placu poboru to jedna pinezka, ale nie łączą się z MOP-em obok.
+  const group = (k) => (k === "fuel" || k === "toll" ? k : "rest");
   const covers = (q, p) => (group(q.kind) === group(p.kind) || (q.kind === "services" && p.kind === "fuel")) && rank[q.kind] <= rank[p.kind];
-  return out.filter((p, i) => !out.some((q, j) => j !== i && q.side === p.side && Math.abs(q.km - p.km) < SAME_KM && covers(q, p) && (rank[q.kind] < rank[p.kind] || q.offM < p.offM || (q.offM === p.offM && j < i))));
+  return out.filter((p, i) => !out.some((q, j) => j !== i && (q.side === p.side || p.kind === "toll") && Math.abs(q.km - p.km) < SAME_KM && covers(q, p) && (rank[q.kind] < rank[p.kind] || q.offM < p.offM || (q.offM === p.offM && j < i))));
 }

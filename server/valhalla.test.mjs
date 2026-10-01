@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { decodePolyline6, limitHere, parseValhalla, roadInfo, traceChunks, tracePoints, traceRequest, valhallaRequest } from "./valhalla.mjs";
+import { decodePolyline6, limitHere, osrmLanes, parseValhalla, roadInfo, traceChunks, tracePoints, traceRequest, valhallaRequest } from "./valhalla.mjs";
 
 /** Koder polyline6 — do zbudowania odpowiedzi testowej. */
 function encode(points) {
@@ -92,5 +92,53 @@ describe("limitHere", () => {
     expect(r.km).toBeCloseTo(0.222, 2);
     expect(r.speedLimits.at(-1).kmh).toBe(50);
     expect(r.roads.at(-1).kind).toBe("urban");
+  });
+});
+
+describe("osrmLanes — pasy z Valhalli (format OSRM)", () => {
+  // Trasa na północ, punkt co ~111 m.
+  const pts = Array.from({ length: 200 }, (_, i) => [52 + i * 0.001, 19, i * 0.11132]);
+  const lane = (indications, valid, valid_indication) => ({ indications, valid, ...(valid_indication ? { valid_indication } : {}) });
+  const json = (inters) => ({ routes: [{ legs: [{ steps: [{ intersections: inters }] }] }] });
+
+  it("zjazd: dwa pasy prosto, trzeci w prawo — prowadzi prawy, km z pozycji skrzyżowania", () => {
+    const r = osrmLanes(json([{ location: [19, 52.05], lanes: [lane(["straight"], false), lane(["straight"], false), lane(["slight right"], true, "slight right")] }]), pts);
+    expect(r).toHaveLength(1);
+    expect(r[0].km).toBeCloseTo(5.566, 2);
+    expect(r[0].lanes).toEqual([{ dirs: ["STRAIGHT"] }, { dirs: ["STRAIGHT"] }, { dirs: ["SLIGHT_RIGHT"], follow: "SLIGHT_RIGHT" }]);
+  });
+
+  it("mijany zjazd (pasy prosto prowadzą, zjazd nie) i powtórka w tym samym miejscu — pomijane", () => {
+    const pass = [lane(["straight"], true, "straight"), lane(["straight"], true, "straight"), lane(["slight right"], false)];
+    const exit = [lane(["straight"], false), lane(["slight right"], true, "slight right")];
+    const r = osrmLanes(json([{ location: [19, 52.01], lanes: pass }, { location: [19, 52.03], lanes: exit }, { location: [19, 52.0302], lanes: exit }]), pts);
+    expect(r.map((x) => x.km.toFixed(1))).toEqual(["3.3"]);
+  });
+
+  it("rozjazd (dwa pasy odchodzą) i manewr z trasy przy mijanym pasie — pokazane", () => {
+    const split = [lane(["straight"], true, "straight"), lane(["straight"], true, "straight"), lane(["right"], false), lane(["right"], false)];
+    const pass = [lane(["straight"], true, "straight"), lane(["straight"], true, "straight"), lane(["slight right"], false)];
+    const r = osrmLanes(json([{ location: [19, 52.01], lanes: split }, { location: [19, 52.03], lanes: pass }, { location: [19, 52.05], lanes: pass }]), pts, 0, [{ km: 5.6, maneuver: "KEEP_LEFT" }]);
+    expect(r.map((x) => x.km.toFixed(1))).toEqual(["1.1", "5.6"]);
+  });
+
+  it("wszystkie pasy prowadzą trasą, jeden pas, daleko od trasy — pomijane; kilka strzałek na pasie", () => {
+    const r = osrmLanes(json([
+      { location: [19, 52.01], lanes: [lane(["straight"], true), lane(["straight"], true)] },
+      { location: [19, 52.02], lanes: [lane(["straight"], true)] },
+      { location: [19.01, 52.03], lanes: [lane(["left"], false), lane(["straight"], true)] },
+      { location: [19, 52.04], lanes: [lane(["left"], false), lane(["straight", "right"], true, "right")] },
+    ]), pts);
+    expect(r.map((x) => x.lanes)).toEqual([[{ dirs: ["LEFT"] }, { dirs: ["STRAIGHT", "RIGHT"], follow: "RIGHT" }]]);
+  });
+});
+
+describe("turnAngle — kąt manewru z kierunków Valhalli", () => {
+  it("w prawo dodatni, w lewo ujemny, przez północ, zawracanie", async () => {
+    const { turnAngle } = await import("./valhalla.mjs");
+    expect(turnAngle(258, 328)).toBe(70);
+    expect(turnAngle(350, 50)).toBe(60);
+    expect(turnAngle(350, 277)).toBe(-73);
+    expect(turnAngle(10, 190)).toBe(180);
   });
 });

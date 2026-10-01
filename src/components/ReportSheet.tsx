@@ -43,8 +43,18 @@ export function ReportSheet({ onSend, onClose, located, place }: { onSend: (kind
           </button>
         ))}
       </div>
+      {/* Parking / MOP / stacja, których nie ma w nawigacji — jedno dotknięcie, miejsce = nasza pozycja (albo przytrzymane na mapie). */}
+      <div className="report-places-label">Brakuje na mapie:</div>
+      <div className="report-places">
+        {REPORT_KINDS.filter((k) => k.place).map((k) => (
+          <button key={k.id} className={`report-place ${kind === k.id && state !== "idle" ? "active" : ""}`} disabled={!located || state === "sending" || state === "sent"} onClick={() => send(k.id)} aria-label={`Tu jest: ${k.label}`}>
+            <ReportIcon kind={k.id} />
+            <span>{kind === k.id && state === "sending" ? "Wysyłam…" : kind === k.id && state === "sent" ? "Dziękujemy ✓" : k.label}</span>
+          </button>
+        ))}
+      </div>
       <div className="report-kinds">
-        {REPORT_KINDS.filter((k) => !k.quick).map((k) => (
+        {REPORT_KINDS.filter((k) => !k.quick && !k.place).map((k) => (
           <button key={k.id} className={`report-kind ${kind === k.id ? "active" : ""}`} onClick={() => pick(k.id)} aria-label={k.label} title={k.label}>
             <ReportIcon kind={k.id} />
           </button>
@@ -58,7 +68,7 @@ export function ReportSheet({ onSend, onClose, located, place }: { onSend: (kind
         </div>
       )}
       {state === "error" && <p className="auth-error">{error}</p>}
-      {!def?.quick && (
+      {!def?.quick && !def?.place && (
         <button className="primary full" disabled={!kind || !located || state === "sending" || state === "sent"} onClick={() => send()}>
           {state === "sent" ? "Dziękujemy — wysłane" : state === "sending" ? "Wysyłam…" : "Wyślij zgłoszenie"}
         </button>

@@ -16,6 +16,8 @@ export const REPORT_KINDS = {
   truck_ban: { label: "Zakaz dla ciężarówek" },
   closed: { label: "Droga zamknięta" },
   parking: { label: "Parking dla ciężarówek" },
+  mop: { label: "MOP — miejsce obsługi podróżnych" },
+  fuel: { label: "Stacja paliw" },
   other: { label: "Inne" },
 };
 

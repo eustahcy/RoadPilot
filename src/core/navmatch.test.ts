@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { distanceM } from "./gps";
-import { alongRoute, bearingAtKm, HERE, isOffRoute, pushTrail, TrailPoint, trailM, lanesAhead, locate, NAV, nearestOnRoute, nextInstruction, pointAtKm, RoutePoint, routeSlice, speedLimitAt, speedTone } from "./navmatch";
+import { alongRoute, bearingAtKm, HERE, isOffRoute, nextOffRoute, OFF_ROUTE_IDLE, pushTrail, TrailPoint, trailM, laneHint, lanesAhead, locate, NAV, nearestOnRoute, nextInstruction, pointAtKm, RoutePoint, routeSlice, speedLimitAt, speedTone } from "./navmatch";
 
 const KM_PER_DEG = distanceM({ lat: 0, lon: 0 }, { lat: 1, lon: 0 }) / 1000;
 /** Trasa na północ po południku 0, punkt co 100 m, 10 km. */
@@ -37,7 +37,7 @@ describe("prowadzenie po trasie", () => {
     expect(nextInstruction(ins, 9.5)).toBeUndefined();
 
     const lanes = [{ km: 3.9, toKm: 4, lanes: [{ dirs: ["STRAIGHT"] }, { dirs: ["RIGHT"], follow: "RIGHT" }] }];
-    expect(lanesAhead(lanes, 2)).toBeUndefined(); // 1,9 km przed — jeszcze za wcześnie
+    expect(lanesAhead(lanes, 1.8)).toBeUndefined(); // 2,1 km przed — jeszcze za wcześnie (NAV.lanesAheadKm 2)
     expect(lanesAhead(lanes, 3)!.inKm).toBeCloseTo(0.9, 6);
     expect(lanesAhead(lanes, 4.1)).toBeUndefined(); // za nami
     expect(speedLimitAt([{ km: 0, toKm: 5, kmh: 80 }], 3)).toBe(80);
@@ -104,5 +104,48 @@ describe("pushTrail", () => {
     expect(trailM(t)).toBeLessThan(HERE.keepM + 40);
     expect(trailM(t)).toBeGreaterThan(HERE.keepM - 40);
     expect(t.at(-1)![0]).toBeGreaterThan(52.0095);
+  });
+});
+
+describe("asystent pasa", () => {
+  const L = (...f: (string | undefined)[]) => ({ lanes: f.map((x) => ({ dirs: [x ?? "STRAIGHT"], ...(x ? { follow: x } : {}) })) });
+  it("dwa pasy prosto + zjazdowy po prawej → skrajnie prawy", () => {
+    expect(laneHint(L(undefined, undefined, "SLIGHT_RIGHT"))).toMatchObject({ side: "right", lanes: [3], total: 3, text: "Jedź skrajnie prawym pasem" });
+  });
+  it("dwa pasy, prowadzi prawy → prawym; dwa prawe z trzech → prawych pasów", () => {
+    expect(laneHint(L(undefined, "RIGHT"))?.text).toBe("Jedź prawym pasem");
+    expect(laneHint(L(undefined, "STRAIGHT", "RIGHT"))?.text).toBe("Trzymaj się prawych pasów");
+  });
+  it("lewy, środkowy; każdy pas prowadzi → brak podpowiedzi", () => {
+    expect(laneHint(L("LEFT", undefined, undefined))).toMatchObject({ side: "left", text: "Jedź skrajnie lewym pasem" });
+    expect(laneHint(L(undefined, "STRAIGHT", undefined, undefined))).toMatchObject({ side: "middle", text: "Jedź pasem 2 od lewej" });
+    expect(laneHint(L("STRAIGHT", "STRAIGHT"))).toBeUndefined();
+  });
+});
+
+describe("zjazd z trasy → nowa trasa sama", () => {
+  const S = 1000;
+  const run = (steps: { t: number; off: boolean; offM?: number }[], rerouting = false) => {
+    let s = OFF_ROUTE_IDLE;
+    const at: number[] = [];
+    for (const x of steps) {
+      const r = nextOffRoute(s, { off: x.off, offM: x.offM ?? (x.off ? 120 : 10), missing: false, now: x.t, rerouting });
+      s = r.state;
+      if (r.reroute) at.push(x.t);
+    }
+    return at;
+  };
+  it("poza trasą od NAV.rerouteAfterMs — wyznacza sama; pojedynczy odczyt „na trasie” przy progu nie zeruje odliczania", () => {
+    const steps = Array.from({ length: 12 }, (_, i) => ({ t: i * S, off: i !== 4 && i !== 7 }));
+    expect(run(steps)).toEqual([NAV.rerouteAfterMs]);
+  });
+  it("daleko od trasy — od razu; nieudana próba powtarzana po NAV.rerouteEveryMs; w trakcie wyznaczania — nie", () => {
+    const steps = Array.from({ length: 45 }, (_, i) => ({ t: i * S, off: true, offM: 400 }));
+    expect(run(steps)).toEqual([0, NAV.rerouteEveryMs, 2 * NAV.rerouteEveryMs]);
+    expect(run(steps, true)).toEqual([]);
+  });
+  it("powrót na trasę na dłużej niż NAV.backOnRouteMs — odliczanie od nowa", () => {
+    const steps = [...Array.from({ length: 5 }, (_, i) => ({ t: i * S, off: true })), ...Array.from({ length: 7 }, (_, i) => ({ t: (5 + i) * S, off: false })), ...Array.from({ length: 5 }, (_, i) => ({ t: (12 + i) * S, off: true }))];
+    expect(run(steps)).toEqual([]);
   });
 });

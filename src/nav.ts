@@ -119,7 +119,8 @@ export interface RouteWarning {
 export interface RoutePoi {
   km: number;
   id: string;
-  kind: "fuel" | "services" | "mop" | "parking";
+  /** toll = bramki (punkt poboru opłat). */
+  kind: "fuel" | "services" | "mop" | "parking" | "toll";
   name: string;
   /** Oznaczone dla ciężarówek (hgv / olej HGV). */
   truck: boolean;
@@ -164,7 +165,7 @@ const fmtLen = (km: number) => (km < 1 ? `${Math.round(km * 1000)} m` : `${Strin
 /** Ostrzeżenia dla trasy z naszej bazy — błąd nie blokuje nawigacji (trasa zostaje bez ostrzeżeń). */
 export async function withWarnings(token: string, route: NavRoute, vehicle: Vehicle): Promise<NavRoute> {
   try {
-    const r = await api<{ warnings: RouteWarning[]; pois?: RoutePoi[] }>("POST", "/nav/warnings", { points: route.points, vehicle }, token);
+    const r = await api<{ warnings: RouteWarning[]; pois?: RoutePoi[] }>("POST", "/nav/warnings", { points: route.points, vehicle, tolls: true }, token);
     return { ...route, warnings: r.warnings, pois: r.pois ?? [] };
   } catch {
     return route;

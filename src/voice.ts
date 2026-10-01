@@ -1,9 +1,9 @@
-// Komunikaty głosowe nawigacji (Web Speech API, po polsku): manewry i ostrzeżenia o ograniczeniach na trasie.
+// Komunikaty głosowe nawigacji (Web Speech API, po polsku): manewry, pas ruchu, bramki i ostrzeżenia o ograniczeniach na trasie.
 // Każdy komunikat raz na próg; progi zależą od prędkości (na autostradzie wcześniej).
 
 import { useEffect, useRef } from "react";
-import { NavInstruction } from "./core/navmatch";
-import { isAlert, RouteWarning, warningText } from "./nav";
+import { LaneSection, laneHint, lanesAhead, NavInstruction } from "./core/navmatch";
+import { isAlert, RoutePoi, RouteWarning, warningText } from "./nav";
 
 export const voiceSupported = () => typeof window !== "undefined" && "speechSynthesis" in window;
 
@@ -87,7 +87,12 @@ export type SectionVoice = (w: RouteWarning) => { limit?: number; avgKmh?: numbe
  * Mówi zapowiedzi manewrów i ostrzeżeń. `next` = następny manewr i odległość do niego; `warnings` z km trasy;
  * `km` — pozycja na trasie.
  */
-export function useNavVoice(enabled: boolean, next: { ins: NavInstruction; inKm: number } | undefined, km: number | undefined, warnings: RouteWarning[] | undefined, kmh: number | null, section?: SectionVoice) {
+/** Asystent pasa: podpowiedź mówimy raz, gdy do miejsca wyboru pasa zostało tyle km (autostrada / reszta). */
+const LANE_SAY_KM = { fast: 1.2, slow: 0.35 } as const;
+/** Bramki zapowiadamy raz z tej odległości. */
+const TOLL_SAY_KM = 1;
+
+export function useNavVoice(enabled: boolean, next: { ins: NavInstruction; inKm: number } | undefined, km: number | undefined, warnings: RouteWarning[] | undefined, kmh: number | null, section?: SectionVoice, lanes?: LaneSection[], pois?: RoutePoi[]) {
   const said = useRef(new Set<string>());
   useEffect(() => {
     if (!enabled || !voiceSupported() || km === undefined) return;
@@ -103,6 +108,20 @@ export function useNavVoice(enabled: boolean, next: { ins: NavInstruction; inKm:
         // Zapowiedź dalsza wyklucza późniejsze etapy tego samego manewru, jeśli już są „za nami”.
         said.current.add(`${key}:${stage}`);
         speak(stage === "now" ? next.ins.text : `Za ${spokenDist(next.inKm)} ${text}.`);
+      }
+    }
+    // Pas ruchu: np. zjazd z pasem, który dopiero się zacznie — „Jedź skrajnie prawym pasem” z wyprzedzeniem.
+    const ls = lanes && lanesAhead(lanes, km);
+    const hint = ls && laneHint(ls);
+    if (ls && hint && ls.inKm <= ((kmh ?? 0) >= 70 ? LANE_SAY_KM.fast : LANE_SAY_KM.slow) && !said.current.has(`l:${ls.km}`)) {
+      said.current.add(`l:${ls.km}`);
+      speak(`${hint.text}.`);
+    }
+    for (const p of pois ?? []) {
+      const d = p.km - km;
+      if (p.kind === "toll" && d > 0 && d <= TOLL_SAY_KM && !said.current.has(`t:${p.id}`)) {
+        said.current.add(`t:${p.id}`);
+        speak(`Za ${spokenDist(d)} bramki.`);
       }
     }
     for (const w of warnings ?? []) {

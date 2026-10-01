@@ -33,11 +33,17 @@ export const NAV = {
   /** Dalej od trasy niż tyle metrów (plus dokładność GPS) = zjechaliśmy z trasy. */
   offRouteM: 50,
   /** Tyle czasu poza trasą, zanim wyznaczymy ją od nowa (ms). */
-  rerouteAfterMs: 15_000,
-  /** Nie częściej niż co tyle ms — każda trasa to zapytanie do limitu TomTom. */
-  rerouteEveryMs: 60_000,
+  rerouteAfterMs: 8_000,
+  /** Dalej niż tyle metrów od trasy — wyznaczamy od razu (na pewno inna droga). */
+  offRouteFarM: 200,
+  /** Powrót na trasę liczy się dopiero po tylu ms na niej — pojedynczy odczyt przy progu nie zeruje odliczania. */
+  backOnRouteMs: 5_000,
+  /** Kolejna próba (np. po błędzie sieci) nie częściej niż co tyle ms — trasy liczy nasz silnik (bez limitu TomTom). */
+  rerouteEveryMs: 20_000,
   /** Pasy pokazujemy od tylu km przed miejscem, gdzie są potrzebne. */
-  lanesAheadKm: 1.5,
+  lanesAheadKm: 2,
+  /** Bramki (punkt poboru opłat) pokazujemy na karcie od tylu km. */
+  tollAheadKm: 3,
   /** Szukanie pozycji wokół poprzedniej: tyle punktów wstecz i naprzód (punkty co ~50 m). */
   windowBack: 40,
   windowAhead: 600,
@@ -93,6 +99,59 @@ export function nextInstruction(list: NavInstruction[], km: number): { ins: NavI
   // „Następnie …” — gdy kolejny manewr jest tuż za tym.
   const then = after && after.km - ins.km <= 0.3 ? after : undefined;
   return { ins, inKm: ins.km - km, then };
+}
+
+/** Gdzie się ustawić: `count` pasów prowadzi trasą; „right” = same prawe, „left” = same lewe, „middle” = środkowe. */
+export interface LaneHint {
+  side: "right" | "left" | "middle";
+  /** Pasy prowadzące trasą (numery od lewej, od 1). */
+  lanes: number[];
+  total: number;
+  text: string;
+}
+
+/**
+ * Asystent pasa: z układu pasów przed manewrem (np. dwa prosto + zjazdowy, który dopiero się zacznie) — którym pasem jechać.
+ * Pas zjazdowy po prawej, którego jeszcze nie ma, osiągniemy z prawego pasa, więc „trzymaj się prawego pasa” już teraz.
+ * undefined = każdy pas prowadzi trasą (nie ma czego podpowiadać).
+ */
+export function laneHint(s: Pick<LaneSection, "lanes">): LaneHint | undefined {
+  const total = s.lanes.length;
+  const ok = s.lanes.flatMap((l, i) => (l.follow ? [i + 1] : []));
+  if (!ok.length || ok.length === total || total < 2) return undefined;
+  const right = ok[ok.length - 1] === total;
+  const left = ok[0] === 1;
+  const many = ok.length > 1;
+  if (right && !left) return { side: "right", lanes: ok, total, text: many ? "Trzymaj się prawych pasów" : total >= 3 ? "Jedź skrajnie prawym pasem" : "Jedź prawym pasem" };
+  if (left && !right) return { side: "left", lanes: ok, total, text: many ? "Trzymaj się lewych pasów" : total >= 3 ? "Jedź skrajnie lewym pasem" : "Jedź lewym pasem" };
+  return { side: "middle", lanes: ok, total, text: many ? `Jedź pasami ${ok[0]}–${ok[ok.length - 1]} (od lewej)` : `Jedź pasem ${ok[0]} od lewej` };
+}
+
+/** Stan wykrywania zjazdu z trasy: od kiedy poza trasą, od kiedy znów na niej (ms), kiedy ostatnio wyznaczaliśmy. */
+export interface OffRouteState {
+  offSince: number | null;
+  onSince: number | null;
+  lastReroute: number;
+}
+
+export const OFF_ROUTE_IDLE: OffRouteState = { offSince: null, onSince: null, lastReroute: -Infinity };
+
+/**
+ * Czy wyznaczyć trasę od nowa. `off` — odczyt poza trasą, `offM` — odległość od niej, `missing` — jest cel, a nie ma trasy
+ * w urządzeniu (wtedy od razu). Poza trasą od NAV.rerouteAfterMs, daleko (NAV.offRouteFarM) od razu; powrót na trasę dopiero po
+ * NAV.backOnRouteMs — przy zjeździe odległość waha się wokół progu i każdy odczyt „na trasie” zaczynał odliczanie od nowa.
+ */
+export function nextOffRoute(s: OffRouteState, o: { off: boolean; offM?: number; missing: boolean; now: number; rerouting: boolean }): { state: OffRouteState; reroute: boolean } {
+  if (!o.off && !o.missing) {
+    if (s.offSince === null) return { state: s.onSince === null ? s : { ...s, onSince: null }, reroute: false };
+    const onSince = s.onSince ?? o.now;
+    const back = o.now - onSince >= NAV.backOnRouteMs;
+    return { state: { ...s, offSince: back ? null : s.offSince, onSince: back ? null : onSince }, reroute: false };
+  }
+  const offSince = s.offSince ?? o.now;
+  const wait = o.missing || (o.offM ?? 0) > NAV.offRouteFarM ? 0 : NAV.rerouteAfterMs;
+  const due = !o.rerouting && o.now - offSince >= wait && o.now - s.lastReroute >= NAV.rerouteEveryMs;
+  return { state: { offSince, onSince: null, lastReroute: due ? o.now : s.lastReroute }, reroute: due };
 }
 
 /** Pasy potrzebne na najbliższym odcinku (od `lanesAheadKm` przed nim do jego końca). */

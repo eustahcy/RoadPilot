@@ -29,6 +29,39 @@ function axis(aLat, aLon, bLat, bLon) {
   return ((Math.atan2((bLon - aLon) * kx, bLat - aLat) * 180) / Math.PI + 360) % 180;
 }
 
+/** Ograniczenie wysokości na moście „przepisane” z drogi pod nim: droga bez mostu z tą samą wartością bliżej niż tyle metrów. */
+const BRIDGE_COPY_M = 40;
+
+/** Punkty obiektu: łamana z geom ([[lat, lon], …]) albo sam punkt. */
+const rowPoints = (r) => (Array.isArray(r.geom) && r.geom.length ? r.geom : [[r.lat, r.lon]]);
+
+/** Najmniejsza odległość (m) między punktami jednej łamanej a odcinkami drugiej. */
+function polyDistM(a, b) {
+  let best = Infinity;
+  for (const [lat, lon] of a) {
+    const kx = M_PER_DEG * Math.cos((lat * Math.PI) / 180);
+    for (let i = 0; i < Math.max(1, b.length - 1); i++) {
+      const [p, q] = [b[i], b[Math.min(i + 1, b.length - 1)]];
+      const bx = (q[1] - p[1]) * kx, by = (q[0] - p[0]) * M_PER_DEG;
+      const px = (lon - p[1]) * kx, py = (lat - p[0]) * M_PER_DEG;
+      const l2 = bx * bx + by * by;
+      const t = l2 > 0 ? Math.max(0, Math.min(1, (px * bx + py * by) / l2)) : 0;
+      best = Math.min(best, Math.hypot(px - t * bx, py - t * by));
+    }
+  }
+  return best;
+}
+
+/**
+ * Częsty błąd w OSM: maxheight wiaduktu pod spodem wpisany na sam most (np. Estakada Kwiatkowskiego w Gdyni ma 3,5 m
+ * jak ulica Leszczynki pod nią). Ograniczenie wysokości na moście pomijamy, gdy tuż obok jest droga bez mostu z tą samą
+ * wartością — prawdziwe ograniczenia na mostach (konstrukcja nad jezdnią) zostają.
+ */
+export function dropCopiedBridgeHeights(rows) {
+  const below = rows.filter((r) => r.kind === "height" && !r.bridge);
+  return rows.filter((r) => !(r.kind === "height" && r.bridge && below.some((u) => Number(u.value) === Number(r.value) && polyDistM(rowPoints(r), rowPoints(u)) <= BRIDGE_COPY_M)));
+}
+
 /** Odległość punktu od łamanej trasy (m) i km trasy w najbliższym miejscu. Trasa: [lat, lon, km][]. */
 export function nearest(route, lat, lon, from = 0, to = route.length - 1) {
   const kx = M_PER_DEG * Math.cos((lat * Math.PI) / 180);

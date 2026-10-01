@@ -101,6 +101,21 @@ const ICONS: Record<string, React.ReactNode> = {
       <text x="24" y="35" textAnchor="middle" fontSize="26" fontWeight="900" fill="#fff" fontFamily="system-ui, sans-serif">P</text>
     </>
   ),
+  // MOP: niebieska tablica z P i znakiem stacji / baru (jak znak MOP), stacja: pomarańczowy dystrybutor.
+  mop: (
+    <>
+      <rect x="6" y="6" width="36" height="36" rx="5" fill="#1f5fd1" stroke="#fff" strokeWidth="2" />
+      <text x="20" y="31" textAnchor="middle" fontSize="20" fontWeight="900" fill="#fff" fontFamily="system-ui, sans-serif">P</text>
+      <path d="M30 18h6v14h-6zM36 22h2.5v7.5a1.5 1.5 0 0 0 3 0V20l-2-2" fill="#fff" stroke="#fff" strokeWidth="1" strokeLinejoin="round" />
+      <text x="24" y="40" textAnchor="middle" fontSize="7.5" fontWeight="900" fill="#fff" fontFamily="system-ui, sans-serif">MOP</text>
+    </>
+  ),
+  fuel: (
+    <>
+      <rect x="6" y="6" width="36" height="36" rx="5" fill="#e07a1f" stroke="#fff" strokeWidth="2" />
+      <path d="M14 36V13h13v23zM17 16v7h7v-7zM27 21h3.5l2.5 2.5v9a2 2 0 0 0 4 0V18l-3.5-3.5" fill="#fff" stroke="#fff" strokeWidth="1.4" strokeLinejoin="round" />
+    </>
+  ),
   other: (
     <>
       <circle cx="24" cy="24" r="19" fill="none" stroke="#cfdae2" strokeWidth="3" />

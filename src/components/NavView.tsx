@@ -14,7 +14,8 @@ import { GpsStatus, useWakeLock } from "../tracking";
 import { SectionVoice, useNavVoice } from "../voice";
 import { AlertVote } from "./AlertVote";
 import { GlVector } from "./GlMap";
-import { HudNav, HudNavData, HudRouteMap, MapBrowse, NavTrack, PinInfo, POI_TITLE, poiVisible, useNavTrack } from "./HudNav";
+import { fmtDist, HudNav, HudNavData, HudRouteMap, ManeuverIcon, MapBrowse, NavTrack, PinInfo, POI_TITLE, poiVisible, useNavTrack } from "./HudNav";
+import { RULES } from "../core/rules";
 import { LatLon, MAX_VIEW_ZOOM, MIN_VIEW_ZOOM } from "./MapView";
 import { HudPlanner, HudRoutePicker } from "./HudRoutePicker";
 import { arrivalInfo, fullscreenSupported, Icon, isStop, routeRefs, STALE_MS, toggleFullscreen, useFullscreen, useTick } from "./HudView";
@@ -61,7 +62,7 @@ function NavVoice({ nav, track, kmh, enabled, section }: { nav?: HudNavData; tra
   const route = nav?.route ?? null;
   const pos = track.pos;
   const next = route && pos && !track.off ? nextInstruction(route.instructions, pos.km) : undefined;
-  useNavVoice(enabled && !!route, next, pos?.km, route?.warnings, kmh, section);
+  useNavVoice(enabled && !!route, next, pos?.km, route?.warnings, kmh, section, route?.lanes, route?.pois);
   return null;
 }
 
@@ -69,7 +70,12 @@ const NO_NAV: HudNavData = { route: null, dest: null, rerouting: false, onRerout
 
 export function NavView(p: NavViewProps) {
   const now = useTick(1000);
+  /** Menu „więcej” (zgłoszenie, postój, dzień, pełny ekran, koniec nawigacji). */
   const [menu, setMenu] = useState(false);
+  /** Telefon pionowo: kafelki „przerwa” i „trasa” rozwinięte pod przyjazdem. */
+  const [tilesOpen, setTilesOpen] = useState(false);
+  /** Lista najbliższych manewrów (przycisk „›” na karcie). */
+  const [maneuvers, setManeuvers] = useState(false);
   const [sheet, setSheet] = useState(false);
   const [reporting, setReporting] = useState(false);
   /** Zgłoszenie z mapy: droga przy przytrzymanym miejscu — null = zgłoszenie z naszej pozycji. */
@@ -104,7 +110,9 @@ export function NavView(p: NavViewProps) {
   const next = route && pos && !track.off ? nextInstruction(route.instructions, pos.km) : undefined;
   // Ograniczenie z trasy; bez trasy albo poza nią — z drogi, którą jedziemy (ślad GPS dopasowany na serwerze).
   const onRoute = !!route && !!pos && !track.off;
-  const here = useLimitHere(p.mapToken, fresh, !onRoute);
+  // Ograniczenie z trasy; gdy trasa nie ma danych w tym miejscu (luka, starsza trasa) — też z drogi pod kołami, jak bez trasy.
+  const routeLimit = onRoute ? legalLimitAt(route, pos.km, p.truck) : undefined;
+  const here = useLimitHere(p.mapToken, fresh, !routeLimit);
   // „Po drodze” bez trasy: miejsca wokół pobieramy, gdy lista jest otwarta albo pasek pod prędkością włączony.
   const stripOn = !!p.mapToken && AHEAD_STRIP.some((k) => p.ahead.strip[k.id]);
   const nearby = useNearbyPois(p.mapToken, fresh, (aheadList || stripOn) && !onRoute, p.ahead.km);
@@ -113,7 +121,7 @@ export function NavView(p: NavViewProps) {
     : nearby && fresh ? placesAhead(nearby, fresh, fresh.heading, p.ahead.km).map(({ item, km }) => ({ poi: item, km, onRoute: false })) : null;
   // Pod prędkością: najbliższy z każdego włączonego rodzaju (najwyżej 3).
   const strip = stripOn && aheadItems ? AHEAD_STRIP.filter((k) => p.ahead.strip[k.id]).flatMap((k) => { const x = aheadItems.find((i) => k.kinds.includes(i.poi.kind)); return x ? [{ k, x }] : []; }) : [];
-  const limit = onRoute ? legalLimitAt(route, pos.km, p.truck)?.kmh : here ? legalLimitAt(here, Math.max(0, here.km - 0.005), p.truck)?.kmh : undefined;
+  const limit = routeLimit?.kmh ?? (here ? legalLimitAt(here, Math.max(0, here.km - 0.005), p.truck)?.kmh : undefined);
   const legal = limit !== undefined && p.vehicleMaxKmh !== undefined ? Math.min(limit, p.vehicleMaxKmh) : limit ?? p.vehicleMaxKmh;
   const tone = speedTone(speed, legal);
   const sectionRun = useSectionRun(route, pos, track.off, fresh?.t, p.truck).run;
@@ -126,6 +134,9 @@ export function NavView(p: NavViewProps) {
   const arrival = arrivalInfo(p.plan, p.deadline, now);
   const endDay = () => confirm("Zakończyć dzień pracy? Zacznie się odpoczynek dzienny.") && sc.onEndDay();
   const openSheet = () => { setSheet(true); setMenu(false); };
+  // Przerwa: ile z 4,5 h jazdy bez przerwy już za nami (pasek na kafelku).
+  const breakUsed = sc.stop ? 1 : Math.min(1, Math.max(0, sc.driver.sinceBreakMin / RULES.maxContinuousDrive));
+  const refs = route ? routeRefs(route.instructions) : "";
   const endNav = () => {
     if (!p.nav?.onEnd || !confirm("Zakończyć nawigację? Trasa i cel zostaną usunięte.")) return;
     p.nav.onEnd();
@@ -165,29 +176,30 @@ export function NavView(p: NavViewProps) {
             <span className="hud-nav-msg">Nawigacja jest dostępna w RoadPilot Premium.</span>
           </div>
         )}
-        <div className="hud-menu-wrap">
-          <button className="hud-pill hud-icon-btn" aria-label="Menu nawigacji" aria-expanded={menu} onClick={() => setMenu(!menu)}>
-            <Icon name="dots" />
-          </button>
-          {menu && (
-            <div className="hud-menu" role="menu">
-              <button role="menuitem" onClick={openSheet}>{sc.stop ? (sc.stop.dayEnd ? "Odpoczynek dzienny" : "Trwający postój") : "Zaczynam przerwę"}</button>
-              {sc.stop?.dayEnd ? (
-                <button role="menuitem" onClick={() => { if (confirmStartDay(sc.stop, now)) sc.onStartDay(); setMenu(false); }}>Rozpocznij dzień</button>
-              ) : (
-                <button role="menuitem" onClick={() => { endDay(); setMenu(false); }}>Zakończ dzień</button>
-              )}
-              {fullscreenSupported() && (
-                <button role="menuitemcheckbox" aria-checked={fullscreen} onClick={() => { toggleFullscreen(); setMenu(false); }}>
-                  {fullscreen ? "✓ " : ""}Pełny ekran
-                </button>
-              )}
-              {p.nav?.onEnd && (p.nav.route || p.nav.dest) && <button role="menuitem" onClick={() => { setMenu(false); endNav(); }}>Zakończ nawigację</button>}
-              <button role="menuitem" onClick={p.onExit}>Wyjdź z nawigacji</button>
-            </div>
-          )}
-        </div>
+        {route && pos && !track.off && <button className="nm-card-more" onClick={() => setManeuvers(true)} aria-label="Najbliższe manewry"><Icon name="chevron" /></button>}
       </header>
+
+      {/* Kafelki: do celu, przyjazd, przerwa, trasa. Telefon pionowo: dwa pierwsze, reszta po dotknięciu uchwytu; poziomo: pasek na dole; tablet: 2×2 u góry. */}
+      <div className={`nm-tiles ${tilesOpen ? "open" : ""}`}>
+        <button className="nm-tiles-handle" onClick={() => setTilesOpen(!tilesOpen)} aria-expanded={tilesOpen} aria-label={tilesOpen ? "Zwiń" : "Przerwa i trasa"} />
+        <div className="nm-tile">
+          <Icon name="flag" />
+          <span><small>Do celu</small><b>{fmtKm(p.route.totalKm)}</b></span>
+        </div>
+        <div className={`nm-tile ${arrival.bad ? "bad" : ""}`}>
+          <Icon name="clock" />
+          <span><small>Przyjazd</small><b>{arrival.clock}</b><i>{arrival.left !== undefined ? `za ${arrival.left}` : arrival.note}</i></span>
+        </div>
+        <button className={`nm-tile extra ${stopItem.tone}`} onClick={openSheet}>
+          <Icon name="coffee" />
+          <span><small>{stopItem.label}</small><b>{stopItem.value}</b><i>{stopItem.sub}</i></span>
+          <em className="nm-tile-bar" aria-hidden><i style={{ width: `${Math.round(breakUsed * 100)}%` }} /></em>
+        </button>
+        <div className="nm-tile extra">
+          <Icon name="road" />
+          <span><small>Trasa</small><b>{refs || (route ? fmtKm(route.lengthKm) : "—")}</b><i>{route ? `${fmtKm(route.lengthKm)}${route.engine === "roadpilot" ? " · RoadPilot" : ""}` : ""}</i></span>
+        </div>
+      </div>
 
       <div className="nm-side">
         {p.voice.supported && (
@@ -196,7 +208,7 @@ export function NavView(p: NavViewProps) {
           </button>
         )}
         {p.planner && (
-          <button className="nm-btn" onClick={() => { setPlanning(true); setMenu(false); }} aria-label="Cel i trasy alternatywne">
+          <button className="nm-btn" onClick={() => setPlanning(true)} aria-label="Cel i trasy alternatywne">
             <Icon name="search" />
           </button>
         )}
@@ -208,19 +220,24 @@ export function NavView(p: NavViewProps) {
           <Icon name="parking" />
         </button>
         {p.report && (
-          <button className="nm-btn report" onClick={() => { setReportAt(null); setReporting(true); setMenu(false); }} aria-label="Zgłoś na drodze">
+          <button className="nm-btn report" onClick={() => { setReportAt(null); setReporting(true); }} aria-label="Zgłoś: fotoradar, kontrola, brakujący parking / MOP / stacja">
             <Icon name="flag" />
           </button>
         )}
-        {browse && (
-          <button className="nm-btn nm-recenter" onClick={() => setBrowse(null)} aria-label="Wróć do mojej pozycji">
-            <Icon name="nav" />
-          </button>
-        )}
+        <button className="nm-btn nm-more" onClick={() => setMenu(true)} aria-label="Więcej: zgłoszenie, postój, zakończ nawigację">
+          <Icon name="dots" className="more-dots" />
+          <Icon name="chevron" className="more-chevron" />
+        </button>
+      </div>
+
+      <div className="nm-ctl">
         <div className="nm-zoom">
           <button onClick={() => (browse ? zoomBrowse(1) : setZoomOffset((z) => Math.min(2, z + 0.5)))} aria-label="Przybliż">+</button>
           <button onClick={() => (browse ? zoomBrowse(-1) : setZoomOffset((z) => Math.max(-5, z - 0.5)))} aria-label="Oddal">−</button>
         </div>
+        <button className={`nm-btn nm-recenter ${browse ? "on" : ""}`} onClick={() => setBrowse(null)} aria-label="Wróć do mojej pozycji">
+          <Icon name="nav" />
+        </button>
       </div>
 
       {/* Nasza prędkość i obok ograniczenie — jedno spojrzenie, jak w nawigacjach. */}
@@ -229,25 +246,22 @@ export function NavView(p: NavViewProps) {
           <strong className={speed === null ? "none" : tone ?? ""}>{speed ?? "—"}</strong>
           <span>km/h</span>
         </div>
-        {/* „×” nad prędkością: w kolumnie po prawej się nie mieści (pionowo wchodziła pod menu, poziomo spychała zoom pod dolny panel). */}
-        {p.nav?.onEnd && (p.nav.route || p.nav.dest) && (
-          <button className="nm-btn end nm-end" onClick={endNav} aria-label="Zakończ nawigację" title="Zakończ nawigację">
-            <Icon name="close" />
-          </button>
-        )}
         {limit !== undefined && <span className="hud-limit nm-limit" aria-label={`Ograniczenie ${limit} km/h`}>{limit}</span>}
-        {strip.length > 0 && (
-          <button className="nm-ahead-strip" onClick={() => setAheadList(true)} aria-label="Po drodze — pokaż listę">
-            {strip.map(({ k, x }) => (
-              <span key={k.id}>
-                <AheadIcon kind={k.id === "fuel" ? "fuel" : x.poi.kind} />
-                <b>{k.short}</b>
-                <strong>{fmtAheadKm(x.km)}</strong>
-              </span>
-            ))}
-          </button>
-        )}
+        {legal !== undefined && speed !== null && <em className={`nm-speed-bar ${tone ?? ""}`} aria-hidden><i style={{ width: `${Math.min(100, Math.round((speed / legal) * 100))}%` }} /></em>}
       </div>
+
+      {strip.length > 0 && (
+        <button className="nm-ahead" onClick={() => setAheadList(true)} aria-label="Po drodze — pokaż listę">
+          {strip.map(({ k, x }) => (
+            <span key={k.id}>
+              <AheadIcon kind={k.id === "fuel" ? "fuel" : x.poi.kind} />
+              <b>{k.short}</b>
+              <strong>{fmtAheadKm(x.km)}</strong>
+              <Icon name="chevron" className="nm-ahead-go" />
+            </span>
+          ))}
+        </button>
+      )}
       {notice && <div className="nm-notice">{notice}</div>}
 
       <footer className="nm-bottom">
@@ -267,25 +281,44 @@ export function NavView(p: NavViewProps) {
             onClose={() => setHold(null)}
           />
         )}
-        <div className="nm-info">
-          <div>
-            <Icon name="flag" />
-            <span><small>Do celu</small><b>{fmtKm(p.route.totalKm)}</b></span>
-          </div>
-          <div className={arrival.bad ? "bad" : ""}>
-            <Icon name="clock" />
-            <span><small>Przyjazd</small><b>{arrival.clock}</b><i>{arrival.left !== undefined ? `za ${arrival.left}` : arrival.note}</i></span>
-          </div>
-          <button className={stopItem.tone} onClick={openSheet}>
-            <Icon name="coffee" />
-            <span><small>{stopItem.label}</small><b>{stopItem.value}</b><i>{stopItem.sub}</i></span>
-          </button>
-          <div>
-            <Icon name="road" />
-            <span><small>Trasa</small><b>{route ? routeRefs(route.instructions) : "—"}</b><i>{route ? fmtKm(route.lengthKm) : ""}{route?.engine === "roadpilot" ? " · RoadPilot" : ""}</i></span>
+      </footer>
+
+      {menu && (
+        <div className="hud-sheet" onClick={(e) => e.target === e.currentTarget && setMenu(false)}>
+          <div className="hud-sheet-body">
+            <button className="hud-sheet-close" aria-label="Zamknij" onClick={() => setMenu(false)}>×</button>
+            <div className="stop-label">{refs ? `${refs} · ` : ""}{route ? fmtKm(route.lengthKm) : "Bez trasy"}{p.nav?.dest ? ` → ${p.nav.dest.label}` : ""}</div>
+            <div className="nm-actions">
+              <button className={sc.stop ? "active" : ""} onClick={openSheet}><Icon name="coffee" /><span>{sc.stop ? (sc.stop.dayEnd ? "Odpoczynek" : "Trwający postój") : "Zaczynam przerwę"}</span></button>
+              {sc.stop?.dayEnd ? (
+                <button onClick={() => { if (confirmStartDay(sc.stop, now)) sc.onStartDay(); setMenu(false); }}><Icon name="clock" /><span>Rozpocznij dzień</span></button>
+              ) : (
+                <button onClick={() => { if (endDay()) setMenu(false); }}><Icon name="clock" /><span>Zakończ dzień</span></button>
+              )}
+              {fullscreenSupported() && <button aria-pressed={fullscreen} onClick={() => { toggleFullscreen(); setMenu(false); }}><Icon name="nav" /><span>{fullscreen ? "Zamknij pełny ekran" : "Pełny ekran"}</span></button>}
+              {p.nav?.onEnd && (p.nav.route || p.nav.dest) && <button className="end" onClick={() => { setMenu(false); endNav(); }}><Icon name="close" /><span>Zakończ nawigację</span></button>}
+              <button onClick={p.onExit}><Icon name="finish" /><span>Wyjdź z nawigacji</span></button>
+            </div>
           </div>
         </div>
-      </footer>
+      )}
+      {maneuvers && route && (
+        <div className="hud-sheet" onClick={(e) => e.target === e.currentTarget && setManeuvers(false)}>
+          <div className="hud-sheet-body">
+            <button className="hud-sheet-close" aria-label="Zamknij" onClick={() => setManeuvers(false)}>×</button>
+            <div className="stop-label">Najbliższe manewry</div>
+            <ul className="nm-man-list">
+              {route.instructions.filter((i) => i.km > (pos?.km ?? 0) + 0.01).slice(0, 20).map((i) => (
+                <li key={i.km + i.maneuver}>
+                  <ManeuverIcon ins={i} />
+                  <span><b>{i.text}</b>{i.signpost && <small>→ {i.signpost}</small>}</span>
+                  <strong>{fmtDist(Math.max(0, i.km - (pos?.km ?? 0)))}</strong>
+                </li>
+              ))}
+            </ul>
+          </div>
+        </div>
+      )}
 
       {warnList && (
         <div className="hud-sheet" onClick={(e) => e.target === e.currentTarget && setWarnList(false)}>
@@ -379,7 +412,7 @@ const AHEAD_MAX = 40;
 
 type AheadFilter = "all" | "mop" | "parking" | "fuel";
 const AHEAD_FILTERS: { id: AheadFilter; label: string; kinds: RoutePoi["kind"][] }[] = [
-  { id: "all", label: "Wszystko", kinds: ["services", "mop", "parking", "fuel"] },
+  { id: "all", label: "Wszystko", kinds: ["services", "mop", "parking", "fuel", "toll"] },
   { id: "mop", label: "MOP", kinds: ["services", "mop"] },
   { id: "parking", label: "Parkingi", kinds: ["parking"] },
   { id: "fuel", label: "Stacje", kinds: ["fuel", "services"] },
@@ -390,7 +423,7 @@ const AHEAD_STRIP: { id: keyof AheadStrip; short: string; kinds: RoutePoi["kind"
   { id: "parking", short: "Parking", kinds: ["parking"] },
   { id: "fuel", short: "Stacja", kinds: ["fuel", "services"] },
 ];
-const AHEAD_KIND: Record<RoutePoi["kind"], string> = { services: "MOP ze stacją", mop: "MOP", parking: "Parking TIR", fuel: "Stacja paliw" };
+const AHEAD_KIND: Record<RoutePoi["kind"], string> = { services: "MOP ze stacją", mop: "MOP", parking: "Parking TIR", fuel: "Stacja paliw", toll: "Bramki" };
 
 /** Blisko z dokładnością do 0,1 km („1,4 km”), dalej pełne km. */
 const fmtAheadKm = (km: number) => (km < 10 ? `${km.toFixed(1).replace(".", ",")} km` : fmtKm(km));
@@ -406,7 +439,8 @@ interface AheadItem {
 function AheadIcon({ kind }: { kind: RoutePoi["kind"] }) {
   return (
     <i className={`nm-ahead-ico k-${kind}`} aria-hidden>
-      {kind === "fuel" ? <svg viewBox="-12 -12 24 24"><path d="M-7 8V-8h9v16zM-5 -6v5h5v-5zM2 -3h2.5l2 2v7a1.5 1.5 0 0 0 3 0V-5l-3-3" fill="#fff" stroke="#fff" strokeWidth="1.2" strokeLinejoin="round" /></svg> : "P"}
+      {kind === "fuel" ? <svg viewBox="-12 -12 24 24"><path d="M-7 8V-8h9v16zM-5 -6v5h5v-5zM2 -3h2.5l2 2v7a1.5 1.5 0 0 0 3 0V-5l-3-3" fill="#fff" stroke="#fff" strokeWidth="1.2" strokeLinejoin="round" /></svg>
+        : kind === "toll" ? <svg viewBox="-12 -12 24 24"><path d="M-8 8V-6" stroke="#fff" strokeWidth="3" strokeLinecap="round" /><rect x="-8" y="-8" width="17" height="5" rx="1.5" fill="#fff" /></svg> : "P"}
     </i>
   );
 }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { applyVotes, routeAlerts, routeBoxes, routeWarnings } from "./warnings.mjs";
+import { applyVotes, dropCopiedBridgeHeights, routeAlerts, routeBoxes, routeWarnings } from "./warnings.mjs";
 
 const KM_PER_DEG = 111.32;
 /** Trasa na północ po 19° E od 52° N, punkt co 100 m, 5 km. */
@@ -111,5 +111,18 @@ describe("głosy na fotoradary i kontrole", () => {
       ["osm:n4", { up: 2, down: 3, lastUp: 1, lastDown: 1 }],
     ]);
     expect(applyVotes(a, votes).map((w) => w.id)).toEqual(["2", "n4"]);
+  });
+});
+
+describe("wysokość na moście przepisana z drogi pod nim (błąd w OSM)", () => {
+  // Estakada Kwiatkowskiego (most, 3,5 m) i ulica Leszczynki pod nią (3,5 m) — dane z OSM.
+  const estakada = { kind: "height", value: 3.5, bridge: 1, lat: 54.52732, lon: 18.48189, geom: [[54.52714, 18.48173], [54.52732, 18.48189], [54.52748, 18.48201]] };
+  const leszczynki = { kind: "height", value: 3.5, bridge: 0, lat: 54.52721, lon: 18.48193, geom: [[54.52757, 18.48101], [54.52736, 18.48159], [54.52721, 18.48193], [54.5272, 18.48201]] };
+  it("most z tą samą wartością co droga pod nim — pomijany; droga pod spodem zostaje", () => {
+    expect(dropCopiedBridgeHeights([estakada, leszczynki])).toEqual([leszczynki]);
+  });
+  it("prawdziwe ograniczenie na moście (inna wartość albo nic pod spodem) — zostaje", () => {
+    expect(dropCopiedBridgeHeights([estakada, { ...leszczynki, value: 3.2 }])).toHaveLength(2);
+    expect(dropCopiedBridgeHeights([estakada])).toEqual([estakada]);
   });
 });

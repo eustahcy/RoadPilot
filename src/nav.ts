@@ -67,6 +67,8 @@ export interface NavRoute {
   roads?: RoadSection[];
   /** Korki, roboty i zamknięcia na trasie (TomTom, w chwili wyznaczenia); level 1 = małe … 3 = duże, 4 = zamknięte. */
   traffic?: TrafficSection[];
+  /** Kiedy korki odświeżono w trakcie jazdy (TRAFFIC_REFRESH) — brak = tylko z chwili wyznaczenia (własny silnik: żadnych). */
+  trafficAt?: number;
   /** Ograniczenia na trasie, których pojazd nie spełnia (nasze dane: OSM + zgłoszenia) — brak = nie sprawdzono. */
   warnings?: RouteWarning[];
   /** Stacje, MOP-y i parkingi przy trasie (pinezki) — dociągane razem z ostrzeżeniami. */
@@ -195,6 +197,28 @@ export async function refreshWarnings(token: string, route: NavRoute, km: number
   }
 }
 
+/** Korki z TomTom na trasie przed nami — dla obu silników, co kilka minut (trasa TomTom ma je tylko z chwili wyznaczenia). */
+export const TRAFFIC_REFRESH = { everyMs: 5 * 60_000, aheadKm: 150 } as const;
+
+/**
+ * Bieżące utrudnienia na odcinku trasy przed nami (od `km`) — zastępują dotychczasowe z tego odcinka; za nami i dalej
+ * zostają. null = nie udało się (zostają stare).
+ */
+export async function refreshTraffic(token: string, route: NavRoute, km: number): Promise<Pick<NavRoute, "traffic" | "trafficMin" | "trafficAt"> | null> {
+  const points = route.points.filter((p) => p[2] >= km - 0.5 && p[2] <= km + TRAFFIC_REFRESH.aheadKm);
+  if (points.length < 2) return null;
+  try {
+    const r = await api<{ traffic: TrafficSection[] }>("POST", "/nav/traffic", { points }, token);
+    const [a, b] = [points[0][2], points[points.length - 1][2]];
+    const traffic = [...(route.traffic ?? []).filter((t) => t.toKm < a || t.km > b), ...r.traffic].sort((x, y) => x.km - y.km);
+    // „Korki teraz” — opóźnienie z utrudnień, których jeszcze nie minęliśmy.
+    const trafficMin = Math.round(traffic.filter((t) => t.toKm > km).reduce((sum, t) => sum + t.delayMin, 0) * 10) / 10;
+    return { traffic, trafficMin, trafficAt: Date.now() };
+  } catch {
+    return null;
+  }
+}
+
 export async function searchPlaces(token: string, q: string, near?: { lat: number; lon: number } | null): Promise<NavPlace[]> {
   const params = new URLSearchParams({ q });
   if (near) {
@@ -303,22 +327,22 @@ export function useLimitHere(token: string | undefined, live: { lat: number; lon
 /** Stacja / MOP / parking TIR wokół pozycji (bez trasy) — z bazy OSM na serwerze. */
 export type NearbyPoi = Pick<RoutePoi, "id" | "kind" | "name" | "truck" | "lat" | "lon">;
 
-/** Pobieramy ponownie po tylu km jazdy (serwer zwraca ok. 32 km wokół, lista sięga 30 km przed nami). */
+/** Pobieramy ponownie po tylu km jazdy; serwer zwraca zasięg listy + ten zapas, więc przed nami zawsze jest pełne `km`. */
 const NEARBY_REFETCH_KM = 8;
 
-/** Miejsca wokół pozycji do listy „Po drodze” bez trasy (Premium); błąd / brak sieci — ponowna próba po NEARBY_REFETCH_KM. */
-export function useNearbyPois(token: string | undefined, live: { lat: number; lon: number; t: number } | null, enabled: boolean): NearbyPoi[] | null {
+/** Miejsca wokół pozycji do listy „Po drodze” bez trasy (Premium), `km` = zasięg listy; błąd / brak sieci — ponowna próba po NEARBY_REFETCH_KM. */
+export function useNearbyPois(token: string | undefined, live: { lat: number; lon: number; t: number } | null, enabled: boolean, km: number): NearbyPoi[] | null {
   const [pois, setPois] = useState<NearbyPoi[] | null>(null);
-  const at = useRef<{ lat: number; lon: number } | null>(null);
+  const at = useRef<{ lat: number; lon: number; km: number } | null>(null);
   const on = enabled && !!token;
   useEffect(() => {
     if (!on || !live) return;
-    if (at.current && distanceM(at.current, live) < NEARBY_REFETCH_KM * 1000) return;
-    at.current = { lat: live.lat, lon: live.lon };
-    api<{ pois: NearbyPoi[] }>("GET", `/nav/nearby?lat=${live.lat.toFixed(4)}&lon=${live.lon.toFixed(4)}`, undefined, token)
+    if (at.current && at.current.km === km && distanceM(at.current, live) < NEARBY_REFETCH_KM * 1000) return;
+    at.current = { lat: live.lat, lon: live.lon, km };
+    api<{ pois: NearbyPoi[] }>("GET", `/nav/nearby?lat=${live.lat.toFixed(4)}&lon=${live.lon.toFixed(4)}&km=${km + NEARBY_REFETCH_KM}`, undefined, token)
       .then((r) => setPois(r.pois))
       .catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [on, live?.t, token]);
+  }, [on, live?.t, token, km]);
   return on ? pois : null;
 }

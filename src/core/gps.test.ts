@@ -74,12 +74,86 @@ describe("GPS — licznik km", () => {
     expect(r.ended).toEqual([{ start: NOW + 10 * MIN, end: NOW + 55 * MIN }]);
   });
 
-  it("luka w odczytach: droga ×1,2, jazda szacowana ze średniej, bez zaliczania przerwy", () => {
+  it("luka bez drogi z serwera: linia prosta ×1,2, jazda ze średniej; jechaliśmy, teraz stoimy → postój trwa od końca jazdy", () => {
     const t = drive(startTrack(fix(0, 0)), 0, 0, 10, 60).track;
     const r = addFix(t, fix(130, 10 + 100)); // 2 h bez odczytów, 100 km w linii prostej
     expect(r.km).toBeCloseTo(120, 1);
     expect(r.driveMin).toBeCloseTo((120 / GPS.gapAvgKmh) * 60, 3);
     expect(r.stopEnded).toBeUndefined();
+    expect(r.driveEnd).toBeCloseTo(NOW + 10 * MIN + r.driveMin * MIN, -2);
+    expect(r.track.stopSince).toBe(r.driveEnd);
+    expect(r.gap).toMatchObject({ start: NOW + 10 * MIN, end: NOW + 130 * MIN, road: false });
+    // Ruszamy po 10 min — zaliczony postój obejmuje część luki: od końca szacowanej jazdy.
+    let tr = r.track;
+    for (let m = 131; m <= 140; m++) tr = addFix(tr, fix(m, 110)).track;
+    const go = drive(tr, 140, 110, 2, 60);
+    expect(go.ended[0].start).toBe(r.driveEnd);
+  });
+
+  it("luka z drogą z serwera: km i czas jazdy ciężarówki zamiast linii prostej", () => {
+    const t = drive(startTrack(fix(0, 0)), 0, 0, 10, 60).track;
+    const r = addFix(t, fix(130, 10 + 100), { road: { km: 131, min: 105 } });
+    expect(r.km).toBe(131);
+    expect(r.driveMin).toBe(105);
+    expect(r.gap).toMatchObject({ km: 131, driveMin: 105, road: true });
+  });
+
+  it("jedziemy po luce → postój był wcześniej i zaliczamy go (np. przerwa 45 min)", () => {
+    const t = drive(startTrack(fix(0, 0)), 0, 0, 10, 60).track;
+    const r = addFix(t, fix(130, 10 + 60, { speed: 22 }), { road: { km: 70, min: 70 } });
+    expect(r.driveEnd).toBe(NOW + 130 * MIN);
+    expect(r.stopEnded).toEqual({ start: NOW + 10 * MIN, end: NOW + 60 * MIN });
+    expect(r.track.stopSince).toBeNull();
+  });
+
+  it("staliśmy przed luką → postój od swojego początku do ruszenia", () => {
+    let t = drive(startTrack(fix(0, 0)), 0, 0, 10, 60).track;
+    for (let m = 11; m <= 20; m++) t = addFix(t, fix(m, 10)).track;
+    expect(t.stopSince).toBe(NOW + 10 * MIN);
+    const r = addFix(t, fix(200, 10 + 50), { road: { km: 60, min: 50 } });
+    expect(r.stopEnded).toEqual({ start: NOW + 10 * MIN, end: NOW + 150 * MIN });
+  });
+
+  it("droga z serwera nie do przejechania w czasie luki → linia prosta", () => {
+    const t = drive(startTrack(fix(0, 0)), 0, 0, 10, 60).track;
+    const r = addFix(t, fix(13, 10 + 4, { speed: 22 }), { road: { km: 7.6, min: 9 } });
+    expect(r.gap?.road).toBe(false);
+    expect(r.km).toBeCloseTo(4 * GPS.gapRoadFactor, 1);
+  });
+
+  it("w luce jechaliśmy szybciej niż szacunek → cała luka to jazda", () => {
+    const t = drive(startTrack(fix(0, 0)), 0, 0, 10, 60).track;
+    const r = addFix(t, fix(40, 10 + 40, { speed: 22 }), { road: { km: 45, min: 38 } });
+    expect(r.driveMin).toBe(30);
+    expect(r.stopEnded).toBeUndefined();
+  });
+
+  it("spacer z telefonem na postoju (5–6 km/h, 450 m) nie kończy postoju; ruszenie autem tak", () => {
+    let t = drive(startTrack(fix(0, 0)), 0, 0, 10, 60).track;
+    for (let m = 11; m <= 20; m++) t = addFix(t, fix(m, 10)).track;
+    expect(t.stopSince).toBe(NOW + 10 * MIN);
+    // Do toalety i z powrotem: odbiornik podaje 1,6 m/s (5,8 km/h), bez prędkości — liczymy z przesunięcia (5,5 km/h).
+    const walk = drive(t, 20, 10, 5, 5.5);
+    expect(walk.driveMin).toBe(0);
+    expect(walk.ended).toEqual([]);
+    let back = walk.track;
+    for (let m = 25.25; m <= 30; m += 0.25) back = addFix(back, fix(m, 10 + 0.458 - ((m - 25) / 5) * 0.458, { speed: 1.6 })).track;
+    expect(back.stopSince).toBe(NOW + 10 * MIN);
+    expect(back.odoKm).toBeCloseTo(t.odoKm, 5);
+    // Ruszamy autem: 40 km/h — postój kończy się, gdy zaczęła się jazda.
+    const go = drive(back, 30, 10, 2, 40);
+    expect(go.ended).toHaveLength(1);
+    expect(go.ended[0].start).toBe(NOW + 10 * MIN);
+    expect(go.ended[0].end).toBeGreaterThanOrEqual(NOW + 30 * MIN);
+  });
+
+  it("luka na postoju z przesunięciem < 1 km (ekran zgasł w drodze do sklepu) to nie jazda", () => {
+    let t = drive(startTrack(fix(0, 0)), 0, 0, 10, 60).track;
+    for (let m = 11; m <= 20; m++) t = addFix(t, fix(m, 10)).track;
+    const r = addFix(t, fix(26, 10.4));
+    expect(r.driveMin).toBe(0);
+    expect(r.stopEnded).toBeUndefined();
+    expect(r.track.stopSince).toBe(NOW + 10 * MIN);
   });
 
   it("luka bez ruchu to postój — np. odpoczynek przy zamkniętej aplikacji", () => {

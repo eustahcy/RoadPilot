@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { describeFriend, fmtAgo, Friend, nearestFriend, presenceOf } from "./friends";
+import { describeFriend, fmtAgo, Friend, nearestFriend, presenceOf, presenceSendable } from "./friends";
 import { Live } from "./gps";
 import { DriverStatus } from "./scenarios";
 
@@ -42,6 +42,16 @@ describe("describeFriend", () => {
   it("postój bez limitu: „od 1 h 05 min”; blisko przerwy → warn", () => {
     expect(describeFriend({ ...base, status: "rest", since: now - 65 * MIN }, null, now).duration).toBe("od 1 h 05 min");
     expect(describeFriend({ ...base, status: "driving", since: now, untilBreakMin: 20 }, null, now).tone).toBe("warn");
+  });
+});
+
+describe("presenceSendable", () => {
+  it("pozycja w ruchu starsza niż minuta nie idzie do znajomych; na postoju tak", () => {
+    const p = presenceOf(live, null, now - 60 * MIN, status, undefined, "", 0)!;
+    expect(p.posAt).toBe(now);
+    expect(presenceSendable(p, now + 30_000)).toBe(true);
+    expect(presenceSendable(p, now + 90 * MIN)).toBe(false);
+    expect(presenceSendable({ ...p, status: "standing" }, now + 90 * MIN)).toBe(true);
   });
 });
 

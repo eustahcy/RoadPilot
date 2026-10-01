@@ -18,6 +18,8 @@ export interface HudNavData {
   onPlan?: () => void;
   /** Nowe punkty pośrednie → trasa liczona od nowa (od pozycji GPS, bez GPS od startu trasy). */
   onVia?: (via: NavPlace[]) => Promise<void>;
+  /** Zakończ nawigację: bez trasy i celu (inaczej trasa wyznaczyłaby się sama od nowa). */
+  onEnd?: () => void;
 }
 
 export interface NavTrack {
@@ -68,8 +70,10 @@ export function useNavTrack(nav: HudNavData, live: Live | null, accuracyM = 20):
 
 /** Od tylu km przed miejscem z ograniczeniem pokazujemy ostrzeżenie. */
 const WARN_AHEAD_KM = 3;
-/** Od tylu km przed korkiem pokazujemy go na karcie. */
+/** Od tylu km przed utrudnieniem pokazujemy je na karcie; korek, zamknięcie albo od 5 min opóźnienia — już od TRAFFIC_FAR_KM. */
 const TRAFFIC_AHEAD_KM = 8;
+const TRAFFIC_FAR_KM = 100;
+const farJam = (t: TrafficSection) => jamTone(t) !== "slow" || t.delayMin >= 5;
 /** Nazwa utrudnienia na karcie: korek / wolniejszy ruch / roboty / zamknięcie. */
 function jamText(t: TrafficSection) {
   const tone = jamTone(t);
@@ -177,8 +181,8 @@ export function HudNav({ nav, track, compact, card, section }: { nav: HudNavData
   // Najbliższe ostrzeżenie przed nami (nasze dane) — pokazujemy od WARN_AHEAD_KM; odcinkowy pomiar do jego końca.
   const warn = route.warnings?.find((w) => isAhead(w, pos.km) && w.km - pos.km <= WARN_AHEAD_KM && (section === undefined || w.kind !== "section"));
   const inSection = warn?.toKm !== undefined && pos.km >= warn.km;
-  // Najbliższy korek, spowolnienie (od minuty) albo zamknięcie przed nami — od TRAFFIC_AHEAD_KM.
-  const jam = route.traffic?.find((t) => jamMatters(t) && t.toKm > pos.km && t.km - pos.km <= TRAFFIC_AHEAD_KM);
+  // Najbliższe utrudnienie przed nami: blisko (TRAFFIC_AHEAD_KM) każde ważne, dalej (TRAFFIC_FAR_KM) tylko korek / zamknięcie / duże opóźnienie.
+  const jam = route.traffic?.find((t) => jamMatters(t) && t.toKm > pos.km && (t.km - pos.km <= TRAFFIC_AHEAD_KM || (t.km - pos.km <= TRAFFIC_FAR_KM && farJam(t))));
 
   return (
     <div className={`${cls} ${warn || section ? "with-warn" : ""} ${jam ? "with-jam" : ""}`}>
@@ -524,9 +528,10 @@ export function HudRouteMap({ nav, track, live, token, anchorY = 0.8, zoomOffset
   const behind = route && pos ? routeSlice(route.points, Math.max(0, km - 1), km) : [];
   const next = route && pos ? nextInstruction(route.instructions, km) : undefined;
   // Utrudnienia na widocznym kawałku trasy — żółty wolniej, czerwony korek; etykieta z opóźnieniem na początku odcinka.
+  const jamTo = browse ? Infinity : km + 12;
   const jams = (route?.traffic ?? [])
-    .filter((t) => t.toKm > km && t.km < km + 12)
-    .map((t) => ({ t, tone: jamTone(t), pts: routeSlice(route!.points, Math.max(km, t.km), Math.min(km + 12, t.toKm)) }))
+    .filter((t) => t.toKm > km && t.km < jamTo)
+    .map((t) => ({ t, tone: jamTone(t), pts: routeSlice(route!.points, Math.max(km, t.km), Math.min(jamTo, t.toKm)) }))
     .filter((j) => j.pts.length > 1);
   // Etykiety nie mogą na siebie wchodzić — kolejna co najmniej 1,5 km dalej.
   let lastLabel = -Infinity;

@@ -1,7 +1,7 @@
 // Stan aplikacji zapisywany lokalnie w urządzeniu (bez backendu).
 
 import { useEffect, useState } from "react";
-import { GpsTrack } from "./core/gps";
+import { Fix, GpsTrack } from "./core/gps";
 import { DayLog } from "./core/history";
 import { DriverState } from "./core/plan";
 import { DEFAULT_SPEEDS, ProfileId, Segment, Speeds } from "./core/route";
@@ -71,6 +71,16 @@ export interface Settings {
   friendsShare: boolean;
   /** Styl własnej mapy w HUD: dzień / noc / automatycznie (pogoda albo zegar). */
   mapTheme: "auto" | "day" | "night";
+  /** Nawigacja → „Po drodze”: zasięg listy (km) i które najbliższe miejsca pokazać pod prędkością. */
+  aheadKm: number;
+  aheadStrip: AheadStrip;
+}
+
+/** Pod prędkością w Nawigacji: najbliższy MOP, parking TIR i stacja przed nami (każde osobno do wyłączenia). */
+export interface AheadStrip {
+  mop: boolean;
+  parking: boolean;
+  fuel: boolean;
 }
 
 export interface AppState {
@@ -101,6 +111,8 @@ export interface AppState {
    * inne biorą stan z konta. at = ostatni zaliczony odczyt (ms); po TRACKER_TTL_MS bez odczytów przejmuje inne.
    */
   tracker: { device: string; at: number } | null;
+  /** Odczyt GPS po luce czekający na drogę ciężarówki z serwera (tracking.ts useGapRoad) — tylko w tym urządzeniu. */
+  pendingGap?: { fix: Fix; from: { lat: number; lon: number }; asked: number } | null;
 }
 
 const KEY = "roadpilot:v1";
@@ -119,7 +131,7 @@ export function defaultState(now = Date.now()): AppState {
       weekDrivenMin: 0,
       prevWeekDrivenMin: 0,
     },
-    settings: { speeds: { ...DEFAULT_SPEEDS }, parkingBufferMin: 45, allowExtension: false, allowReducedRest: false, gps: false, liveEta: false, service: { date: null, km: null, odoAtSet: 0 }, hudMirror: false, ongoing: false, autoStop: true, hudAnimation: true, hudStyle: "full", hudItems: { full: { ...DEFAULT_HUD_ITEMS.full }, minimal: { ...DEFAULT_HUD_ITEMS.minimal } }, work: { ...DEFAULT_WORK }, musicApp: "none", navEnabled: false, vehicle: { ...DEFAULT_VEHICLE }, navEngine: "tomtom", routeType: "fastest", navVoice: true, friendsShare: true, mapTheme: "auto" },
+    settings: { speeds: { ...DEFAULT_SPEEDS }, parkingBufferMin: 45, allowExtension: false, allowReducedRest: false, gps: false, liveEta: false, service: { date: null, km: null, odoAtSet: 0 }, hudMirror: false, ongoing: false, autoStop: true, hudAnimation: true, hudStyle: "full", hudItems: { full: { ...DEFAULT_HUD_ITEMS.full }, minimal: { ...DEFAULT_HUD_ITEMS.minimal } }, work: { ...DEFAULT_WORK }, musicApp: "none", navEnabled: false, vehicle: { ...DEFAULT_VEHICLE }, navEngine: "tomtom", routeType: "fastest", navVoice: true, friendsShare: true, mapTheme: "auto", aheadKm: 50, aheadStrip: { mop: true, parking: true, fuel: true } },
     planTime: null,
     track: null,
     odoKm: 0,
@@ -149,7 +161,7 @@ export function normalize(s: Partial<AppState>): AppState {
     trip: { ...base.trip, ...s.trip },
     driver: { ...base.driver, ...s.driver },
     settings: { ...base.settings, ...s.settings, speeds: { ...base.settings.speeds, ...s.settings?.speeds }, service: { ...base.settings.service, ...s.settings?.service }, work: { ...base.settings.work, ...s.settings?.work }, // Dawny styl HUD „nav” to dziś osobny ekran nawigacji.
-      hudStyle: (s.settings?.hudStyle as string) === "nav" ? "full" : s.settings?.hudStyle ?? base.settings.hudStyle, hudItems: hudItems(base.settings.hudItems, s.settings), vehicle: { ...base.settings.vehicle, ...s.settings?.vehicle } },
+      hudStyle: (s.settings?.hudStyle as string) === "nav" ? "full" : s.settings?.hudStyle ?? base.settings.hudStyle, hudItems: hudItems(base.settings.hudItems, s.settings), vehicle: { ...base.settings.vehicle, ...s.settings?.vehicle }, aheadStrip: { ...base.settings.aheadStrip, ...s.settings?.aheadStrip } },
   };
 }
 

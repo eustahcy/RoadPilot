@@ -2,8 +2,8 @@ import { useState } from "react";
 import { REPORT_KINDS, ReportKind } from "../collect";
 import { ReportIcon } from "./ReportIcon";
 
-/** HUD: zgłoszenie z drogi w miejscu, w którym jesteśmy — rodzaj, wartość (np. 3,8 m), wysłanie. */
-export function ReportSheet({ onSend, onClose, located }: { onSend: (kind: ReportKind, value: number | null) => Promise<void>; onClose: () => void; located: boolean }) {
+/** HUD: zgłoszenie z drogi w miejscu, w którym jesteśmy (albo przytrzymanym na mapie — `place`) — rodzaj, wartość (np. 3,8 m), wysłanie. */
+export function ReportSheet({ onSend, onClose, located, place }: { onSend: (kind: ReportKind, value: number | null) => Promise<void>; onClose: () => void; located: boolean; place?: string }) {
   const [kind, setKind] = useState<ReportKind | null>(null);
   const [value, setValue] = useState(0);
   const [state, setState] = useState<"idle" | "sending" | "sent" | "error">("idle");
@@ -32,7 +32,7 @@ export function ReportSheet({ onSend, onClose, located }: { onSend: (kind: Repor
 
   return (
     <div className="report">
-      <div className="stop-label">Zgłoś w tym miejscu{def ? `: ${def.label.toLowerCase()}` : ""}</div>
+      <div className="stop-label">{place !== undefined ? `Zgłoś na drodze${place ? ` ${place}` : ""}` : "Zgłoś w tym miejscu"}{def ? `: ${def.label.toLowerCase()}` : ""}</div>
       {!located && <p className="warn-text small">Brak pozycji GPS — zgłoszenie wymaga lokalizacji.</p>}
       {/* Fotoradar, odcinkowy, kontrole — jedno dotknięcie wysyła od razu (w czasie jazdy). */}
       <div className="report-quick">

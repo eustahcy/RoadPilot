@@ -4,7 +4,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "./api";
-import { Friend, Presence } from "./core/friends";
+import { Friend, Presence, presenceSendable } from "./core/friends";
 
 const REFRESH_MS = 30_000;
 const PRESENCE_EVERY_MS = 20_000;
@@ -63,7 +63,11 @@ export function useFriends(token: string | null, share: boolean, presence: Prese
     if (!sending) return;
     const send = () => {
       const p = latest.current;
-      if (p) api("POST", "/presence", p, token).catch(() => {});
+      const now = Date.now();
+      if (!p || !presenceSendable(p, now)) return;
+      // Wiek pozycji zamiast chwili odczytu — serwer liczy „sygnał X temu” od odczytu GPS, a zegar telefonu może się różnić.
+      const { posAt, ...rest } = p;
+      api("POST", "/presence", { ...rest, posAge: posAt !== undefined ? Math.max(0, now - posAt) : 0 }, token).catch(() => {});
     };
     send();
     const id = setInterval(send, PRESENCE_EVERY_MS);

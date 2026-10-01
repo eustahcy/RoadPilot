@@ -42,10 +42,15 @@ interface AccountProps {
   onLogout: () => Promise<void>;
   onSyncNow: () => Promise<void>;
   onDelete: (password: string) => Promise<void>;
+  /** Dane konta po zmianie na serwerze (np. Premium z klucza). */
+  onUser: (u: User) => void;
 }
 
 export type SettingsCategory = "account" | "friends" | "planning" | "work" | "service" | "vehicle" | "gps" | "hud" | "apps" | "data" | "admin";
 type Category = SettingsCategory;
+
+/** Zasięg listy „Po drodze” do wyboru (km). */
+const AHEAD_KM_OPTIONS = [20, 30, 50, 80];
 
 export function SettingsView({ initialCategory, navAccess, state, now, onSettings, onPlanTime, onReset, account, friends }: Props) {
   const { settings, driver } = state;
@@ -180,6 +185,7 @@ export function SettingsView({ initialCategory, navAccess, state, now, onSetting
         <>
           <AdminStatsCard token={account.token} />
           <AdminMap token={account.token} />
+          <PremiumKeysCard token={account.token} />
           <AdminSection token={account.token} me={account.user.id} />
         </>
       )}
@@ -213,8 +219,9 @@ export function SettingsView({ initialCategory, navAccess, state, now, onSetting
             : "Bez konta wszystko jest zapisane tylko w tym urządzeniu."}{" "}
           W trybie HUD przybliżona pozycja (z dokładnością ~1 km) trafia do OpenStreetMap (Overpass) i Open-Meteo — po
           najbliższe MOP-y i parkingi, nazwy dróg i miejscowości oraz pogodę. Przy włączonej nawigacji wpisywany cel,
-          punkt startu (pozycja GPS) i dane pojazdu idą przez serwer RoadPilot do TomTom; trasa zostaje tylko w telefonie. Kafelki mapy w HUD pobiera serwer RoadPilot — TomTom nie widzi Twojego telefonu.
+          punkt startu (pozycja GPS) i dane pojazdu idą przez serwer RoadPilot do TomTom; trasa zostaje tylko w telefonie. W czasie jazdy co 5 min serwer RoadPilot pyta TomTom o korki w obszarze ~150 km trasy przed Tobą (bez Twojej pozycji ani telefonu). Kafelki mapy w HUD pobiera serwer RoadPilot — TomTom nie widzi Twojego telefonu.
           {account.user ? " Znajomi (Ustawienia → Znajomi): przy włączonym GPS i udostępnianiu serwer RoadPilot trzyma Twoją ostatnią pozycję, prędkość, postój, cel i stan tachografu — widzą je tylko zaakceptowani znajomi; wyłączenie udostępniania kasuje te dane." : ""}
+          {account.user ? " Po powrocie do aplikacji po przerwie w odczytach GPS ostatnia i obecna pozycja idą do serwera RoadPilot, który liczy drogę ciężarówki (do szacunku jazdy i postoju). Przy otwarciu przekroczenia w Historii serwer dostaje jego pozycję, żeby podać miejscowość, drogę i MOP. Serwer tych pozycji nie zapisuje." : ""}
           {account.user ? " Opinie o parkingu przy celu (Trasa → nawigacja): serwer zapisuje miejsce celu, ocenę i komentarz z Twoim kontem; inni kierowcy widzą je bez Twojego imienia i e-maila. Swoją opinię usuniesz w każdej chwili, a usunięcie konta kasuje wszystkie." : ""}
         </p>
         {confirmReset ? (
@@ -266,7 +273,7 @@ function VehicleSection({ settings, navAccess, onChange }: { settings: Settings;
           <div className="hud-style-pick engines">
             {([
               ["tomtom", "TomTom", "Pełne dane w Europie, korki na żywo, pasy ruchu i ograniczenia prędkości."],
-              ["roadpilot", "RoadPilot (beta)", "Własny silnik na OpenStreetMap — tylko Polska, bez korków i pasów, bez limitów TomTom."],
+              ["roadpilot", "RoadPilot (beta)", "Własny silnik na OpenStreetMap — tylko Polska, bez pasów; korki na trasie dociągane z TomTom co 5 min."],
             ] as const).map(([id, label, hint]) => (
               <button key={id} className={`hud-style-opt ${settings.navEngine === id ? "active" : ""}`} aria-pressed={settings.navEngine === id} onClick={() => onChange({ navEngine: id })}>
                 <strong>{label}</strong>
@@ -289,6 +296,21 @@ function VehicleSection({ settings, navAccess, onChange }: { settings: Settings;
             ))}
           </div>
           <p className="muted small">Działa od następnej wyznaczonej trasy. Alternatywy w porównaniu tras są zawsze liczone dla wybranego rodzaju.</p>
+        </section>
+      )}
+      {navAccess === "premium" && (
+        <section className="card">
+          <div className="eyebrow">Po drodze</div>
+          <p className="muted small">MOP-y, parkingi TIR i stacje przed Tobą — lista pod przyciskiem P w Nawigacji i najbliższe pod prędkością.</p>
+          <label className="field">
+            <span className="field-label">Zasięg listy</span>
+            <select value={settings.aheadKm} onChange={(e) => onChange({ aheadKm: Number(e.target.value) })}>
+              {AHEAD_KM_OPTIONS.map((km) => <option key={km} value={km}>{km} km</option>)}
+            </select>
+          </label>
+          <Toggle checked={settings.aheadStrip.mop} onChange={(mop) => onChange({ aheadStrip: { ...settings.aheadStrip, mop } })} label="Najbliższy MOP pod prędkością" />
+          <Toggle checked={settings.aheadStrip.parking} onChange={(parking) => onChange({ aheadStrip: { ...settings.aheadStrip, parking } })} label="Najbliższy parking TIR pod prędkością" />
+          <Toggle checked={settings.aheadStrip.fuel} onChange={(fuel) => onChange({ aheadStrip: { ...settings.aheadStrip, fuel } })} label="Najbliższa stacja pod prędkością" />
         </section>
       )}
       <section className="card">
@@ -444,7 +466,7 @@ function WorkSection({ w, reducedRestsLeft, onChange }: { w: WorkSettings; reduc
   );
 }
 
-function AccountSection({ user, sync, onLogin, onLogout, onSyncNow, onDelete }: AccountProps) {
+function AccountSection({ user, token, sync, onLogin, onLogout, onSyncNow, onDelete, onUser }: AccountProps) {
   const [confirmOut, setConfirmOut] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [password, setPassword] = useState("");
@@ -478,6 +500,7 @@ function AccountSection({ user, sync, onLogin, onLogout, onSyncNow, onDelete }: 
       <p className={`premium-line ${user.premium ? "on" : ""}`}>
         {user.admin ? "Administrator · Premium" : user.premium ? `Premium ${premiumText(user.premiumUntil ?? null)}` : "Bez Premium — wkrótce do kupienia"}
       </p>
+      {!user.admin && token && <RedeemKey token={token} onUser={onUser} />}
       <p className={`sync-line ${sync.kind}`}>
         <span className="sync-dot" aria-hidden />
         {syncText(sync)}
@@ -512,6 +535,167 @@ function AccountSection({ user, sync, onLogin, onLogout, onSyncNow, onDelete }: 
   );
 }
 
+/** Klucz Premium od administratora: wpisanie (wielkość liter, spacje i myślniki bez znaczenia) → Premium od razu. */
+function RedeemKey({ token, onUser }: { token: string; onUser: (u: User) => void }) {
+  const [open, setOpen] = useState(false);
+  const [key, setKey] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const redeem = async () => {
+    setBusy(true);
+    setMsg(null);
+    try {
+      const r = await api<{ user: User; days: number | null }>("POST", "/premium/redeem", { key }, token);
+      onUser(r.user);
+      setKey("");
+      setMsg({ ok: true, text: `Gotowe — Premium ${premiumText(r.user.premiumUntil ?? null)}${r.days !== null ? ` (+${r.days} dni)` : ""}.` });
+    } catch (e) {
+      setMsg({ ok: false, text: e instanceof ApiError ? e.message : "Nie udało się — sprawdź połączenie." });
+    } finally {
+      setBusy(false);
+    }
+  };
+  if (!open) return <button className="text-btn" onClick={() => setOpen(true)}>Mam klucz Premium</button>;
+  return (
+    <div className="redeem">
+      <label className="field">
+        <span className="field-label">Klucz Premium</span>
+        <input value={key} onChange={(e) => setKey(e.target.value)} placeholder="RP-XXXX-XXXX" autoCapitalize="characters" autoCorrect="off" spellCheck={false} onKeyDown={(e) => e.key === "Enter" && key.trim() && !busy && redeem()} />
+      </label>
+      <div className="row-buttons">
+        <button className="primary" disabled={!key.trim() || busy} onClick={redeem}>{busy ? "Sprawdzam…" : "Aktywuj"}</button>
+        <button className="ghost" onClick={() => { setOpen(false); setMsg(null); }}>Zamknij</button>
+      </div>
+      {msg && <p className={msg.ok ? "redeem-ok" : "auth-error"}>{msg.text}</p>}
+    </div>
+  );
+}
+
+interface PremiumKey {
+  key: string;
+  days: number | null;
+  note: string;
+  createdAt: number;
+  usedAt: number | null;
+  usedBy: string | null;
+}
+
+const KEY_DAYS: { days: number | null; label: string }[] = [
+  { days: 7, label: "7 dni" },
+  { days: 30, label: "30 dni" },
+  { days: 90, label: "3 mies." },
+  { days: 365, label: "Rok" },
+  { days: null, label: "Bez terminu" },
+];
+
+const keyDaysText = (days: number | null) => (days === null ? "bez terminu" : days === 1 ? "1 dzień" : `${days} dni`);
+
+/** Administracja: klucze Premium do przekazania (SMS, komunikator) — jednorazowe, na wybraną liczbę dni. */
+function PremiumKeysCard({ token }: { token: string }) {
+  const [keys, setKeys] = useState<PremiumKey[] | null>(null);
+  const [days, setDays] = useState<number | null>(30);
+  const [custom, setCustom] = useState("");
+  const [note, setNote] = useState("");
+  const [fresh, setFresh] = useState<PremiumKey | null>(null);
+  const [copied, setCopied] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const load = () => api<{ keys: PremiumKey[] }>("GET", "/admin/keys", undefined, token).then((r) => setKeys(r.keys)).catch(() => {});
+  useEffect(() => {
+    load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token]);
+  const chosen = custom.trim() ? Number(custom) : days;
+  const generate = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      const r = await api<{ key: PremiumKey }>("POST", "/admin/keys", { days: chosen, note }, token);
+      setFresh(r.key);
+      setCopied(false);
+      setNote("");
+      load();
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : "Nie udało się wygenerować klucza.");
+    } finally {
+      setBusy(false);
+    }
+  };
+  const message = (k: PremiumKey) => `Klucz RoadPilot Premium (${keyDaysText(k.days)}): ${k.key}\nWpisz go w aplikacji: Ustawienia → Konto → „Mam klucz Premium”.`;
+  const share = async (k: PremiumKey) => {
+    const text = message(k);
+    try {
+      if (navigator.share) await navigator.share({ text });
+      else {
+        await navigator.clipboard.writeText(text);
+        setCopied(true);
+      }
+    } catch {
+      /* anulowane udostępnianie / brak schowka — klucz jest widoczny */
+    }
+  };
+  const remove = async (k: PremiumKey) => {
+    if (!confirm(`Usunąć klucz ${k.key}? Nie będzie można go użyć.`)) return;
+    try {
+      await api("DELETE", "/admin/keys", { key: k.key }, token);
+      if (fresh?.key === k.key) setFresh(null);
+      load();
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : "Nie udało się usunąć klucza.");
+    }
+  };
+  const valid = chosen === null || (Number.isInteger(chosen) && chosen >= 1 && chosen <= 3650);
+  return (
+    <section className="card">
+      <div className="eyebrow">Klucze Premium</div>
+      <h2>Wygeneruj klucz</h2>
+      <p className="muted small">Jednorazowy klucz do przekazania kierowcy — wpisuje go w Ustawienia → Konto. Dni dokładają się do trwającego Premium.</p>
+      <div className="key-days" role="radiogroup" aria-label="Na ile">
+        {KEY_DAYS.map((d) => (
+          <button key={d.label} role="radio" aria-checked={!custom.trim() && days === d.days} className={!custom.trim() && days === d.days ? "active" : ""} onClick={() => { setDays(d.days); setCustom(""); }}>{d.label}</button>
+        ))}
+      </div>
+      <div className="form">
+        <label className="field">
+          <span className="field-label">Albo liczba dni</span>
+          <input inputMode="numeric" value={custom} onChange={(e) => setCustom(e.target.value.replace(/\D/g, "").slice(0, 4))} placeholder="np. 14" />
+        </label>
+        <label className="field">
+          <span className="field-label">Dla kogo (notatka)</span>
+          <input value={note} onChange={(e) => setNote(e.target.value)} maxLength={120} placeholder="np. Marek, firma X" />
+        </label>
+      </div>
+      {error && <p className="auth-error">{error}</p>}
+      <button className="primary key-generate" disabled={busy || !valid} onClick={generate}>{busy ? "Generuję…" : `Wygeneruj klucz — ${keyDaysText(chosen)}`}</button>
+      {fresh && (
+        <div className="key-fresh">
+          <strong>{fresh.key}</strong>
+          <span>{keyDaysText(fresh.days)}{fresh.note ? ` · ${fresh.note}` : ""}</span>
+          <button className="ghost" onClick={() => share(fresh)}>{copied ? "Skopiowano ✓" : "Wyślij / kopiuj"}</button>
+        </div>
+      )}
+      {keys && keys.length > 0 && (
+        <ul className="key-list">
+          {keys.map((k) => (
+            <li key={k.key} className={k.usedAt ? "used" : ""}>
+              <span>
+                <b>{k.key}</b>
+                <small>{keyDaysText(k.days)}{k.note ? ` · ${k.note}` : ""} · {k.usedAt ? `użyty ${new Date(k.usedAt).toLocaleDateString("pl-PL")} przez ${k.usedBy ?? "usunięte konto"}` : `wolny, od ${new Date(k.createdAt).toLocaleDateString("pl-PL")}`}</small>
+              </span>
+              {!k.usedAt && (
+                <span className="key-actions">
+                  <button className="ghost" onClick={() => share(k)}>Wyślij</button>
+                  <button className="ghost danger-text" onClick={() => remove(k)}>Usuń</button>
+                </span>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
+
 /** „bez terminu” (rok 9999) albo „do 30.10.2026”. */
 function premiumText(until: number | null) {
   if (until === null || new Date(until).getFullYear() >= 9999) return "bez terminu";
@@ -532,7 +716,7 @@ interface AdminStats {
   recent: { kind: string; lat: number; lon: number; value: number | null; note: string; at: number; email: string }[];
 }
 
-const API_LABELS: Record<string, string> = { search: "TomTom — wyszukiwanie", route: "TomTom — trasy", tiles: "TomTom — mapa (kafelki)" };
+const API_LABELS: Record<string, string> = { search: "TomTom — wyszukiwanie", route: "TomTom — trasy", tiles: "TomTom — mapa (kafelki)", traffic: "TomTom — korki" };
 
 /** Zużycie limitów TomTom (próg 80%) i dane zebrane do mapy. */
 function AdminStatsCard({ token }: { token: string }) {

@@ -111,7 +111,7 @@ export function RouteView({ trip, route, onChange, nav }: Props) {
           <div className="nav-trip">
             <span><small>Do celu</small><b>{fmtKm(route.totalKm)}</b></span>
             <span><small>Cała trasa</small><b>{fmtKm(navRoute.lengthKm)}</b></span>
-            <span><small>Korki teraz</small><b className={navRoute.trafficMin >= 1 ? "warn-text" : ""}>{navRoute.trafficMin >= 1 ? `+${fmtDuration(navRoute.trafficMin)}` : navRoute.engine === "roadpilot" ? "—" : "brak"}</b></span>
+            <span><small>Korki teraz</small><b className={navRoute.trafficMin >= 1 ? "warn-text" : ""}>{navRoute.trafficMin >= 1 ? `+${fmtDuration(navRoute.trafficMin)}` : navRoute.engine === "roadpilot" && !navRoute.trafficAt ? "—" : "brak"}</b></span>
           </div>
           {trip.doneKm > 0 && (
             <p className="field-hint">

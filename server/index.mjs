@@ -11,6 +11,7 @@ import { ALERT_KINDS, ALERT_TTL_H, applyVotes, blockingPoints, routeAlerts, rout
 import { compareReports, REPORT_TO_OSM } from "./compare.mjs";
 import { parseRoutes, parseSearch, ROUTE_TYPES, routeError, routeUrl, searchUrl, validPoint } from "./nav.mjs";
 import { cleanPresence, friendView, keepReplayedPosAt } from "./friends.mjs";
+import { bboxParam, incidentSections, TRAFFIC_CATEGORIES, trafficBoxes } from "./traffic.mjs";
 import { routePois } from "./pois.mjs";
 import { extendPremium, keyView, makeKey, MAX_KEY_DAYS, normalizeKey } from "./premium.mjs";
 import { gapRequest, gapRoute, pickPlace, pickPoi, PLACE_MAX_KM, POI_AT_M, roadLabel } from "./geo.mjs";
@@ -261,18 +262,18 @@ function requirePremium(user) {
   if (!hasPremium(user)) throw new HttpError(403, "Nawigacja jest dostępna w RoadPilot Premium.");
 }
 
-const NAV_LIMITS = { search: { max: 120, windowMs: 10 * 60_000 }, route: { max: 30, windowMs: 10 * 60_000 }, here: { max: 600, windowMs: 10 * 60_000 }, nearby: { max: 60, windowMs: 10 * 60_000 }, gap: { max: 20, windowMs: 10 * 60_000 }, where: { max: 60, windowMs: 10 * 60_000 }, redeem: { max: 10, windowMs: 60 * 60_000 } };
+const NAV_LIMITS = { search: { max: 120, windowMs: 10 * 60_000 }, route: { max: 30, windowMs: 10 * 60_000 }, here: { max: 600, windowMs: 10 * 60_000 }, nearby: { max: 60, windowMs: 10 * 60_000 }, gap: { max: 20, windowMs: 10 * 60_000 }, traffic: { max: 30, windowMs: 10 * 60_000 }, where: { max: 60, windowMs: 10 * 60_000 }, redeem: { max: 10, windowMs: 60 * 60_000 } };
 
 // Limity darmowego planu TomTom (z panelu my.tomtom.com) — nie przekraczamy BUDGET_SHARE z nich.
 // Okres: miesiąc (bezpieczniej) albo dzień — TOMTOM_PERIOD=day, jeśli limity w panelu są dzienne.
-const TOMTOM_LIMITS = { search: Number(process.env.TOMTOM_LIMIT_SEARCH ?? 2500), route: Number(process.env.TOMTOM_LIMIT_ROUTING ?? 20000), tiles: Number(process.env.TOMTOM_LIMIT_TILES ?? 200000) };
+const TOMTOM_LIMITS = { search: Number(process.env.TOMTOM_LIMIT_SEARCH ?? 2500), route: Number(process.env.TOMTOM_LIMIT_ROUTING ?? 20000), tiles: Number(process.env.TOMTOM_LIMIT_TILES ?? 200000), traffic: Number(process.env.TOMTOM_LIMIT_TRAFFIC ?? 20000) };
 const TOMTOM_PERIOD = process.env.TOMTOM_PERIOD === "day" ? "day" : "month";
 const BUDGET_SHARE = 0.8;
 /** Na jedno konto dziennie — żeby jeden kierowca nie zużył limitu wszystkich (admin bez limitu). */
-const PER_USER_DAY = { search: 150, route: 40, tiles: 1500 };
+const PER_USER_DAY = { search: 150, route: 40, tiles: 1500, traffic: 400 };
 const USER_HITS = new Map();
 
-const API_NAMES = { search: "wyszukiwań", route: "tras", tiles: "mapy" };
+const API_NAMES = { search: "wyszukiwań", route: "tras", tiles: "mapy", traffic: "korków" };
 
 const periodKey = (d = new Date()) => (TOMTOM_PERIOD === "day" ? d.toISOString().slice(0, 10) : d.toISOString().slice(0, 7));
 
@@ -657,6 +658,45 @@ routes["POST /api/nav/warnings"] = async (req, user) => {
   return [200, { warnings: await findWarnings(pts, vehicle), pois: body.pois === false ? undefined : await findPois(pts) }];
 };
 
+/** Najwięcej prostokątów TomTom na jedno odświeżenie (trasa przed nami ~150 km to zwykle 1–3). */
+const TRAFFIC_MAX_BOXES = 6;
+/** Te same prostokąty (np. dwóch kierowców na tej samej drodze) przez 2 min z pamięci. */
+const TRAFFIC_CACHE = new Map();
+const TRAFFIC_TTL = 2 * 60_000;
+const TRAFFIC_FIELDS = "{incidents{type,geometry{type,coordinates},properties{id,iconCategory,magnitudeOfDelay,delay,length}}}";
+
+async function trafficIncidents(box) {
+  const bbox = bboxParam(box);
+  const hit = TRAFFIC_CACHE.get(bbox);
+  if (hit && Date.now() - hit.at < TRAFFIC_TTL) return hit.incidents;
+  await spend("traffic");
+  const q = new URLSearchParams({ key: TOMTOM_KEY, bbox, fields: TRAFFIC_FIELDS, language: "pl-PL", timeValidityFilter: "present", categoryFilter: TRAFFIC_CATEGORIES.join(",") });
+  const r = await tomtom(`https://api.tomtom.com/traffic/services/5/incidentDetails?${q}`);
+  if (!r.ok || !Array.isArray(r.json?.incidents)) throw new HttpError(502, "Nie udało się pobrać korków.");
+  TRAFFIC_CACHE.set(bbox, { at: Date.now(), incidents: r.json.incidents });
+  return r.json.incidents;
+}
+
+setInterval(() => {
+  for (const [k, v] of TRAFFIC_CACHE) if (Date.now() - v.at >= TRAFFIC_TTL) TRAFFIC_CACHE.delete(k);
+}, TRAFFIC_TTL).unref();
+
+/**
+ * Bieżące korki, roboty i zamknięcia na kawałku trasy (z dowolnego silnika) — aplikacja pyta co kilka minut o trasę
+ * przed nami. Trasa: [lat, lon, km][]; km w odpowiedzi są km tej trasy.
+ */
+routes["POST /api/nav/traffic"] = async (req, user) => {
+  requirePremium(user);
+  navThrottle("traffic", req);
+  const body = await readJson(req);
+  const pts = Array.isArray(body.points) ? body.points.filter((p) => Array.isArray(p) && p.length >= 3 && p.every(Number.isFinite)).slice(0, 20000) : [];
+  if (pts.length < 2) throw new HttpError(400, "Brak trasy.");
+  userDaily("traffic", user);
+  const incidents = [];
+  for (const box of trafficBoxes(pts).slice(0, TRAFFIC_MAX_BOXES)) incidents.push(...(await trafficIncidents(box)));
+  return [200, { traffic: incidentSections(pts, incidents) }];
+};
+
 /** Stacje paliw, MOP-y i parkingi TIR przy trasie (pinezki na mapie) — z osm_pois, bez kosztów TomTom. */
 /** Promień (km) miejsc wokół pozycji — lista „po drodze” bez wyznaczonej trasy (aplikacja podaje km: zasięg z ustawień + zapas). */
 const NEARBY_KM = { default: 32, max: 100 };
@@ -724,6 +764,30 @@ routes["POST /api/geo/where"] = async (req, user) => {
     }
   }
   return [200, { place: pickPlace(places, at), road, poi: pickPoi(pois, at) }];
+};
+
+/** Ile metrów od przytrzymanego miejsca szukamy drogi — palec na mapie nie trafia dokładnie. */
+const SNAP_MAX_M = 60;
+
+/**
+ * Przytrzymanie na mapie → najbliższa droga (punkt na jej osi i nazwa) — zgłoszenie ograniczenia musi leżeć na drodze,
+ * bo ostrzeżenia na trasie łapią punkty ≤ 20 m od niej. Profil „auto”, żeby droga z zakazem dla ciężarówek też się znalazła.
+ */
+routes["POST /api/geo/snap"] = async (req, user) => {
+  navThrottle("where", req);
+  const body = await readJson(req);
+  const at = validPoint({ lat: body.lat, lon: body.lon });
+  if (!at) throw new HttpError(400, "Brak pozycji.");
+  if (!VALHALLA_URL || !inPoland(at.lat, at.lon)) return [200, { road: null }];
+  try {
+    const r = await fetch(`${VALHALLA_URL}/locate`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ locations: [at], costing: "auto", verbose: true }), signal: AbortSignal.timeout(5_000) });
+    const edges = r.ok ? ((await r.json())[0]?.edges ?? []).filter((e) => e.distance <= SNAP_MAX_M).sort((a, b) => a.distance - b.distance) : [];
+    const e = edges[0];
+    if (!e) return [200, { road: null }];
+    return [200, { road: { lat: e.correlated_lat, lon: e.correlated_lon, name: roadLabel(e.edge_info?.names) ?? "", offM: Math.round(e.distance) } }];
+  } catch {
+    return [200, { road: null }];
+  }
 };
 
 async function findPois(pts) {

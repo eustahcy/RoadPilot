@@ -49,12 +49,19 @@ src/core/          RoadPilot Core — czyste, deterministyczne funkcje TS (bez R
   scenarios.ts     compareScenarios (now/rest9/rest11 + bestId), whatIfs, betterOption (kafelek „Lepszy scenariusz”), explain, driverStatus, fmtDuration
   deadline.ts      planForDeadline: najdłuższy odpoczynek / najpóźniejszy wyjazd pod awizację (wyszukiwanie binarne)
   reconstruct.ts   spóźniony start — liczniki z listy aktywności; reconstructTimed: godziny od–do, luki = postój
-  gps.ts           licznik km z odczytów, luki, średnia z 10 min, creditDriving/creditStop; nextLive (prędkość/kierunek do HUD);
+  gps.ts           licznik km z odczytów, średnia z 10 min, creditDriving/creditStop; nextLive (prędkość/kierunek do HUD);
+                   luki (addGap): droga z serwera (GapRoad, odrzucana, gdy min > luka × gapRoadSlack) albo linia prosta × 1,2 przy 70 km/h;
+                   reszta = postój: stoimy przed luką / jedziemy teraz → postój na początku (stopEnded), jechaliśmy i stoimy → stopSince = koniec jazdy;
+                   GapEstimate do historii, driveEnd = koniec jazdy w kroku
                    nextAutoStop — postój sam po 5 s z prędkością 0–5 km/h (uzbraja się po jeździe)
-                   ruszenie z postoju potwierdzane dopiero po GPS.confirmMoveM (200 m) od miejsca postoju (moveSince) —
-                   pojedynczy fałszywy odczyt ruchu nie kończy przerwy
+                   ruszenie z postoju potwierdzane dopiero po GPS.confirmMoveM (200 m) od miejsca postoju (moveSince) i przy każdym odczycie
+                   ≥ GPS.resumeKmh 10 km/h (prędkość z odbiornika albo z przesunięcia od track.lastFix) — pojedynczy fałszywy odczyt ani spacer
+                   z telefonem (5–6 km/h) nie kończą przerwy; luka na postoju z przesunięciem < GPS.gapMinKm (1 km) to nie jazda
   workday.ts       czas pracy (od shiftStart, bez zatrzymania w przerwach): WorkSettings, workStatus, workReminders; 13 h / 15 h z dutyWindow
-  history.ts       historia dzienna (DayLog, dzień kalendarzowy lokalnie): recordDrive/recordStop/daySummary
+  history.ts       historia dzienna (DayLog, dzień kalendarzowy lokalnie): recordDrive/recordStop(est)/recordGap/daySummary; DayLog.gaps, .violations
+  violations.ts    przekroczenia z GPS: trackViolations (continuous / daily / week / fortnight z liczników przed jazdą, duty = jazda po 13/15 h
+                   od shiftStart; open → overMin rośnie do resetu licznika), restViolation (za krótki odpoczynek — „Rozpocznij dzień” < 9 h albo
+                   9–11 h bez skróconych), whereText, violationReport (summary, printout jak wydruk, note jak PrintoutTips: art. 12 + przyczyna + miejsce)
   stations.ts      parseOverpass, parseParkings/parkingsQuery (MOP, parking TIR), nearestStation<T> (najbliższe przed nami, ±70°)
   roads.ts         roadsQuery/parseRoads (drogi z geometrią + miejscowości z Overpass), matchRoad (odległość + kierunek), nearestPlace, roadLabel
   service.ts       serviceStatus: dni i km do serwisu (km z licznika GPS AppState.odoKm)
@@ -63,7 +70,9 @@ src/core/          RoadPilot Core — czyste, deterministyczne funkcje TS (bez R
   stop.ts          ręczny postój (AppState.stop; targetMin null = bez limitu, do ruszenia): stopCredit, nextStopThreshold, endStop, stopEnd, planAfterStop
   *.test.ts        testy Vitest (core, gps, hud, stop; src/tracking.test.ts — postój + GPS)
 src/state.ts       AppState (version: 1) w localStorage pod kluczem "roadpilot:v1", useNow (tick 15 s)
-src/tracking.ts    Geolocation.watchPosition + Wake Lock → applyFix na stanie (też historia); zwraca { status, live }; useAutoStop;
+src/tracking.ts    Geolocation.watchPosition + Wake Lock → applyFix na stanie (też historia i przekroczenia); zwraca { status, live }; useAutoStop;
+                   luka ≥ GPS.gapLookupKm z kontem: odczyt czeka w AppState.pendingGap (nie w sync), useGapRoad → POST /api/gps/gap → applyFix z road
+                   (bez odpowiedzi po GAP_WAIT_MS 15 s — linia prosta);
                    endDay/startDay — koniec dnia = postój { dayEnd: true, 11 h }, nowy dzień zeruje liczniki;
                    startStop/finishStop — ręczny postój (ruszenie z GPS kończy go; GPS nie zalicza tego postoju drugi raz)
 src/ongoing.ts     stałe powiadomienie: cicha pętla audio (WAV generowany w pamięci) + Media Session, ongoingInfo = tekst karty
@@ -72,8 +81,9 @@ src/core/navmatch.ts  prowadzenie: pointAtKm, bearingAtKm, routeSlice, locate (r
                    speedLimitAt trzyma ostatni limit do NAV.limitCarryKm za końcem odcinka (luki w danych TomTom); speedTone ok/warn/over (NAV.overWarnKmh = 5)
                    legalLimitAt = min(znak, TRUCK_SPEED[rodzaj drogi z NavRoute.roads]) — wyższy znak ciężarówki nie dotyczy (ignoredSign)
                    bez trasy / poza nią: pushTrail (ślad GPS, HERE) → nav.ts useLimitHere → POST /api/nav/here (trace_attributes map_snap, limitHere)
-                   „Po drodze” (NavView AheadSheet, przycisk P): MOP-y / parkingi TIR / stacje do AHEAD_KM 30 km — z trasą route.pois (km po trasie, poiVisible),
-                   bez trasy GET /api/nav/nearby (osm_pois w promieniu NEARBY_KM) → nav.ts useNearbyPois → core/stations placesAhead (kierunek ±aheadDeg, linia prosta)
+                   „Po drodze” (NavView AheadSheet, przycisk P): MOP-y / parkingi TIR / stacje do settings.aheadKm (20/30/50/80, domyślnie 50) — z trasą route.pois (km po trasie, poiVisible),
+                   bez trasy GET /api/nav/nearby (osm_pois w promieniu NEARBY_KM) → nav.ts useNearbyPois → core/stations placesAhead (kierunek ±aheadDeg, linia prosta);
+                   pasek pod prędkością (.nm-ahead-strip, settings.aheadStrip): najbliższy MOP / parking / stacja, każdy do wyłączenia
 src/components/SectionControl.tsx  useSectionRun (stan odcinka z odczytów GPS), sectionView (zapowiedź / w trakcie / podsumowanie), SectionPanel w karcie HudNav (prop section)
 src/components/MapView.tsx  useMapGestures (1 palec = przesuwanie, 2 = szczypanie, kółko; tłumi klik po przeciągnięciu) + moveView (punkt pod palcem
                    zostaje pod palcem, z obrotem i przybliżeniem pochylenia; testy src/mapGestures.test.ts) — MapView z onMove, RouteCompare, HudRouteMap
@@ -112,8 +122,12 @@ src/components/NavView.tsx  nawigacja jako osobny system (nie HUD): HudRouteMap 
                    HUD dostaje trasę tylko jako dane (navRoute: km po trasie do MOP-u/znajomych, limit do koloru prędkości)
 src/components/    widoki; HudView.tsx = tryb HUD; fields.tsx = NumberField, OptionalNumberField, DurationField, Toggle, Stepper
 src/api.ts         zapytania do API, token sesji (localStorage "roadpilot:auth"), tryb bez konta ("roadpilot:guest")
-src/sync.ts        useSync: stan ↔ konto (wysyłka co ≤ 30 s i przy schowaniu z baseRev — 409 = pobierz; pobranie przy starcie/powrocie i co 30 s);
-                   nie wysyła track/hud/planTime; meta w "roadpilot:sync" { rev, dirty }
+src/sync.ts        useSync: stan ↔ konto (wysyłka co ≤ 30 s i przy schowaniu z baseRev; pobranie przy starcie/powrocie i co 30 s);
+                   nie wysyła track/hud/planTime/navRoute/pendingGap; meta w "roadpilot:sync" { rev, dirty, stamps }.
+                   Nowa wersja na koncie albo 409 → scalanie (src/syncMerge.ts mergeStates): grupy tacho (driver, stop, tracker, odoKm) / trip /
+                   settings / history, w każdej nowszy znacznik (stamps = kiedy grupa zmieniła się na urządzeniu, które ją zmieniło; wysyłane jako
+                   state.syncStamps; remis → konto), historia = suma dni; tachograf z konta od innego urządzenia → track = null (bez liczenia luki drugi raz).
+                   `ready` = pierwsze pobranie skończone (maks. 10 s) — do tego czasu GPS nie dolicza jazdy (useGpsTracking hold)
 src/components/AuthScreen.tsx  logowanie / rejestracja / „Kontynuuj bez konta”
 src/core/friends.ts  znajomi: presenceOf (co wysyłamy: pozycja, prędkość, status driving/standing/break/rest/dayEnd, since, cel, przyjazd, tachograf),
                    describeFriend (km w linii prostej, status, „25 min z 45 min”), nearestFriend; testy friends.test.ts
@@ -122,7 +136,8 @@ src/friends.ts     useFriends: GET /api/friends co 30 s (gdy widoczna), POST /ap
                    (status + „Gdzie jest”: MapView z pozycją przy Premium, inaczej link do map), kafelek HUD
 public/sw.js       service worker (cache "roadpilot-vN"): nawigacja network-first, assets cache-first, /api/ zawsze z sieci
 server/friends.mjs   znajomi: cleanPresence (walidacja obecności, pozycja do 1e-4°), friendView (relation accepted/invited/pending, obecność ≤
-                   PRESENCE_TTL 10 min = na żywo; starsza do 7 dni z offline: true = ostatnia pozycja, szara strzałka na mapie); tabele friends (user_id zaprasza friend_id, accepted_at) i presence (JSON, 1 wiersz na konto);
+                   PRESENCE_TTL 10 min = na żywo, liczone od odczytu GPS: aplikacja wysyła posAge, serwer zapisuje posAt; pozycja w ruchu starsza niż
+                   PRESENCE_MOVING_MAX_AGE_MS 60 s nie jest wysyłana (presenceSendable), a po powrocie z tła `live` starszy niż 30 s jest kasowany; iPhone podaje wtedy starą pozycję ze świeżą godziną — tracking.ts odrzuca odczyt identyczny z poprzednim po > 30 s, serwer keepReplayedPosAt zostawia stary posAt przy tej samej pozycji w jeździe ≥ 10 km/h; starsza do 7 dni z offline: true = ostatnia pozycja, szara strzałka na mapie); tabele friends (user_id zaprasza friend_id, accepted_at) i presence (JSON, 1 wiersz na konto);
                    /api/friends (GET), /api/friends/invite|accept (POST), DELETE /api/friends, POST /api/presence — wszystkie z kontem
 server/            RoadPilot API: index.mjs (node:http + mysql2), schema.sql; nav.mjs = TomTom (routeUrl, parseRoute, parseSearch) + nav.test.mjs;
                    /api/nav/* tylko Premium (users.premium_until / role=admin) + limit na IP + dzienny limit na konto + budżet TomTom
@@ -132,6 +147,10 @@ server/            RoadPilot API: index.mjs (node:http + mysql2), schema.sql; na
                    SMTP simply.com do resetu hasła, APP_ORIGINS = CORS + linki w e-mailach); zależności: mysql2, nodemailer
 server/warnings.mjs  ostrzeżenia na trasie z osm_restrictions + road_reports (routeBoxes → zapytania po prostokątach, routeWarnings:
                    punkt ≤ 20 m, odcinek musi biec wzdłuż trasy — most nad drogą nie ostrzega); POST /api/nav/warnings (bez kosztów TomTom)
+server/traffic.mjs  korki dla obu silników: trafficBoxes (routeBoxes sklejane do ≤ 9000 km² — limit TomTom 10 000), incidentSections
+                   (zdarzenia TomTom kategorii TRAFFIC_CATEGORIES → { km, toKm, delayMin, level, cause } jak parseRoute; początek, środek i koniec ≤ 50 m
+                   od trasy i km rosnące — druga jezdnia odpada); POST /api/nav/traffic (Premium, budżet „traffic” = TOMTOM_LIMIT_TRAFFIC, cache 2 min);
+                   App: refreshTraffic (nav.ts, TRAFFIC_REFRESH 5 min / 150 km, NavRoute.trafficAt), własny silnik od razu po wyznaczeniu
 server/compare.mjs   zgłoszenia kierowców vs OSM (missing / diff / match / info, potwierdzenia); GET /api/admin/compare
 server/valhalla.mjs  własny silnik tras (Valhalla, OSM Polska, VALHALLA_URL): valhallaRequest (truck), parseValhalla → format jak parseRoute;
                    /api/nav/route: engine "roadpilot" w PL albo zapas, gdy TomTom niedostępny / limit 80%; valhallaRoute sprawdza trasę
@@ -153,6 +172,14 @@ server/pois.mjs    pinezki przy trasie: poiRow (osmium geojsonseq → fuel/servi
                    right/left z iloczynu wektorowego, FUEL_NEAR_M 150 / POI_NEAR_M 250, jedno miejsce na 300 m); poi-import.mjs → osm_pois
                    (krok w osm-update.sh); findPois w index.mjs dokłada `pois` do /api/nav/warnings (refreshWarnings wysyła pois:false);
                    NavRoute.pois; HudNav routePins (Pin + ikony SVG, PINS_AHEAD_KM 20, przy przeglądaniu pinGapKm, PINS_MAX)
+server/geo.mjs     miejsce przekroczenia: placeRow (osmium n/place=city,town,village,suburb → osm_places, place-import.mjs, krok w osm-update.sh),
+                   pickPlace (w miejscowości wg promienia PLACE_IN_KM, inaczej najbliższa ≤ 15 km), pickPoi (≤ 700 m), roadLabel (Valhalla names → „A2”,
+                   „DK 14, Łódzka”, „DW 708, …”); POST /api/geo/where (locate 5 punktów bez dróg serwisowych) i POST /api/gps/gap (gapRequest/gapRoute) —
+                   z kontem, bez Premium, POST żeby pozycje nie szły do logów Nginx
+server/premium.mjs  klucze Premium: makeKey (RP-XXXX-XXXX, alfabet bez 0/O/1/I/L), normalizeKey (spacje, myślniki, małe litery), extendPremium
+                   (dni od końca trwającego Premium albo od teraz; null = bez terminu 9999); tabela premium_keys; POST/GET/DELETE /api/admin/keys (admin),
+                   POST /api/premium/redeem (konto, jednorazowo: warunkowy UPDATE used_by IS NULL); UI: SettingsView PremiumKeysCard (Administracja),
+                   RedeemKey („Mam klucz Premium” w Konto → AccountProps.onUser)
 server/parking.mjs  parking przy celu: cleanParking, boxAround/distanceM, parkingView (promień PARKING_RADIUS_M 300 m, sortowanie po 👍−👎, podsumowanie
                    bez opinii z przewagą 👎); tabele parking_opinions (1 opinia na konto przy celu) i parking_votes; GET/POST/DELETE /api/parking,
                    POST /api/parking/vote — z kontem, bez Premium; ParkingCard.tsx w NavCard (przy wybranym celu)
@@ -215,13 +242,15 @@ Widoki nie liczą reguł same — tylko formatują wyniki silnika.
 - Liczniki tygodniowe w `DriverState` (`weekDrivenMin`, `prevWeekDrivenMin`, `extensionsLeft`) **nie przewijają się
   same po poniedziałku 00:00** — robi to tylko symulacja. Po zmianie tygodnia kierowca musi je poprawić ręcznie,
   a GPS (`creditDriving`) dolicza jazdę do starego tygodnia.
-- `creditDriving` obcina `sinceBreakMin` do 270 — przekroczenie ciągłej jazdy nie jest widoczne w stanie.
+- `creditDriving` obcina `sinceBreakMin` do 270 — przekroczenie ciągłej jazdy widać tylko w historii (`violations.ts`), nie w stanie.
+- Jazda 9–10 h z GPS nie zmniejsza `extensionsLeft` (przekroczenie dzienne liczy limit 10 h, póki są wydłużenia).
 - `DurationField` pozwala wpisać np. 10 h 59 min jazdy dziennej (limit godzin, a minuty do 59).
 - `planForDeadline` zakłada monotoniczność (`maxWhere`) — przy granicy tygodnia może nie znaleźć optimum.
 - Stałe powiadomienie to obejście PWA (audio + Media Session): na Androidzie może przejąć fokus audio i zatrzymać
   muzykę z innej aplikacji; znika po zamknięciu aplikacji z listy ostatnich. Prawdziwa usługa w tle wymaga opakowania
-  natywnego (np. Capacitor). GPS w tle nie jest gwarantowany — luki nadrabia `addFix` po powrocie.
-- Synchronizacja: zapis z `baseRev` (409 → aplikacja bierze stan z konta, jej niewysłane zmiany przepadają), pobieranie co 30 s
+  natywnego (np. Capacitor). GPS w tle nie jest gwarantowany — luki nadrabia `addFix` po powrocie (szacunek: droga z serwera, kolejność jazda / postój z heurystyki).
+- Synchronizacja: zapis z `baseRev`, konflikt → scalanie grupami po znacznikach czasu (zegary telefonów muszą być zbliżone; gdy dwa
+  urządzenia offline liczą jazdę naraz, wygrywa to, które zapisze później — nie da się tego rozstrzygnąć bez sieci), pobieranie co 30 s
   przy widocznej aplikacji. Jazdę z GPS dolicza tylko jedno urządzenie (`AppState.tracker`, `tracking.ts` otherTracker,
   przejęcie po `TRACKER_TTL_MS` 3 min bez odczytów) — drugie prowadzi tylko własny `track`. Przy przejęciu ≤ 3 min jazdy może przepaść.
   Brak weryfikacji adresu e-mail przy rejestracji.

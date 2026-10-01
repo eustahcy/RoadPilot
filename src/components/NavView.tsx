@@ -9,6 +9,7 @@ import { fmtDuration } from "../core/scenarios";
 import { fmtClock, fmtKm } from "../format";
 import { insertVia, isAhead, NavPlace, NavRoute, RoutePoi, RouteWarning, useLimitHere, useNearbyPois, viaAhead, warningText } from "../nav";
 import { placesAhead } from "../core/stations";
+import { AheadStrip } from "../state";
 import { GpsStatus, useWakeLock } from "../tracking";
 import { SectionVoice, useNavVoice } from "../voice";
 import { AlertVote } from "./AlertVote";
@@ -17,7 +18,7 @@ import { HudNav, HudNavData, HudRouteMap, MapBrowse, NavTrack, PinInfo, POI_TITL
 import { LatLon, MAX_VIEW_ZOOM, MIN_VIEW_ZOOM } from "./MapView";
 import { HudPlanner, HudRoutePicker } from "./HudRoutePicker";
 import { arrivalInfo, fullscreenSupported, Icon, isStop, routeRefs, STALE_MS, toggleFullscreen, useFullscreen, useTick } from "./HudView";
-import { ReportKind } from "../collect";
+import { ReportKind, SnappedRoad } from "../collect";
 import { ReportSheet } from "./ReportSheet";
 import { SectionPanel, sectionKey, sectionView, useSectionRun } from "./SectionControl";
 import { sectionLimit } from "../core/section";
@@ -35,7 +36,8 @@ export interface NavViewProps {
   /** Własny styl mapy (kafelki wektorowe RoadPilot, dzień / noc) — undefined = kafelki TomTom. */
   mapVector?: GlVector;
   voice: { supported: boolean; on: boolean; toggle: () => void };
-  report?: { onSend: (kind: ReportKind, value: number | null) => Promise<void>; onVote: (w: RouteWarning, vote: 1 | -1) => Promise<void> };
+  /** Zgłoszenia: `at` = miejsce przytrzymane na mapie (przyklejone do drogi przez onSnap), bez niego — nasza pozycja. */
+  report?: { onSend: (kind: ReportKind, value: number | null, at?: SnappedRoad) => Promise<void>; onVote: (w: RouteWarning, vote: 1 | -1) => Promise<void>; onSnap: (at: LatLon) => Promise<SnappedRoad | null> };
   friends?: Friend[];
   live: Live | null;
   gpsOn: boolean;
@@ -50,6 +52,8 @@ export interface NavViewProps {
   vehicleMaxKmh?: number;
   /** Pojazd > 3,5 t: limity ciężarówki (50 / 70 / 80) — wyższy znak go nie dotyczy. */
   truck: boolean;
+  /** „Po drodze”: zasięg listy (km) i najbliższe miejsca pod prędkością (Ustawienia → Pojazd i nawigacja). */
+  ahead: { km: number; strip: AheadStrip };
   onExit: () => void;
 }
 
@@ -68,6 +72,8 @@ export function NavView(p: NavViewProps) {
   const [menu, setMenu] = useState(false);
   const [sheet, setSheet] = useState(false);
   const [reporting, setReporting] = useState(false);
+  /** Zgłoszenie z mapy: droga przy przytrzymanym miejscu — null = zgłoszenie z naszej pozycji. */
+  const [reportAt, setReportAt] = useState<SnappedRoad | null>(null);
   const [warnList, setWarnList] = useState(false);
   const [aheadList, setAheadList] = useState(false);
   const [planning, setPlanning] = useState(false);
@@ -99,8 +105,14 @@ export function NavView(p: NavViewProps) {
   // Ograniczenie z trasy; bez trasy albo poza nią — z drogi, którą jedziemy (ślad GPS dopasowany na serwerze).
   const onRoute = !!route && !!pos && !track.off;
   const here = useLimitHere(p.mapToken, fresh, !onRoute);
-  // Lista „Po drodze” bez trasy: miejsca wokół pobieramy dopiero po otwarciu listy.
-  const nearby = useNearbyPois(p.mapToken, fresh, aheadList && !onRoute);
+  // „Po drodze” bez trasy: miejsca wokół pobieramy, gdy lista jest otwarta albo pasek pod prędkością włączony.
+  const stripOn = !!p.mapToken && AHEAD_STRIP.some((k) => p.ahead.strip[k.id]);
+  const nearby = useNearbyPois(p.mapToken, fresh, (aheadList || stripOn) && !onRoute, p.ahead.km);
+  const aheadItems: AheadItem[] | null = onRoute
+    ? route.pois?.filter((x) => x.km > pos.km && x.km <= pos.km + p.ahead.km && poiVisible(route, x)).map((x) => ({ poi: x, km: x.km - pos.km, side: x.side, onRoute: true })) ?? []
+    : nearby && fresh ? placesAhead(nearby, fresh, fresh.heading, p.ahead.km).map(({ item, km }) => ({ poi: item, km, onRoute: false })) : null;
+  // Pod prędkością: najbliższy z każdego włączonego rodzaju (najwyżej 3).
+  const strip = stripOn && aheadItems ? AHEAD_STRIP.filter((k) => p.ahead.strip[k.id]).flatMap((k) => { const x = aheadItems.find((i) => k.kinds.includes(i.poi.kind)); return x ? [{ k, x }] : []; }) : [];
   const limit = onRoute ? legalLimitAt(route, pos.km, p.truck)?.kmh : here ? legalLimitAt(here, Math.max(0, here.km - 0.005), p.truck)?.kmh : undefined;
   const legal = limit !== undefined && p.vehicleMaxKmh !== undefined ? Math.min(limit, p.vehicleMaxKmh) : limit ?? p.vehicleMaxKmh;
   const tone = speedTone(speed, legal);
@@ -114,6 +126,13 @@ export function NavView(p: NavViewProps) {
   const arrival = arrivalInfo(p.plan, p.deadline, now);
   const endDay = () => confirm("Zakończyć dzień pracy? Zacznie się odpoczynek dzienny.") && sc.onEndDay();
   const openSheet = () => { setSheet(true); setMenu(false); };
+  const endNav = () => {
+    if (!p.nav?.onEnd || !confirm("Zakończyć nawigację? Trasa i cel zostaną usunięte.")) return;
+    p.nav.onEnd();
+    setPin(null);
+    setHold(null);
+    setBrowse(null);
+  };
   const stopItem = sc.stop
     ? { label: sc.stop.dayEnd ? "Odpoczynek" : "Postój", value: fmtTimer(Math.max(0, (now - sc.stop.start) / 60_000)), sub: sc.stop.targetMin !== null ? `z ${fmtDuration(sc.stop.targetMin)}` : "do ruszenia", tone: "active" }
     : (() => {
@@ -163,6 +182,7 @@ export function NavView(p: NavViewProps) {
                   {fullscreen ? "✓ " : ""}Pełny ekran
                 </button>
               )}
+              {p.nav?.onEnd && (p.nav.route || p.nav.dest) && <button role="menuitem" onClick={() => { setMenu(false); endNav(); }}>Zakończ nawigację</button>}
               <button role="menuitem" onClick={p.onExit}>Wyjdź z nawigacji</button>
             </div>
           )}
@@ -188,7 +208,7 @@ export function NavView(p: NavViewProps) {
           <Icon name="parking" />
         </button>
         {p.report && (
-          <button className="nm-btn report" onClick={() => { setReporting(true); setMenu(false); }} aria-label="Zgłoś na drodze">
+          <button className="nm-btn report" onClick={() => { setReportAt(null); setReporting(true); setMenu(false); }} aria-label="Zgłoś na drodze">
             <Icon name="flag" />
           </button>
         )}
@@ -209,13 +229,43 @@ export function NavView(p: NavViewProps) {
           <strong className={speed === null ? "none" : tone ?? ""}>{speed ?? "—"}</strong>
           <span>km/h</span>
         </div>
+        {/* „×” nad prędkością: w kolumnie po prawej się nie mieści (pionowo wchodziła pod menu, poziomo spychała zoom pod dolny panel). */}
+        {p.nav?.onEnd && (p.nav.route || p.nav.dest) && (
+          <button className="nm-btn end nm-end" onClick={endNav} aria-label="Zakończ nawigację" title="Zakończ nawigację">
+            <Icon name="close" />
+          </button>
+        )}
         {limit !== undefined && <span className="hud-limit nm-limit" aria-label={`Ograniczenie ${limit} km/h`}>{limit}</span>}
+        {strip.length > 0 && (
+          <button className="nm-ahead-strip" onClick={() => setAheadList(true)} aria-label="Po drodze — pokaż listę">
+            {strip.map(({ k, x }) => (
+              <span key={k.id}>
+                <AheadIcon kind={k.id === "fuel" ? "fuel" : x.poi.kind} />
+                <b>{k.short}</b>
+                <strong>{fmtAheadKm(x.km)}</strong>
+              </span>
+            ))}
+          </button>
+        )}
       </div>
       {notice && <div className="nm-notice">{notice}</div>}
 
       <footer className="nm-bottom">
-        {(pin || hold) && route && p.nav?.onVia && (
-          <PinCard key={pin?.key ?? `${hold?.lat},${hold?.lon}`} pin={pin} hold={hold} route={route} myKm={pos?.km} live={fresh} onVia={p.nav.onVia} onClose={() => { setPin(null); setHold(null); }} />
+        {pin && route && p.nav?.onVia && (
+          <PinCard key={pin.key} pin={pin} route={route} myKm={pos?.km} live={fresh} onVia={p.nav.onVia} onClose={() => setPin(null)} />
+        )}
+        {hold && (route && p.nav?.onVia || p.report) && (
+          <HoldCard
+            key={`${hold.lat},${hold.lon}`}
+            hold={hold}
+            route={route}
+            myKm={pos?.km}
+            live={fresh}
+            onVia={p.nav?.onVia}
+            onSnap={p.report?.onSnap}
+            onReport={(road) => { setReportAt(road); setReporting(true); setHold(null); }}
+            onClose={() => setHold(null)}
+          />
         )}
         <div className="nm-info">
           <div>
@@ -259,9 +309,8 @@ export function NavView(p: NavViewProps) {
       )}
       {aheadList && (
         <AheadSheet
-          items={onRoute
-            ? route.pois?.filter((x) => x.km > pos.km && x.km <= pos.km + AHEAD_KM && poiVisible(route, x)).map((x) => ({ poi: x, km: x.km - pos.km, side: x.side, onRoute: true })) ?? []
-            : nearby && fresh ? placesAhead(nearby, fresh, fresh.heading, AHEAD_KM).map(({ item, km }) => ({ poi: item, km, onRoute: false })) : null}
+          items={aheadItems}
+          km={p.ahead.km}
           premium={!!p.mapToken}
           gps={!!fresh}
           onShow={onRoute ? (x) => {
@@ -294,7 +343,7 @@ export function NavView(p: NavViewProps) {
         <div className="hud-sheet" onClick={(e) => e.target === e.currentTarget && setReporting(false)}>
           <div className="hud-sheet-body">
             <button className="hud-sheet-close" aria-label="Zamknij" onClick={() => setReporting(false)}>×</button>
-            <ReportSheet onSend={p.report.onSend} onClose={() => setReporting(false)} located={p.live !== null} />
+            <ReportSheet onSend={(kind, value) => p.report!.onSend(kind, value, reportAt ?? undefined)} onClose={() => setReporting(false)} located={reportAt !== null || p.live !== null} place={reportAt ? reportAt.name : undefined} />
           </div>
         </div>
       )}
@@ -325,8 +374,6 @@ const MAX_VIA = 5;
  * Karta nad mapą: co to za pinezka i jak daleko — albo propozycja punktu pośredniego po przytrzymaniu mapy.
  * Miejsce z pinezki (stacja, MOP) też można dodać do trasy; punkt pośredni — usunąć.
  */
-/** Lista „Po drodze” sięga tyle km przed nas. */
-const AHEAD_KM = 30;
 /** Najwięcej pozycji na liście (stacji bywa kilkadziesiąt). */
 const AHEAD_MAX = 40;
 
@@ -336,6 +383,12 @@ const AHEAD_FILTERS: { id: AheadFilter; label: string; kinds: RoutePoi["kind"][]
   { id: "mop", label: "MOP", kinds: ["services", "mop"] },
   { id: "parking", label: "Parkingi", kinds: ["parking"] },
   { id: "fuel", label: "Stacje", kinds: ["fuel", "services"] },
+];
+/** Pasek pod prędkością: rodzaje w kolejności wyświetlania (MOP ze stacją liczy się jako MOP i jako stacja). */
+const AHEAD_STRIP: { id: keyof AheadStrip; short: string; kinds: RoutePoi["kind"][] }[] = [
+  { id: "mop", short: "MOP", kinds: ["services", "mop"] },
+  { id: "parking", short: "Parking", kinds: ["parking"] },
+  { id: "fuel", short: "Stacja", kinds: ["fuel", "services"] },
 ];
 const AHEAD_KIND: Record<RoutePoi["kind"], string> = { services: "MOP ze stacją", mop: "MOP", parking: "Parking TIR", fuel: "Stacja paliw" };
 
@@ -350,8 +403,16 @@ interface AheadItem {
   onRoute: boolean;
 }
 
-/** MOP-y, parkingi TIR i stacje do AHEAD_KM przed nami — po trasie, a bez niej w kierunku jazdy (w linii prostej). */
-function AheadSheet({ items, premium, gps, onShow, onClose }: { items: AheadItem[] | null; premium: boolean; gps: boolean; onShow?: (p: AheadItem["poi"]) => void; onClose: () => void }) {
+function AheadIcon({ kind }: { kind: RoutePoi["kind"] }) {
+  return (
+    <i className={`nm-ahead-ico k-${kind}`} aria-hidden>
+      {kind === "fuel" ? <svg viewBox="-12 -12 24 24"><path d="M-7 8V-8h9v16zM-5 -6v5h5v-5zM2 -3h2.5l2 2v7a1.5 1.5 0 0 0 3 0V-5l-3-3" fill="#fff" stroke="#fff" strokeWidth="1.2" strokeLinejoin="round" /></svg> : "P"}
+    </i>
+  );
+}
+
+/** MOP-y, parkingi TIR i stacje do `km` przed nami — po trasie, a bez niej w kierunku jazdy (w linii prostej). */
+function AheadSheet({ items, km, premium, gps, onShow, onClose }: { items: AheadItem[] | null; km: number; premium: boolean; gps: boolean; onShow?: (p: AheadItem["poi"]) => void; onClose: () => void }) {
   const [filter, setFilter] = useState<AheadFilter>("all");
   const kinds = AHEAD_FILTERS.find((f) => f.id === filter)!.kinds;
   const shown = items?.filter((x) => kinds.includes(x.poi.kind)).slice(0, AHEAD_MAX);
@@ -360,7 +421,7 @@ function AheadSheet({ items, premium, gps, onShow, onClose }: { items: AheadItem
     <div className="hud-sheet" onClick={(e) => e.target === e.currentTarget && onClose()}>
       <div className="hud-sheet-body">
         <button className="hud-sheet-close" aria-label="Zamknij" onClick={onClose}>×</button>
-        <div className="stop-label">Po drodze — {AHEAD_KM} km przed Tobą{straight ? " (w linii prostej, bez trasy)" : ""}</div>
+        <div className="stop-label">Po drodze — {km} km przed Tobą{straight ? " (w linii prostej, bez trasy)" : ""}</div>
         <div className="nm-ahead-filters" role="radiogroup" aria-label="Rodzaj miejsc">
           {AHEAD_FILTERS.map((f) => (
             <button key={f.id} role="radio" aria-checked={filter === f.id} className={filter === f.id ? "active" : ""} onClick={() => setFilter(f.id)}>{f.label}</button>
@@ -376,9 +437,7 @@ function AheadSheet({ items, premium, gps, onShow, onClose }: { items: AheadItem
               const sub = [x.poi.name ? AHEAD_KIND[x.poi.kind] : "", x.side ? (x.side === "right" ? "po prawej" : "po lewej") : "", x.poi.truck && x.poi.kind !== "parking" ? "dla TIR" : ""].filter(Boolean).join(" · ");
               const body = (
                 <>
-                  <i className={`nm-ahead-ico k-${x.poi.kind}`} aria-hidden>
-                    {x.poi.kind === "fuel" ? <svg viewBox="-12 -12 24 24"><path d="M-7 8V-8h9v16zM-5 -6v5h5v-5zM2 -3h2.5l2 2v7a1.5 1.5 0 0 0 3 0V-5l-3-3" fill="#fff" stroke="#fff" strokeWidth="1.2" strokeLinejoin="round" /></svg> : "P"}
-                  </i>
+                  <AheadIcon kind={x.poi.kind} />
                   <span className="nm-ahead-name">
                     <b>{x.poi.name || AHEAD_KIND[x.poi.kind]}</b>
                     {sub && <small>{sub}</small>}
@@ -390,14 +449,14 @@ function AheadSheet({ items, premium, gps, onShow, onClose }: { items: AheadItem
             })}
           </ul>
         ) : (
-          <p className="muted">Brak takich miejsc w ciągu {AHEAD_KM} km (dane OpenStreetMap, Polska).</p>
+          <p className="muted">Brak takich miejsc w ciągu {km} km (dane OpenStreetMap, Polska).</p>
         )}
       </div>
     </div>
   );
 }
 
-function PinCard({ pin, hold, route, myKm, live, onVia, onClose }: { pin: PinInfo | null; hold: LatLon | null; route: NavRoute; myKm: number | undefined; live: Live | null; onVia: (via: NavPlace[]) => Promise<void>; onClose: () => void }) {
+function PinCard({ pin, route, myKm, live, onVia, onClose }: { pin: PinInfo; route: NavRoute; myKm: number | undefined; live: Live | null; onVia: (via: NavPlace[]) => Promise<void>; onClose: () => void }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const ahead = viaAhead(route, live);
@@ -415,29 +474,74 @@ function PinCard({ pin, hold, route, myKm, live, onVia, onClose }: { pin: PinInf
   };
   const add = (place: NavPlace) => run(insertVia(route, ahead, place));
 
-  let title: string, sub: string[], action: React.ReactNode;
-  if (pin) {
-    title = pin.title;
-    sub = [pin.name, aheadText(route, pin.km, myKm), ...pin.details].filter(Boolean);
-    if (pin.kind === "via") {
-      action = <button className="ghost" disabled={busy} onClick={() => run(viaAhead({ ...route, via: (route.via ?? []).filter((_, i) => i !== pin.viaIndex) }, live))}>{busy ? "Wyznaczam…" : "Usuń z trasy"}</button>;
-    } else if (["fuel", "services", "mop", "parking"].includes(pin.kind)) {
-      action = <button className="primary" disabled={busy || ahead.length >= MAX_VIA} onClick={() => add({ label: pin.name || pin.title, sub: pin.title, lat: pin.lat, lon: pin.lon })}>{busy ? "Wyznaczam…" : "Jedź przez to miejsce"}</button>;
-    }
-  } else {
-    const at = locate(route.points, hold!);
-    title = "Dodać punkt do trasy?";
-    sub = [at ? (at.offM < 150 ? `Na trasie · ${aheadText(route, at.km, myKm)}` : `ok. ${fmtKm(at.offM / 1000)} od obecnej trasy`) : "", "Trasa zostanie wyznaczona od nowa tak, by przejechać przez ten punkt."].filter(Boolean);
-    action = <button className="primary" disabled={busy || ahead.length >= MAX_VIA} onClick={() => add({ label: "Punkt na mapie", sub: `${hold!.lat.toFixed(4)}, ${hold!.lon.toFixed(4)}`, lat: hold!.lat, lon: hold!.lon })}>{busy ? "Wyznaczam…" : "Jedź przez ten punkt"}</button>;
+  const title = pin.title;
+  const sub = [pin.name, aheadText(route, pin.km, myKm), ...pin.details].filter(Boolean);
+  let action: React.ReactNode;
+  if (pin.kind === "via") {
+    action = <button className="ghost" disabled={busy} onClick={() => run(viaAhead({ ...route, via: (route.via ?? []).filter((_, i) => i !== pin.viaIndex) }, live))}>{busy ? "Wyznaczam…" : "Usuń z trasy"}</button>;
+  } else if (["fuel", "services", "mop", "parking"].includes(pin.kind)) {
+    action = <button className="primary" disabled={busy || ahead.length >= MAX_VIA} onClick={() => add({ label: pin.name || pin.title, sub: pin.title, lat: pin.lat, lon: pin.lon })}>{busy ? "Wyznaczam…" : "Jedź przez to miejsce"}</button>;
   }
   return (
     <div className="nm-pin-card" role="dialog" aria-label={title}>
       <button className="hud-sheet-close" aria-label="Zamknij" onClick={onClose}>×</button>
       <b>{title}</b>
       {sub.map((t) => <span key={t}>{t}</span>)}
-      {ahead.length >= MAX_VIA && pin?.kind !== "via" && <span className="warn-text">Najwyżej {MAX_VIA} punktów pośrednich.</span>}
+      {ahead.length >= MAX_VIA && pin.kind !== "via" && <span className="warn-text">Najwyżej {MAX_VIA} punktów pośrednich.</span>}
       {error && <span className="bad-text">{error}</span>}
       {action && <div className="row-buttons">{action}</div>}
+    </div>
+  );
+}
+
+/**
+ * Miejsce przytrzymane na mapie: najbliższa droga (z serwera) i co można z nim zrobić — zgłosić ograniczenie na tej drodze
+ * (tonaż, zakaz dla ciężarówek, wiadukt…) albo poprowadzić przez nie trasę.
+ */
+function HoldCard({ hold, route, myKm, live, onVia, onSnap, onReport, onClose }: { hold: LatLon; route: NavRoute | null; myKm: number | undefined; live: Live | null; onVia?: (via: NavPlace[]) => Promise<void>; onSnap?: (at: LatLon) => Promise<SnappedRoad | null>; onReport: (road: SnappedRoad) => void; onClose: () => void }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  /** undefined = szukam drogi, null = brak drogi w pobliżu / błąd. */
+  const [road, setRoad] = useState<SnappedRoad | null | undefined>(onSnap ? undefined : null);
+  useEffect(() => {
+    if (!onSnap) return;
+    let on = true;
+    onSnap(hold).then((r) => on && setRoad(r)).catch(() => on && setRoad(null));
+    return () => {
+      on = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hold.lat, hold.lon]);
+  const ahead = route ? viaAhead(route, live) : [];
+  const addVia = async () => {
+    if (!route || !onVia) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await onVia(insertVia(route, ahead, { label: "Punkt na mapie", sub: `${hold.lat.toFixed(4)}, ${hold.lon.toFixed(4)}`, lat: hold.lat, lon: hold.lon }));
+      onClose();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Nie udało się wyznaczyć trasy.");
+    } finally {
+      setBusy(false);
+    }
+  };
+  const at = route ? locate(route.points, hold) : undefined;
+  const sub = [
+    onSnap ? (road === undefined ? "Szukam drogi…" : road ? `${road.name || "Droga bez nazwy"}${road.offM > 15 ? ` · ${road.offM} m od palca` : ""}` : "Brak drogi w pobliżu — przytrzymaj bliżej drogi") : "",
+    route && at ? (at.offM < 150 ? `Na trasie · ${aheadText(route, at.km, myKm)}` : `ok. ${fmtKm(at.offM / 1000)} od obecnej trasy`) : "",
+  ].filter(Boolean);
+  return (
+    <div className="nm-pin-card" role="dialog" aria-label="Miejsce na mapie">
+      <button className="hud-sheet-close" aria-label="Zamknij" onClick={onClose}>×</button>
+      <b>Miejsce na mapie</b>
+      {sub.map((t) => <span key={t}>{t}</span>)}
+      {route && onVia && ahead.length >= MAX_VIA && <span className="warn-text">Najwyżej {MAX_VIA} punktów pośrednich.</span>}
+      {error && <span className="bad-text">{error}</span>}
+      <div className="row-buttons">
+        {onSnap && <button className="primary" disabled={!road} onClick={() => road && onReport(road)}>Zgłoś ograniczenie</button>}
+        {route && onVia && <button className={onSnap ? "ghost" : "primary"} disabled={busy || ahead.length >= MAX_VIA} onClick={addVia}>{busy ? "Wyznaczam…" : "Jedź przez ten punkt"}</button>}
+      </div>
     </div>
   );
 }

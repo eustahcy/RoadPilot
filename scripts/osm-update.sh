@@ -17,6 +17,9 @@ osmium cat enforcement.osm.pbf -f opl -o enforcement.opl --overwrite
 # Pinezki przy trasie: stacje paliw, MOP-y i parkingi (parkingi bez hgv odrzuca poi-import.mjs).
 osmium tags-filter poland-latest.osm.pbf nwr/amenity=fuel,parking nwr/highway=rest_area,services -o pois.osm.pbf --overwrite
 osmium export pois.osm.pbf -f geojsonseq --add-unique-id=type_id --geometry-types=point,polygon -o pois.geojsonseq --overwrite
+# Miejscowości do opisu miejsca przekroczenia w historii („Stryków, A2, MOP Niesułków”).
+osmium tags-filter poland-latest.osm.pbf n/place=city,town,village,suburb -o places.osm.pbf --overwrite
+osmium export places.osm.pbf -f geojsonseq --add-unique-id=type_id --geometry-types=point -o places.geojsonseq --overwrite
 # Obszar zabudowany / poza nim (limity dla ciężarówek w nawigacji): id drogi → u | r, plik czyta API (ZONES_FILE).
 osmium tags-filter poland-latest.osm.pbf w/source:maxspeed=PL:urban,PL:rural w/zone:traffic=PL:urban,PL:rural \
   w/maxspeed:type=PL:urban,PL:rural w/maxspeed=PL:urban,PL:rural -R -o zones.osm.pbf --overwrite
@@ -26,3 +29,4 @@ cd "$(dirname "$0")/.."
 node --env-file=/etc/roadpilot-api.env server/osm-import.mjs "$DIR/truck.geojsonseq"
 node --env-file=/etc/roadpilot-api.env server/enforcement-import.mjs "$DIR/enforcement.opl"
 node --env-file=/etc/roadpilot-api.env server/poi-import.mjs "$DIR/pois.geojsonseq"
+node --env-file=/etc/roadpilot-api.env server/place-import.mjs "$DIR/places.geojsonseq"

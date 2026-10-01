@@ -122,6 +122,19 @@ export function sendReport(token: string, r: { kind: ReportKind; lat: number; lo
   return api("POST", "/collect/report", r, token);
 }
 
+/** Najbliższa droga przy przytrzymanym miejscu (punkt na osi drogi i nazwa) — null = brak drogi w pobliżu. */
+export interface SnappedRoad {
+  lat: number;
+  lon: number;
+  name: string;
+  offM: number;
+}
+
+export async function snapRoad(token: string, at: { lat: number; lon: number }): Promise<SnappedRoad | null> {
+  const r = await api<{ road: SnappedRoad | null }>("POST", "/geo/snap", { lat: at.lat, lon: at.lon }, token);
+  return r.road;
+}
+
 export function setConsent(token: string, on: boolean) {
   return api<{ dataConsent: boolean }>("POST", "/consent", { on }, token);
 }

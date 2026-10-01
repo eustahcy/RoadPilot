@@ -116,3 +116,51 @@ describe("dwa urządzenia na jednym koncie", () => {
     expect(tablet.driver.drivenTodayMin - phone.driver.drivenTodayMin).toBeCloseTo(20 - 10 - ttlMin, 0);
   });
 });
+
+describe("luka — aplikacja zamknięta", () => {
+  const moving = (min: number, km: number): Fix => ({ ...fix(min, km), speed: 22 });
+  it("z kontem odczyt po luce czeka na drogę z serwera; potem liczy jazdę z niej i zalicza postój jako przerwę", () => {
+    let s = defaultState(NOW);
+    s = { ...s, driver: { ...s.driver, drivenTodayMin: 100, sinceBreakMin: 100 } };
+    for (let m = 0; m <= 10; m += 0.25) s = applyFix(s, fix(m, m), undefined, { lookup: true });
+    const before = s.driver.drivenTodayMin;
+    const waiting = applyFix(s, moving(130, 110), undefined, { lookup: true });
+    expect(waiting.pendingGap?.fix.t).toBe(NOW + 130 * MIN);
+    expect(waiting.driver).toBe(s.driver);
+    // Serwer: 115 km, 70 min jazdy → reszta (50 min) to przerwa przed ruszeniem.
+    s = applyFix({ ...waiting, pendingGap: null }, waiting.pendingGap!.fix, undefined, { road: { km: 115, min: 70 } });
+    expect(s.driver.drivenTodayMin).toBeCloseTo(before + 70, 5);
+    expect(s.driver.sinceBreakMin).toBeCloseTo(70, 5);
+    const day = s.history[0];
+    expect(day.gaps?.[0]).toMatchObject({ km: 115, driveMin: 70, road: true });
+    expect(day.stops.at(-1)).toMatchObject({ start: NOW + 10 * MIN, end: NOW + 60 * MIN, est: true });
+  });
+
+  it("serwer milczy — po GAP_WAIT_MS liczymy z linii prostej", () => {
+    let s = defaultState(NOW);
+    for (let m = 0; m <= 10; m += 0.25) s = applyFix(s, fix(m, m), undefined, { lookup: true });
+    s = applyFix(s, fix(130, 110), undefined, { lookup: true });
+    s = applyFix(s, fix(130.1, 110), undefined, { lookup: true }); // 6 s — jeszcze czekamy
+    expect(s.pendingGap).toBeTruthy();
+    s = applyFix(s, fix(131, 110), undefined, { lookup: true });
+    expect(s.pendingGap).toBeNull();
+    expect(s.history[0].gaps?.[0]).toMatchObject({ road: false });
+  });
+
+  it("przekroczenie w czasie jazdy trafia do historii z pozycją", () => {
+    let s = defaultState(NOW);
+    s = { ...s, driver: { ...s.driver, drivenTodayMin: 265, sinceBreakMin: 265 } };
+    for (let m = 0; m <= 15; m += 0.25) s = applyFix(s, fix(m, m));
+    const v = s.history[0].violations?.find((x) => x.kind === "continuous");
+    expect(v).toMatchObject({ open: true, limitMin: 270 });
+    expect(v!.overMin).toBeCloseTo(10, 0);
+    expect(v!.lat).toBeGreaterThan(0);
+  });
+
+  it("„Rozpocznij dzień” po za krótkim odpoczynku zapisuje przekroczenie", () => {
+    let s = endDay(parked(0), NOW);
+    s = startDay(s, NOW + 7 * 60 * MIN);
+    expect(s.history.flatMap((d) => d.violations ?? []).find((x) => x.kind === "shortRest")).toMatchObject({ overMin: 120 });
+  });
+});
+

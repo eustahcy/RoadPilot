@@ -31,6 +31,19 @@ export interface Presence {
   leftKm: number | null;
   driveLeftMin: number | null;
   untilBreakMin: number | null;
+  /** Chwila odczytu GPS, z którego jest pozycja (ms, zegar tego telefonu) — wysyłamy wiek pozycji, nie samą chwilę. */
+  posAt?: number;
+}
+
+/**
+ * Pozycja w ruchu starsza niż tyle ms nie idzie do znajomych — po powrocie z tła telefon ma w pamięci odczyt sprzed
+ * godziny i pokazywałby znajomym miejsce sprzed 100 km. Na postoju stara pozycja jest dalej prawdziwa.
+ */
+export const PRESENCE_MOVING_MAX_AGE_MS = 60_000;
+
+/** Czy obecność można teraz wysłać (pozycja nie za stara jak na jazdę). */
+export function presenceSendable(p: Presence, now: number): boolean {
+  return p.posAt === undefined || p.status !== "driving" || now - p.posAt <= PRESENCE_MOVING_MAX_AGE_MS;
 }
 
 export interface Friend {
@@ -79,6 +92,7 @@ export function presenceOf(live: Live | null, stop: ActiveStop | null, shiftStar
     leftKm: Math.round(leftKm),
     driveLeftMin: Math.round(status.driveLeftToday),
     untilBreakMin: Math.round(status.untilBreak),
+    posAt: live.t,
   };
 }
 

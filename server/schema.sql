@@ -189,3 +189,26 @@ CREATE TABLE IF NOT EXISTS osm_pois (
   truck TINYINT NOT NULL DEFAULT 0,
   KEY (lat, lon)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Miejscowości (2026-10-01): do opisu miejsca przekroczenia w historii (import: server/place-import.mjs).
+CREATE TABLE IF NOT EXISTS osm_places (
+  osm_id VARCHAR(20) NOT NULL PRIMARY KEY,
+  kind VARCHAR(10) NOT NULL,
+  lat DOUBLE NOT NULL,
+  lon DOUBLE NOT NULL,
+  name VARCHAR(120) NOT NULL,
+  KEY (lat, lon)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Klucze Premium (2026-10-01): admin generuje klucz na N dni (NULL = bez terminu), kierowca wpisuje go w Ustawienia → Konto.
+CREATE TABLE IF NOT EXISTS premium_keys (
+  code CHAR(12) NOT NULL PRIMARY KEY,
+  days INT NULL,
+  note VARCHAR(120) NOT NULL DEFAULT '',
+  created_by INT UNSIGNED NOT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  used_by INT UNSIGNED NULL,
+  used_at DATETIME NULL,
+  KEY (created_at),
+  CONSTRAINT fk_pkeys_used FOREIGN KEY (used_by) REFERENCES users (id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

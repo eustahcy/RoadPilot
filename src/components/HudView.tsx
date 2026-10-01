@@ -789,7 +789,7 @@ function Tile({ icon, label, tone, bar, children }: { icon: IconName; label: str
   );
 }
 
-export type IconName = "sound" | "mute" | "warning" | "road" | "clock" | "pin" | "coffee" | "dots" | "flag" | "wheel" | "parking" | "truck" | "play" | "finish" | "chevron" | "briefcase" | "wrench" | "bed" | "nav" | "music" | "pip" | "search" | WeatherIcon;
+export type IconName = "sound" | "mute" | "warning" | "road" | "clock" | "pin" | "coffee" | "dots" | "flag" | "wheel" | "parking" | "truck" | "play" | "finish" | "chevron" | "briefcase" | "wrench" | "bed" | "nav" | "music" | "pip" | "search" | "close" | WeatherIcon;
 
 const CLOUD = "M7 17a4.5 4.5 0 1 1 .9-8.9A6 6 0 0 1 19.3 9.6 3.8 3.8 0 0 1 18 17H7Z";
 const ICONS: Record<IconName, string> = {
@@ -812,6 +812,7 @@ const ICONS: Record<IconName, string> = {
   warning: "M12 3 2 21h20L12 3ZM12 10v5M12 18h.01",
   road: "M8 3 4 21M16 3l4 18M12 4v3M12 11v3M12 18v3",
   pip: "M3 5h18v14H3zM12 12h7v5h-7z",
+  close: "M6 6l12 12M18 6 6 18",
   search: "M10.5 17a6.5 6.5 0 1 0 0-13 6.5 6.5 0 0 0 0 13ZM15.3 15.3 21 21",
   music: "M9 18V5l11-2v13M9 18a3 3 0 1 1-6 0 3 3 0 0 1 6 0ZM20 16a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z",
   bed: "M3 18V7M3 14h18v4M21 14v-2a3 3 0 0 0-3-3h-7v5M7 12a1.8 1.8 0 1 0 0-3.6A1.8 1.8 0 0 0 7 12Z",

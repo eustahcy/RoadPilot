@@ -1,5 +1,5 @@
 import { ReactNode, useEffect, useMemo, useRef, useState } from "react";
-import { cachedTile, LatLon, loadTile, TILE, worldPx } from "./MapView";
+import { cachedTile, fromWorldPx, LatLon, loadTile, TILE, worldPx } from "./MapView";
 import { apiUrl } from "../api";
 import { decodeMvt } from "../core/mvt";
 import { MapPalette, MapTheme, PALETTES, ROAD_ORDER, roadWidth } from "../mapStyle";
@@ -52,6 +52,8 @@ export interface GlMapProps {
   /** Własny styl z kafelków wektorowych; brak = kafelki TomTom. */
   vector?: GlVector;
   children?: ReactNode;
+  /** Dostaje funkcję: punkt ekranu (px względem ramki) → miejsce na mapie, z bieżącej kamery (też przy pochyleniu). */
+  pickRef?: { current: ((x: number, y: number) => LatLon | undefined) | null };
 }
 
 /** Tyle kafelków trzymamy na karcie graficznej (tekstur albo buforów). */
@@ -146,6 +148,26 @@ function project(c: Cam, x: number, y: number): [number, number] | undefined {
   return [((cx / cw + 1) / 2) * c.w, ((1 - cy / cw) / 2) * c.h];
 }
 
+/**
+ * Piksele ekranu → punkt płaszczyzny mapy (px poziomu z względem odniesienia). Dla z = 0 kamera to przekształcenie
+ * rzutowe 3×3 (kolumny x, y, wyraz wolny; wiersze x, y, w) — odwracamy je. undefined = nad horyzontem.
+ */
+function unproject(c: Cam, sx: number, sy: number): [number, number] | undefined {
+  const m = c.m;
+  const [a, b, t, d, e, f, g, h, k] = [m[0], m[4], m[12], m[1], m[5], m[13], m[3], m[7], m[15]];
+  const u = (sx / c.w) * 2 - 1;
+  const v = 1 - (sy / c.h) * 2;
+  // Rozwiązanie (a − g·u)x + (b − h·u)y = k·u − t, (d − g·v)x + (e − h·v)y = k·v − f.
+  const a1 = a - g * u, b1 = b - h * u, c1 = k * u - t;
+  const a2 = d - g * v, b2 = e - h * v, c2 = k * v - f;
+  const det = a1 * b2 - a2 * b1;
+  if (Math.abs(det) < 1e-12) return undefined;
+  const x = (c1 * b2 - c2 * b1) / det;
+  const y = (a1 * c2 - a2 * c1) / det;
+  if (g * x + h * y + k <= 0.01) return undefined;
+  return [x, y];
+}
+
 /** Linie z aplikacji (trasa, korki) → trójkąty w formacie [x, y, nx, ny, d]; szerokość nadaje shader. */
 function buildLines(lines: GlLine[], z: number, cx: number, cy: number): { data: Float32Array; ranges: { start: number; count: number; color: GlLine["color"]; widthPx: number }[] } {
   const out: number[] = [];
@@ -180,7 +202,7 @@ const LABEL_RANK: Record<VLabel["kind"], number> = { city: 0, town: 1, ref: 2, v
 /** Kąt etykiety wzdłuż drogi na ekranie: zawsze czytelny (nigdy do góry nogami). */
 const readable = (deg: number) => { let a = ((deg % 360) + 540) % 360 - 180; if (a > 90) a -= 180; if (a < -90) a += 180; return a; };
 
-export function GlMapView({ token, center, zoom, bearing = 0, pitch = 0, anchorY = 0.5, lines, markers, follow, vector, children }: GlMapProps) {
+export function GlMapView({ token, center, zoom, bearing = 0, pitch = 0, anchorY = 0.5, lines, markers, follow, vector, children, pickRef }: GlMapProps) {
   const box = useRef<HTMLDivElement>(null);
   const canvas = useRef<HTMLCanvasElement>(null);
   const [size, setSize] = useState({ w: 800, h: 500 });
@@ -412,6 +434,13 @@ export function GlMapView({ token, center, zoom, bearing = 0, pitch = 0, anchorY
       const b = now?.bearing ?? f.bearing;
       const cam = camera(f.size.w, f.size.h, f.size.w / 2, f.size.h * f.anchorY, f.pitch, b, (nx - f.cx) * f.scale, (ny - f.cy) * f.scale, f.scale);
       gl.uniformMatrix4fv(uM, false, cam.m);
+      if (pickRef) {
+        const { z: pz, cx: pcx, cy: pcy } = f;
+        pickRef.current = (sx, sy) => {
+          const p = unproject(cam, sx, sy);
+          return p ? fromWorldPx(p[0] + pcx, p[1] + pcy, pz) : undefined;
+        };
+      }
       gl.uniform1f(uScale, f.scale);
       gl.uniform1f(uDash, 0);
       gl.uniform1f(uHw, 0);

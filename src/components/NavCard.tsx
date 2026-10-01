@@ -1,6 +1,8 @@
+import { GlVector } from "./GlMap";
 import { useEffect, useState } from "react";
 import { ApiError } from "../api";
 import { fmtDuration, fmtKm, fmtTime } from "../format";
+import { ParkingCard } from "./ParkingCard";
 import { RouteCompare } from "./RouteCompare";
 import { currentPosition, fetchRoutes, isAlert, NavAccess, NavEngine, NavPlace, NavRoute, RouteType, RouteWarning, searchPlaces, Vehicle, warningText } from "../nav";
 
@@ -20,6 +22,8 @@ export interface NavProps {
   onRoute: (r: NavRoute) => void;
   onClear: () => void;
   onSettings: () => void;
+  /** Styl własnej mapy do porównania tras. */
+  mapStyle?: GlVector;
 }
 
 /** Nawigacja dla ciężarówek (beta): cel z wyszukiwarki i trasa TomTom z danymi pojazdu. */
@@ -162,9 +166,11 @@ export function NavCard(p: NavProps) {
       {r && p.token && options.length > 1 && options.some((o) => o.to.lat === r.to.lat && o.to.lon === r.to.lon) && (
         <>
           <div className="stop-label">Porównanie tras</div>
-          <RouteCompare routes={options} selectedAt={r.at} token={p.token} onPick={p.onRoute} />
+          <RouteCompare routes={options} selectedAt={r.at} token={p.token} onPick={p.onRoute} mapStyle={p.mapStyle} />
         </>
       )}
+
+      {p.dest && !editing && p.token && <ParkingCard dest={p.dest} token={p.token} />}
 
       {error && <p className="auth-error">{error}</p>}
 

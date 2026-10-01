@@ -1,3 +1,4 @@
+import { autoTheme } from "../mapStyle";
 import { useEffect, useState } from "react";
 import { AdminUser, api, ApiError, User } from "../api";
 import { DEFAULT_SPEEDS, ROAD_LABELS, ROAD_TYPES } from "../core/route";
@@ -94,7 +95,7 @@ export function SettingsView({ initialCategory, navAccess, state, now, onSetting
 
       {cat === "account" && <AccountSection {...account} />}
 
-      {cat === "friends" && <FriendsSettings api={friends.api} share={settings.friendsShare} onShare={(friendsShare) => set({ friendsShare })} gpsOn={friends.gpsOn} onLogin={account.onLogin} me={friends.me} now={now} mapToken={navAccess === "premium" ? account.token : null} />}
+      {cat === "friends" && <FriendsSettings api={friends.api} share={settings.friendsShare} onShare={(friendsShare) => set({ friendsShare })} gpsOn={friends.gpsOn} onLogin={account.onLogin} me={friends.me} now={now} mapToken={navAccess === "premium" ? account.token : null} mapStyle={{ theme: settings.mapTheme === "auto" ? autoTheme(undefined, now) : settings.mapTheme, vehicle: settings.vehicle }} />}
 
       {cat === "planning" && (
         <>
@@ -214,6 +215,7 @@ export function SettingsView({ initialCategory, navAccess, state, now, onSetting
           najbliższe MOP-y i parkingi, nazwy dróg i miejscowości oraz pogodę. Przy włączonej nawigacji wpisywany cel,
           punkt startu (pozycja GPS) i dane pojazdu idą przez serwer RoadPilot do TomTom; trasa zostaje tylko w telefonie. Kafelki mapy w HUD pobiera serwer RoadPilot — TomTom nie widzi Twojego telefonu.
           {account.user ? " Znajomi (Ustawienia → Znajomi): przy włączonym GPS i udostępnianiu serwer RoadPilot trzyma Twoją ostatnią pozycję, prędkość, postój, cel i stan tachografu — widzą je tylko zaakceptowani znajomi; wyłączenie udostępniania kasuje te dane." : ""}
+          {account.user ? " Opinie o parkingu przy celu (Trasa → nawigacja): serwer zapisuje miejsce celu, ocenę i komentarz z Twoim kontem; inni kierowcy widzą je bez Twojego imienia i e-maila. Swoją opinię usuniesz w każdej chwili, a usunięcie konta kasuje wszystkie." : ""}
         </p>
         {confirmReset ? (
           <div className="row-buttons">

@@ -6,12 +6,16 @@
 
 import { createHash, randomBytes, scrypt as scryptCb, timingSafeEqual } from "node:crypto";
 import { cleanPoints, cleanReport, inPoland } from "./collect.mjs";
-import { parseValhalla, parseValhallaAlternates, valhallaRequest } from "./valhalla.mjs";
+import { parseValhalla, parseValhallaAlternates, roadInfo, traceChunks, traceRequest, valhallaRequest } from "./valhalla.mjs";
 import { ALERT_KINDS, ALERT_TTL_H, applyVotes, blockingPoints, routeAlerts, routeBoxes, routeWarnings } from "./warnings.mjs";
 import { compareReports, REPORT_TO_OSM } from "./compare.mjs";
 import { parseRoutes, parseSearch, ROUTE_TYPES, routeError, routeUrl, searchUrl, validPoint } from "./nav.mjs";
 import { cleanPresence, friendView } from "./friends.mjs";
+import { routePois } from "./pois.mjs";
+import { boxAround, cleanParking, distanceM, PARKING_DAILY_MAX, PARKING_RADIUS_M, parkingView } from "./parking.mjs";
+import { createReadStream } from "node:fs";
 import { readFile, stat } from "node:fs/promises";
+import { createInterface } from "node:readline";
 import { createServer } from "node:http";
 import { promisify } from "node:util";
 import mysql from "mysql2/promise";
@@ -31,6 +35,8 @@ const TOMTOM_KEY = process.env.TOMTOM_KEY ?? "";
 const VALHALLA_URL = (process.env.VALHALLA_URL ?? "").replace(/\/+$/, "");
 // Własne kafelki wektorowe mapy (scripts/tiles-build.sh → katalog z/x/y.pbf, gzip); puste = mapa z kafelków TomTom.
 const VTILES_DIR = (process.env.VTILES_DIR ?? "").replace(/\/+$/, "");
+/** Drogi OSM w obszarze zabudowanym / poza nim (id\tu|r) — z scripts/osm-update.sh; brak pliku = tylko gęstość dróg Valhalli. */
+const ZONES_FILE = process.env.ZONES_FILE ?? "/opt/roadpilot-osm/zones.tsv";
 // Zasięg własnych kafelków (Polska) — poza nim aplikacja wraca do TomTom.
 const VTILES_BOUNDS = [14.07, 49.0, 24.15, 54.84];
 const APP_ORIGINS = (process.env.APP_ORIGINS ?? "").split(",").map((s) => s.trim()).filter(Boolean);
@@ -213,14 +219,23 @@ const routes = {
     return [200, rows.length ? { state: JSON.parse(rows[0].state), rev: rows[0].rev } : { state: null, rev: 0 }];
   },
 
-  /** Zapis stanu: ostatni zapis wygrywa. Zwraca nowy numer wersji. */
+  /**
+   * Zapis stanu. Z `baseRev` (wersja, od której wyszedł zapis) odrzucamy go (409), gdy w międzyczasie zapisało inne
+   * urządzenie — aplikacja pobiera wtedy stan z konta. Bez `baseRev` (starsze wersje aplikacji): ostatni zapis wygrywa.
+   */
   "PUT /api/state": async (req, user) => {
     const body = await readJson(req);
     if (!body.state || typeof body.state !== "object" || body.state.version !== 1) throw new HttpError(400, "Nieprawidłowy stan aplikacji.");
-    await db.query(
-      "INSERT INTO user_state (user_id, state) VALUES (?, ?) ON DUPLICATE KEY UPDATE state = VALUES(state), rev = rev + 1",
-      [user.id, JSON.stringify(body.state)],
-    );
+    const json = JSON.stringify(body.state);
+    // Warunkowy UPDATE jest atomowy — dwa urządzenia zapisujące naraz nie przejdą oba.
+    const [upd] = Number.isInteger(body.baseRev) && body.baseRev > 0
+      ? await db.query("UPDATE user_state SET state = ?, rev = rev + 1 WHERE user_id = ? AND rev = ?", [json, user.id, body.baseRev])
+      : [{ affectedRows: 0 }];
+    if (!upd.affectedRows) {
+      const [cur] = await db.query("SELECT rev FROM user_state WHERE user_id = ?", [user.id]);
+      if (cur.length && Number.isInteger(body.baseRev) && body.baseRev > 0) throw new HttpError(409, "Stan zmieniono na innym urządzeniu.");
+      await db.query("INSERT INTO user_state (user_id, state) VALUES (?, ?) ON DUPLICATE KEY UPDATE state = VALUES(state), rev = rev + 1", [user.id, json]);
+    }
     const [rows] = await db.query("SELECT rev FROM user_state WHERE user_id = ?", [user.id]);
     return [200, { rev: rows[0].rev }];
   },
@@ -334,10 +349,44 @@ routes["GET /api/nav/search"] = async (req, user) => {
 /** Tyle razy silnik RoadPilot liczy trasę od nowa, omijając ograniczenia z naszej bazy, których pojazd nie spełnia. */
 const MAX_DETOURS = 6;
 
-async function valhallaOnce(from, to, vehicle, exclude, routeType = "fastest") {
+/** id drogi OSM → "u" (zabudowany) | "r" (poza) — wczytywane raz, przy pierwszej trasie. */
+let zones = null;
+function loadZones() {
+  zones ??= (async () => {
+    const map = new Map();
+    try {
+      for await (const line of createInterface({ input: createReadStream(ZONES_FILE) })) {
+        const tab = line.indexOf("\t");
+        if (tab > 0) map.set(Number(line.slice(0, tab)), line.slice(tab + 1));
+      }
+    } catch (e) {
+      console.error(`Brak obszarów zabudowanych (${ZONES_FILE}): ${e.message}`);
+    }
+    return map;
+  })();
+  return zones;
+}
+
+/** Trasa Valhalla + ograniczenia ze znaków i rodzaj drogi (trace_attributes po kawałkach); błąd = trasa bez nich. */
+async function withRoadInfo(route) {
+  if (!route) return route;
+  try {
+    const chunks = await Promise.all(traceChunks(route.points).map(async (c) => {
+      const r = await fetch(`${VALHALLA_URL}/trace_attributes`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(traceRequest(c.pts)), signal: AbortSignal.timeout(20_000) });
+      if (!r.ok) throw new Error(`trace_attributes ${r.status}`);
+      return { ...c, edges: (await r.json()).edges ?? [] };
+    }));
+    return { ...route, ...roadInfo(chunks, await loadZones()) };
+  } catch (e) {
+    console.error(`Ograniczenia prędkości (Valhalla): ${e.message}`);
+    return route;
+  }
+}
+
+async function valhallaOnce(from, to, vehicle, exclude, routeType = "fastest", via = []) {
   let r;
   try {
-    r = await fetch(`${VALHALLA_URL}/route`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(valhallaRequest(from, to, vehicle, exclude, 0, routeType)), signal: AbortSignal.timeout(30_000) });
+    r = await fetch(`${VALHALLA_URL}/route`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(valhallaRequest(from, to, vehicle, exclude, 0, routeType, via)), signal: AbortSignal.timeout(30_000) });
   } catch {
     return null;
   }
@@ -349,37 +398,37 @@ async function valhallaOnce(from, to, vehicle, exclude, routeType = "fastest") {
  * sprawdzamy trasę naszą bazą i przy twardym konflikcie (oś, masa, wysokość, szerokość, długość, zakaz) liczymy
  * od nowa z tym miejscem wykluczonym. Gdy objazdu nie ma — zostaje ostatnia wykonalna trasa z ostrzeżeniami.
  */
-async function valhallaRoute(from, to, vehicle, routeType = "fastest") {
+async function valhallaRoute(from, to, vehicle, routeType = "fastest", via = []) {
   if (!VALHALLA_URL) return null;
   let veh;
   try {
     veh = parseVehicle(vehicle);
   } catch {
-    return valhallaOnce(from, to, vehicle, [], routeType);
+    return withRoadInfo(await valhallaOnce(from, to, vehicle, [], routeType, via));
   }
   const exclude = [];
   const seen = new Set();
-  let best = await valhallaOnce(from, to, vehicle, exclude, routeType);
+  let best = await valhallaOnce(from, to, vehicle, exclude, routeType, via);
   if (!best) return null;
   for (let i = 0; i < MAX_DETOURS; i++) {
     const blocking = blockingPoints(await findWarnings(best.points, veh, false), best.lengthKm).filter((p) => !seen.has(p.key));
-    if (!blocking.length) return { ...best, detours: exclude.length };
+    if (!blocking.length) return withRoadInfo({ ...best, detours: exclude.length });
     blocking.forEach((p) => {
       seen.add(p.key);
       exclude.push(p);
     });
-    const next = await valhallaOnce(from, to, vehicle, exclude, routeType);
+    const next = await valhallaOnce(from, to, vehicle, exclude, routeType, via);
     if (!next) break; // bez objazdu — zostaje poprzednia trasa (ostrzeżenia pokaże aplikacja)
     best = next;
   }
-  return { ...best, detours: exclude.length };
+  return withRoadInfo({ ...best, detours: exclude.length });
 }
 
 /** Trasy alternatywne z Valhalli (bez omijania ograniczeń — kierowca widzi ostrzeżenia przy porównaniu). */
 async function valhallaAlternates(from, to, vehicle, routeType = "fastest") {
   try {
     const r = await fetch(`${VALHALLA_URL}/route`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(valhallaRequest(from, to, vehicle, [], 2, routeType)), signal: AbortSignal.timeout(30_000) });
-    return r.ok ? parseValhallaAlternates(await r.json().catch(() => null)) : [];
+    return r.ok ? Promise.all(parseValhallaAlternates(await r.json().catch(() => null)).map(withRoadInfo)) : [];
   } catch {
     return [];
   }
@@ -395,6 +444,8 @@ const distinct = (main, alts) => alts
  * Trasa dla ciężarówki: silnik wybrany przez kierowcę ("tomtom" / "roadpilot"). Własny działa tylko w Polsce;
  * gdy TomTom jest niedostępny lub wyczerpał limit 80% — w Polsce przechodzimy na własny silnik.
  */
+const MAX_VIA = 5;
+
 routes["POST /api/nav/route"] = async (req, user) => {
   requirePremium(user);
   navThrottle("route", req);
@@ -402,24 +453,27 @@ routes["POST /api/nav/route"] = async (req, user) => {
   const from = validPoint(body.from);
   const to = validPoint(body.to);
   if (!from || !to) throw new HttpError(400, "Brak punktu startu lub celu.");
-  const withAlts = body.alternatives === true;
+  // Punkty pośrednie (przytrzymanie na mapie → „dodaj do trasy”); z nimi bez tras alternatywnych.
+  const via = Array.isArray(body.via) ? body.via.map(validPoint) : [];
+  if (via.length > MAX_VIA || via.some((p) => !p)) throw new HttpError(400, `Najwyżej ${MAX_VIA} punktów pośrednich.`);
+  const withAlts = body.alternatives === true && !via.length;
   const routeType = ROUTE_TYPES.has(body.routeType) ? body.routeType : "fastest";
   let url;
   try {
-    url = routeUrl(from, to, body.vehicle, TOMTOM_KEY, withAlts ? 2 : 0, routeType);
+    url = routeUrl(from, to, body.vehicle, TOMTOM_KEY, withAlts ? 2 : 0, routeType, via);
   } catch (e) {
     throw new HttpError(400, e.message);
   }
-  const ownPossible = !!VALHALLA_URL && inPoland(from.lat, from.lon) && inPoland(to.lat, to.lon);
+  const ownPossible = !!VALHALLA_URL && [from, ...via, to].every((p) => inPoland(p.lat, p.lon));
   if (body.engine === "roadpilot" && ownPossible) {
-    const own = await valhallaRoute(from, to, body.vehicle, routeType);
+    const own = await valhallaRoute(from, to, body.vehicle, routeType, via);
     if (own) return [200, { route: own, alternatives: withAlts ? distinct(own, (await valhallaAlternates(from, to, body.vehicle, routeType)).map((a) => ({ ...a, engine: "roadpilot" }))) : [] }];
   }
   userDaily("route", user);
   try {
     await spend("route");
   } catch (e) {
-    const own = ownPossible ? await valhallaRoute(from, to, body.vehicle, routeType) : null;
+    const own = ownPossible ? await valhallaRoute(from, to, body.vehicle, routeType, via) : null;
     if (own) return [200, { route: { ...own, fallback: true } }];
     throw e;
   }
@@ -427,7 +481,7 @@ routes["POST /api/nav/route"] = async (req, user) => {
   const [route, ...alts] = r.ok ? parseRoutes(r.json) : [];
   if (route) return [200, { route: { ...route, engine: "tomtom" }, alternatives: distinct(route, alts).map((a) => ({ ...a, engine: "tomtom" })) }];
   if (r.status >= 500 && ownPossible) {
-    const own = await valhallaRoute(from, to, body.vehicle, routeType);
+    const own = await valhallaRoute(from, to, body.vehicle, routeType, via);
     if (own) return [200, { route: { ...own, fallback: true } }];
   }
   throw new HttpError(r.status === 400 || r.status === 404 ? 422 : 502, routeError(r.json));
@@ -574,8 +628,20 @@ routes["POST /api/nav/warnings"] = async (req, user) => {
   const vehicle = parseVehicle(body.vehicle);
   const pts = Array.isArray(body.points) ? body.points.filter((p) => Array.isArray(p) && p.length >= 3 && p.every(Number.isFinite)).slice(0, 20000) : [];
   if (pts.length < 2) throw new HttpError(400, "Brak trasy.");
-  return [200, { warnings: await findWarnings(pts, vehicle) }];
+  return [200, { warnings: await findWarnings(pts, vehicle), pois: body.pois === false ? undefined : await findPois(pts) }];
 };
+
+/** Stacje paliw, MOP-y i parkingi TIR przy trasie (pinezki na mapie) — z osm_pois, bez kosztów TomTom. */
+async function findPois(pts) {
+  const out = [];
+  for (const box of routeBoxes(pts, 25, 0.004)) {
+    const [rows] = await db.query("SELECT osm_id, kind, lat, lon, name, truck FROM osm_pois WHERE lat BETWEEN ? AND ? AND lon BETWEEN ? AND ?", [box.minLat, box.maxLat, box.minLon, box.maxLon]);
+    out.push(...routePois(pts, rows, box));
+  }
+  // Sąsiednie prostokąty zachodzą na siebie — to samo miejsce tylko raz.
+  const seen = new Set();
+  return out.sort((a, b) => a.km - b.km).filter((p) => !seen.has(p.id) && seen.add(p.id));
+}
 
 // ── Dane do własnej mapy (za zgodą) ──────────────────────────────────────────
 
@@ -637,6 +703,77 @@ routes["DELETE /api/collect"] = async (req, user) => {
   await db.query("DELETE FROM road_reports WHERE user_id = ?", [user.id]);
   await db.query("DELETE FROM alert_votes WHERE user_id = ?", [user.id]);
   await db.query("UPDATE users SET data_consent_at = NULL WHERE id = ?", [user.id]);
+  return [200, {}];
+};
+
+// ── Parking przy celu: opinie kierowców i potwierdzenia (bez Premium — liczy się każdy głos) ──
+
+/** Opinie w promieniu celu z sumami głosów i moim głosem. */
+async function parkingAt(at, user) {
+  const b = boxAround(at.lat, at.lon, PARKING_RADIUS_M);
+  const [rows] = await db.query(
+    `SELECT o.id, o.user_id, o.lat, o.lon, o.label, o.status, o.note, o.updated_at,
+       COALESCE(SUM(v.vote = 1), 0) AS up, COALESCE(SUM(v.vote = -1), 0) AS down, MAX(IF(v.user_id = ?, v.vote, NULL)) AS my_vote
+     FROM parking_opinions o LEFT JOIN parking_votes v ON v.opinion_id = o.id
+     WHERE o.lat BETWEEN ? AND ? AND o.lon BETWEEN ? AND ?
+     GROUP BY o.id ORDER BY o.updated_at DESC LIMIT 200`,
+    [user.id, b.minLat, b.maxLat, b.minLon, b.maxLon],
+  );
+  return parkingView(rows, at, user.id);
+}
+
+routes["GET /api/parking"] = async (req, user) => {
+  const u = new URL(req.url, "http://x");
+  const at = validPoint({ lat: Number(u.searchParams.get("lat")), lon: Number(u.searchParams.get("lon")) });
+  if (!at) throw new HttpError(400, "Brak położenia celu.");
+  return [200, await parkingAt(at, user)];
+};
+
+/** Dodaj albo zmień swoją opinię — jedna na kierowcę w promieniu celu. */
+routes["POST /api/parking"] = async (req, user) => {
+  let o;
+  try {
+    o = cleanParking(await readJson(req));
+  } catch (e) {
+    throw new HttpError(400, e.message);
+  }
+  const [[{ n }]] = await db.query("SELECT COUNT(*) AS n FROM parking_opinions WHERE user_id = ? AND updated_at > NOW() - INTERVAL 1 DAY", [user.id]);
+  if (n >= PARKING_DAILY_MAX) throw new HttpError(429, "Za dużo opinii jak na jeden dzień — spróbuj jutro.");
+  const b = boxAround(o.lat, o.lon, PARKING_RADIUS_M);
+  const [own] = await db.query("SELECT id, lat, lon FROM parking_opinions WHERE user_id = ? AND lat BETWEEN ? AND ? AND lon BETWEEN ? AND ?", [user.id, b.minLat, b.maxLat, b.minLon, b.maxLon]);
+  const mine = own.find((r) => distanceM(o, { lat: r.lat, lon: r.lon }) <= PARKING_RADIUS_M);
+  if (mine) {
+    await db.query("UPDATE parking_opinions SET status = ?, note = ?, label = IF(? = '', label, ?), updated_at = NOW() WHERE id = ?", [o.status, o.note, o.label, o.label, mine.id]);
+    // Zmieniona opinia to nowa informacja — stare potwierdzenia dotyczyły czegoś innego.
+    await db.query("DELETE FROM parking_votes WHERE opinion_id = ?", [mine.id]);
+  } else {
+    await db.query("INSERT INTO parking_opinions (user_id, lat, lon, label, status, note) VALUES (?, ?, ?, ?, ?, ?)", [user.id, o.lat, o.lon, o.label, o.status, o.note]);
+  }
+  return [200, await parkingAt(o, user)];
+};
+
+/** 👍 (1) / 👎 (-1) / wycofanie (0) pod cudzą opinią. */
+routes["POST /api/parking/vote"] = async (req, user) => {
+  const b = await readJson(req);
+  const id = Number(b.id);
+  const vote = Number(b.vote);
+  if (!Number.isInteger(id) || id <= 0 || ![1, 0, -1].includes(vote)) throw new HttpError(400, "Nieprawidłowy głos.");
+  const [[o]] = await db.query("SELECT user_id FROM parking_opinions WHERE id = ?", [id]);
+  if (!o) throw new HttpError(404, "Opinia została usunięta.");
+  if (o.user_id === user.id) throw new HttpError(400, "Nie można głosować na własną opinię.");
+  if (vote === 0) await db.query("DELETE FROM parking_votes WHERE user_id = ? AND opinion_id = ?", [user.id, id]);
+  else await db.query("INSERT INTO parking_votes (user_id, opinion_id, vote) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE vote = VALUES(vote), created_at = NOW()", [user.id, id, vote]);
+  return [200, {}];
+};
+
+/** Usuń opinię — swoją; administrator każdą (moderacja). */
+routes["DELETE /api/parking"] = async (req, user) => {
+  const id = Number((await readJson(req)).id);
+  if (!Number.isInteger(id) || id <= 0) throw new HttpError(400, "Nieprawidłowa opinia.");
+  const [r] = isAdmin(user)
+    ? await db.query("DELETE FROM parking_opinions WHERE id = ?", [id])
+    : await db.query("DELETE FROM parking_opinions WHERE id = ? AND user_id = ?", [id, user.id]);
+  if (!r.affectedRows) throw new HttpError(404, "Nie znaleziono opinii.");
   return [200, {}];
 };
 

@@ -149,3 +149,43 @@ CREATE TABLE IF NOT EXISTS presence (
   updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
   CONSTRAINT fk_presence_user FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Parking przy celu (2026-09-30): opinie kierowców „czy da się stanąć koło firmy” (status 2 = jest dla ciężarówek,
+-- 1 = ograniczony, 0 = brak) i potwierdzenia innych. Jedna opinia na kierowcę w promieniu celu (zmiana nadpisuje).
+CREATE TABLE IF NOT EXISTS parking_opinions (
+  id INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  user_id INT UNSIGNED NOT NULL,
+  lat DOUBLE NOT NULL,
+  lon DOUBLE NOT NULL,
+  label VARCHAR(120) NOT NULL DEFAULT '',
+  status TINYINT NOT NULL,
+  note VARCHAR(280) NOT NULL DEFAULT '',
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  KEY (lat, lon),
+  KEY (user_id, updated_at),
+  CONSTRAINT fk_parking_user FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 👍 / 👎 pod opinią o parkingu — jeden głos na konto (zmiana nadpisuje, 0 = wycofanie).
+CREATE TABLE IF NOT EXISTS parking_votes (
+  user_id INT UNSIGNED NOT NULL,
+  opinion_id INT UNSIGNED NOT NULL,
+  vote TINYINT NOT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (user_id, opinion_id),
+  KEY (opinion_id),
+  CONSTRAINT fk_pvotes_user FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE,
+  CONSTRAINT fk_pvotes_opinion FOREIGN KEY (opinion_id) REFERENCES parking_opinions (id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Pinezki przy trasie (2026-09-30): stacje paliw, MOP-y i parkingi dla ciężarówek z OSM (import: server/poi-import.mjs).
+CREATE TABLE IF NOT EXISTS osm_pois (
+  osm_id VARCHAR(20) NOT NULL PRIMARY KEY,
+  kind VARCHAR(10) NOT NULL,
+  lat DOUBLE NOT NULL,
+  lon DOUBLE NOT NULL,
+  name VARCHAR(120) NOT NULL DEFAULT '',
+  truck TINYINT NOT NULL DEFAULT 0,
+  KEY (lat, lon)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

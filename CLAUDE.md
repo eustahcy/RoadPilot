@@ -41,7 +41,9 @@ Po każdej zmianie w `src/core/` uruchom testy i `npx tsc -b`. Po zmianie w UI �
 
 ```
 src/core/          RoadPilot Core — czyste, deterministyczne funkcje TS (bez Reacta, Date.now(), losowości)
-  rules.ts         JEDYNE miejsce z limitami z przepisów (minuty)
+  rules.ts         JEDYNE miejsce z limitami z przepisów (minuty; TRUCK_SPEED — km/h ciężarówki > 3,5 t: 50 / 70 / 80)
+  section.ts       odcinkowy pomiar: stepSection (wjazd interpolowany między odczytami, przejechane km z przyrostów — odporne na nową trasę),
+                   sectionStats (średnia, ton, adviseKmh — ile do końca, by średnia zeszła do limitu), sectionLimit (znak odcinka vs limit ciężarówki)
   route.ts         Segment/Route: odcinki o różnych prędkościach, profile tras, remainingSegments
   plan.ts          simulate(): pętla jazda → przerwa → odpoczynek dzienny/tygodniowy; parkingHint, positionAt
   scenarios.ts     compareScenarios (now/rest9/rest11 + bestId), whatIfs, betterOption (kafelek „Lepszy scenariusz”), explain, driverStatus, fmtDuration
@@ -68,7 +70,12 @@ src/ongoing.ts     stałe powiadomienie: cicha pętla audio (WAV generowany w pa
 src/core/navmatch.ts  prowadzenie: pointAtKm, bearingAtKm, routeSlice, locate (rzut GPS na trasę, okno wokół podpowiedzi), nextInstruction, lanesAhead, speedLimitAt, isOffRoute; NAV = progi;
                    alongRoute / nearestOnRoute — km po trasie do punktu przy niej (MOP, znajomy; ON_ROUTE_M = 300);
                    speedLimitAt trzyma ostatni limit do NAV.limitCarryKm za końcem odcinka (luki w danych TomTom); speedTone ok/warn/over (NAV.overWarnKmh = 5)
-src/components/MapView.tsx  mapa DOM bez bibliotek (podgląd admina, „Gdzie jest” znajomego — bez pochylenia): kafelki TomTom 512 px (noc) przez /api/tiles
+                   legalLimitAt = min(znak, TRUCK_SPEED[rodzaj drogi z NavRoute.roads]) — wyższy znak ciężarówki nie dotyczy (ignoredSign)
+src/components/SectionControl.tsx  useSectionRun (stan odcinka z odczytów GPS), sectionView (zapowiedź / w trakcie / podsumowanie), SectionPanel w karcie HudNav (prop section)
+src/components/MapView.tsx  useMapGestures (1 palec = przesuwanie, 2 = szczypanie, kółko; tłumi klik po przeciągnięciu) + moveView (punkt pod palcem
+                   zostaje pod palcem, z obrotem i przybliżeniem pochylenia; testy src/mapGestures.test.ts) — MapView z onMove, RouteCompare, HudRouteMap
+                   (NavView.browse: przeglądanie z góry, pitch 0, powrót przyciskiem / po 20 s jazdy)
+src/components/MapView.tsx  mapa DOM bez bibliotek (podgląd admina; porównanie tras i „Gdzie jest” znajomego tylko poza zasięgiem własnych kafelków — w Polsce GlMapView z App.mapStyle): kafelki TomTom 512 px (noc) przez /api/tiles
                    z tokenem (fetch → blob, wspólny cache loadTile/cachedTile), Web Mercator, nakładki SVG; AdminMap.tsx = podgląd danych
 src/components/GlMap.tsx  mapa HUD w WebGL (GlMapView): kafelki rastrowe TomTom jako tekstury ALBO własne kafelki wektorowe (prop vector: theme + vehicle;
                    /api/vtiles → core/mvt.ts decodeMvt → glVector.ts buildVectorTile: bufor [x,y,nx,ny,d], partie wg klucza stylu; wypełnienia przez
@@ -90,6 +97,7 @@ src/voice.ts       komunikaty głosowe (Web Speech, pl-PL): useNavVoice — mane
 src/nav.ts         nawigacja (beta): Vehicle, NavPlace, NavRoute, RouteType (fastest/shortest/eco → Settings.routeType, POST /api/nav/route);
                    searchPlaces / fetchRoute przez API → TomTom; AppState.navRoute tylko lokalnie (nie w sync)
 src/components/NavCard.tsx  Trasa: wyszukiwanie celu, „Wyznacz trasę dla ciężarówki”; trasa → trip.segments (profil custom) → silnik przerw
+src/vtiles.ts      useVtiles (GET /api/vtiles/meta raz na sesję, wspólne dla Nawigacji i „Gdzie jest” — w Polsce GlMapView z własnym stylem) + inVtiles
 src/hudConfig.ts   HudStyle (full/minimal; dawny „nav” migrowany do „full” w normalize), HUD_ITEMS, DEFAULT_HUD_ITEMS — Settings.hudItems[styl]; element „road” steruje też pobieraniem dróg
 src/floating.ts    pływające okienko: canvas → captureStream → <video> → PiP (requestPictureInPicture / webkitSetPresentationMode); useFloating(info, prepare)
 src/install.ts     useInstall: beforeinstallprompt łapane przy wczytaniu modułu, isStandalone; InstallButton.tsx = przycisk + instrukcja iOS
@@ -101,7 +109,7 @@ src/components/NavView.tsx  nawigacja jako osobny system (nie HUD): HudRouteMap 
                    HUD dostaje trasę tylko jako dane (navRoute: km po trasie do MOP-u/znajomych, limit do koloru prędkości)
 src/components/    widoki; HudView.tsx = tryb HUD; fields.tsx = NumberField, OptionalNumberField, DurationField, Toggle, Stepper
 src/api.ts         zapytania do API, token sesji (localStorage "roadpilot:auth"), tryb bez konta ("roadpilot:guest")
-src/sync.ts        useSync: stan ↔ konto (ostatni zapis wygrywa; wysyłka co ≤ 30 s i przy schowaniu, pobranie przy starcie/powrocie);
+src/sync.ts        useSync: stan ↔ konto (wysyłka co ≤ 30 s i przy schowaniu z baseRev — 409 = pobierz; pobranie przy starcie/powrocie i co 30 s);
                    nie wysyła track/hud/planTime; meta w "roadpilot:sync" { rev, dirty }
 src/components/AuthScreen.tsx  logowanie / rejestracja / „Kontynuuj bez konta”
 src/core/friends.ts  znajomi: presenceOf (co wysyłamy: pozycja, prędkość, status driving/standing/break/rest/dayEnd, since, cel, przyjazd, tachograf),
@@ -126,11 +134,26 @@ server/valhalla.mjs  własny silnik tras (Valhalla, OSM Polska, VALHALLA_URL): v
                    /api/nav/route: engine "roadpilot" w PL albo zapas, gdy TomTom niedostępny / limit 80%; valhallaRoute sprawdza trasę
                    findWarnings i przy twardym konflikcie (oś, masa, wysokość, szer., dł., zakaz) liczy od nowa z exclude_locations
                    w punkcie przejazdu (blockingPoints, max MAX_DETOURS); routeWarnings: odcinek ≥2 pkt i 60% przy trasie, kierunek ±30°
+                   withRoadInfo (index.mjs): trace_attributes po kawałkach ≤ TRACE_CHUNK_KM → roadInfo: speedLimits ze znaków OSM i roads
+                   (motorway z klasy drogi, urban/rural z ZONES_FILE = /opt/roadpilot-osm/zones.tsv „id\tu|r” z tagów PL:urban/PL:rural,
+                   bez tagów: gęstość ≥ URBAN_DENSITY albo luka ≤ URBAN_GAP_KM między zabudowanymi = urban); błąd → trasa bez nich
 server/enforcement.mjs  OSM (OPL) → fotoradary / odcinkowe pomiary / kamery na czerwonym (relacje enforcement: from→device = kierunek,
                    from→to = odcinek); enforcement-import.mjs → tabela osm_enforcement. warnings.mjs routeAlerts: dopasowanie do trasy
                    z kierunkiem (from / kurs zgłaszającego); zgłoszenia police/itd żyją 3 h (ALERT_TTL_H); HUD dociąga je co 5 min
 server/nav.mjs → parseRoutes: trasa + alternatywy (maxAlternatives=2, 1 zapytanie TomTom) i korki (sectionType=traffic → route.traffic);
                    POST /api/nav/route {alternatives:true} → {route, alternatives}; Valhalla: alternates=2 (valhallaAlternates)
+punkty pośrednie  NavRoute.via (NavPlace[]); fetchRoute(..., via) → /api/nav/route {via} (MAX_VIA 5; routeUrl/valhallaRequest `via`, Valhalla type "through");
+                   viaAhead (nieprzejechane, do reroute w App) / insertVia (kolejność po km trasy); App.setVia → HudNavData.onVia;
+                   useMapGestures onTap/onLongPress (LONG_PRESS_MS 600); GlMapView pickRef (unproject: odwrotność kamery dla z=0);
+                   HudRouteMap onPin (trafienie w [data-pin], PinInfo) / onHold; NavView PinCard w stopce
+server/pois.mjs    pinezki przy trasie: poiRow (osmium geojsonseq → fuel/services/mop/parking, środek wielokąta), routePois (km, strona drogi
+                   right/left z iloczynu wektorowego, FUEL_NEAR_M 150 / POI_NEAR_M 250, jedno miejsce na 300 m); poi-import.mjs → osm_pois
+                   (krok w osm-update.sh); findPois w index.mjs dokłada `pois` do /api/nav/warnings (refreshWarnings wysyła pois:false);
+                   NavRoute.pois; HudNav routePins (Pin + ikony SVG, PINS_AHEAD_KM 20, przy przeglądaniu pinGapKm, PINS_MAX)
+server/parking.mjs  parking przy celu: cleanParking, boxAround/distanceM, parkingView (promień PARKING_RADIUS_M 300 m, sortowanie po 👍−👎, podsumowanie
+                   bez opinii z przewagą 👎); tabele parking_opinions (1 opinia na konto przy celu) i parking_votes; GET/POST/DELETE /api/parking,
+                   POST /api/parking/vote — z kontem, bez Premium; ParkingCard.tsx w NavCard (przy wybranym celu)
+src/components/PrintoutTips.tsx  Pro tip na Planie: formułki na odwrót wydruku z tachografu (art. 12 561/2006, art. 35/37 165/2014), kopiowanie do schowka
 alert_votes        głosy „jest / nie ma” po minięciu fotoradaru/kontroli (POST /api/alerts/vote, applyVotes w warnings.mjs)
 server/osm.mjs     OSM → ograniczenia (height/weight/axle/width/length/hgv/speed_hgv), parseValue; osm-import.mjs → tabela osm_restrictions
 /opt/roadpilot-valhalla  dane i build.sh Valhalla (docker ghcr.io/valhalla/valhalla); kontener roadpilot-valhalla na 127.0.0.1:8002;
@@ -195,7 +218,9 @@ Widoki nie liczą reguł same — tylko formatują wyniki silnika.
 - Stałe powiadomienie to obejście PWA (audio + Media Session): na Androidzie może przejąć fokus audio i zatrzymać
   muzykę z innej aplikacji; znika po zamknięciu aplikacji z listy ostatnich. Prawdziwa usługa w tle wymaga opakowania
   natywnego (np. Capacitor). GPS w tle nie jest gwarantowany — luki nadrabia `addFix` po powrocie.
-- Synchronizacja: ostatni zapis wygrywa — przy jeździe na dwóch urządzeniach naraz zmiany jednego mogą nadpisać drugie.
+- Synchronizacja: zapis z `baseRev` (409 → aplikacja bierze stan z konta, jej niewysłane zmiany przepadają), pobieranie co 30 s
+  przy widocznej aplikacji. Jazdę z GPS dolicza tylko jedno urządzenie (`AppState.tracker`, `tracking.ts` otherTracker,
+  przejęcie po `TRACKER_TTL_MS` 3 min bez odczytów) — drugie prowadzi tylko własny `track`. Przy przejęciu ≤ 3 min jazdy może przepaść.
   Brak weryfikacji adresu e-mail przy rejestracji.
 - simply.com (tuike.pl) odpowiada 455 na zapytania HTTP z VPS (WAF) — wersji na tuike.pl nie da się sprawdzić z serwera.
 - Overpass odpowiada 406 na zapytania z tego serwera (VPS) — testy HUD z nazwą drogi/stacjami podstawiają odpowiedź

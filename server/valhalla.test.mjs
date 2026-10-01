@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { decodePolyline6, parseValhalla, valhallaRequest } from "./valhalla.mjs";
+import { decodePolyline6, parseValhalla, roadInfo, traceChunks, valhallaRequest } from "./valhalla.mjs";
 
 /** Koder polyline6 — do zbudowania odpowiedzi testowej. */
 function encode(points) {
@@ -49,5 +49,34 @@ describe("silnik RoadPilot (Valhalla)", () => {
     const v = { heightM: 4, widthM: 2.55, lengthM: 16.5, weightKg: 40000, axleWeightKg: 11500, axles: 5, adr: "none", maxKmh: 90 };
     expect(valhallaRequest({ lat: 52, lon: 19 }, { lat: 54, lon: 18 }, v, [], 0, "shortest").costing_options.truck.shortest).toBe(true);
     expect(valhallaRequest({ lat: 52, lon: 19 }, { lat: 54, lon: 18 }, v, [], 0, "eco").costing_options.truck.shortest).toBeUndefined();
+  });
+  it("punkty pośrednie jako „through” — bez alternatyw", () => {
+    const v = { heightM: 4, widthM: 2.55, lengthM: 16.5, weightKg: 40000, axleWeightKg: 11500, axles: 5, adr: "none", maxKmh: 90 };
+    const q = valhallaRequest({ lat: 52, lon: 19 }, { lat: 54, lon: 18 }, v, [], 2, "fastest", [{ lat: 53, lon: 18.5 }]);
+    expect(q.locations).toEqual([{ lat: 52, lon: 19 }, { lat: 53, lon: 18.5, type: "through" }, { lat: 54, lon: 18 }]);
+    expect(q.alternates).toBeUndefined();
+  });
+});
+
+describe("ograniczenia i obszar zabudowany z trace_attributes", () => {
+  it("kawałki trasy do 150 km dzielą punkt na styku", () => {
+    const pts = Array.from({ length: 401 }, (_, i) => [52, 19, i]);
+    const c = traceChunks(pts);
+    expect(c.map((x) => [x.fromKm, x.toKm])).toEqual([[0, 150], [150, 300], [300, 400]]);
+  });
+
+  it("znak 70 bez tagu PL:urban między odcinkami w mieście = nadal zabudowany; autostrada z klasy drogi", () => {
+    const zones = new Map([[1, "u"], [3, "u"], [5, "r"]]);
+    const edges = [
+      { way_id: 1, length: 1, speed_limit: 50, road_class: "primary" },
+      { way_id: 2, length: 1, speed_limit: 70, road_class: "primary" },
+      { way_id: 3, length: 1, speed_limit: 50, road_class: "primary" },
+      { way_id: 4, length: 1, speed_limit: 90, road_class: "primary" },
+      { way_id: 5, length: 1, road_class: "primary" },
+      { way_id: 6, length: 2, speed_limit: 140, road_class: "motorway" },
+    ];
+    const r = roadInfo([{ fromKm: 0, toKm: 7, edges }], zones);
+    expect(r.roads).toEqual([{ km: 0, toKm: 3, kind: "urban" }, { km: 3, toKm: 5, kind: "rural" }, { km: 5, toKm: 7, kind: "motorway" }]);
+    expect(r.speedLimits).toEqual([{ km: 0, toKm: 1, kmh: 50 }, { km: 1, toKm: 2, kmh: 70 }, { km: 2, toKm: 3, kmh: 50 }, { km: 3, toKm: 4, kmh: 90 }, { km: 5, toKm: 7, kmh: 140 }]);
   });
 });

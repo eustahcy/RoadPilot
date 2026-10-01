@@ -26,10 +26,11 @@ export function decodePolyline6(s) {
 
 /** Zapytanie Valhalla /route dla ciężarówki z danymi pojazdu z aplikacji. */
 /** `routeType` "shortest" → Valhalla liczy po długości, nie po czasie; "eco" u nas = najszybsza. */
-export function valhallaRequest(from, to, v, exclude = [], alternates = 0, routeType = "fastest") {
+/** `via` — punkty pośrednie (typ „through”: przejazd bez zatrzymania i zawracania, trasa zostaje jednym odcinkiem). */
+export function valhallaRequest(from, to, v, exclude = [], alternates = 0, routeType = "fastest", via = []) {
   return {
-    ...(alternates > 0 ? { alternates } : {}),
-    locations: [{ lat: from.lat, lon: from.lon }, { lat: to.lat, lon: to.lon }],
+    ...(alternates > 0 && !via.length ? { alternates } : {}),
+    locations: [{ lat: from.lat, lon: from.lon }, ...via.map((p) => ({ lat: p.lat, lon: p.lon, type: "through" })), { lat: to.lat, lon: to.lon }],
     ...(exclude.length ? { exclude_locations: exclude.map((p) => ({ lat: p.lat, lon: p.lon })) } : {}),
     costing: "truck",
     costing_options: {
@@ -129,5 +130,86 @@ export function parseValhalla(json) {
     lanes: [],
     speedLimits: [],
     traffic: [],
+  };
+}
+
+// ── Ograniczenia prędkości i obszar zabudowany na trasie (trace_attributes) ─────────────────────────
+// Valhalla /route nie podaje ograniczeń ani klasy drogi, więc dopasowujemy gotową trasę do mapy (trace_attributes)
+// i z krawędzi bierzemy znak (speed_limit), klasę drogi i id drogi OSM. Teren zabudowany: drogi z tagami PL:urban
+// (plik zones.tsv z osm-update.sh) — w OSM znak 60/70 w mieście zwykle gubi tag PL:urban, stąd wypełnianie luk.
+
+/** Kawałek trasy na jedno zapytanie (limit trace w Valhalli: 200 km i 16 000 punktów). */
+export const TRACE_CHUNK_KM = 150;
+/** Luka bez danych między odcinkami zabudowanymi krótsza niż tyle km = nadal obszar zabudowany (np. znak 70 w mieście). */
+export const URBAN_GAP_KM = 3;
+/** Gęstość dróg Valhalli (0–15), od której droga bez tagów jest w mieście. */
+export const URBAN_DENSITY = 8;
+
+/** Punkty trasy [lat, lon, km] → kawałki do trace_attributes (sąsiednie dzielą punkt na styku). */
+export function traceChunks(points, maxKm = TRACE_CHUNK_KM) {
+  const out = [];
+  let cur = [];
+  for (const p of points) {
+    cur.push(p);
+    if (p[2] - cur[0][2] >= maxKm || cur.length >= 15000) {
+      out.push(cur);
+      cur = [p];
+    }
+  }
+  if (cur.length > 1) out.push(cur);
+  return out.map((pts) => ({ fromKm: pts[0][2], toKm: pts[pts.length - 1][2], pts }));
+}
+
+export function traceRequest(pts) {
+  return {
+    shape: pts.map(([lat, lon]) => ({ lat, lon })),
+    costing: "truck",
+    shape_match: "walk_or_snap",
+    filters: { attributes: ["edge.way_id", "edge.length", "edge.speed_limit", "edge.road_class", "edge.density"], action: "include" },
+  };
+}
+
+/**
+ * Krawędzie z trace_attributes (po kawałkach) → ograniczenia ze znaków i rodzaj drogi wg przepisów:
+ * motorway (autostrada / ekspresowa), urban (obszar zabudowany), rural (poza nim). `zones`: id drogi OSM → "u" | "r".
+ */
+export function roadInfo(chunks, zones) {
+  const edges = [];
+  for (const c of chunks) {
+    const total = c.edges.reduce((s, e) => s + (e.length ?? 0), 0);
+    // Długości krawędzi skalujemy do km trasy — dopasowanie bywa o kilka metrów krótsze/dłuższe.
+    const scale = total > 0 ? (c.toKm - c.fromKm) / total : 0;
+    let km = c.fromKm;
+    for (const e of c.edges) {
+      const len = (e.length ?? 0) * scale;
+      const zone = zones.get(e.way_id);
+      const kind = e.road_class === "motorway" ? "motorway" : zone === "u" ? "urban" : zone === "r" ? "rural" : (e.density ?? 0) >= URBAN_DENSITY ? "urban" : null;
+      const kmh = typeof e.speed_limit === "number" && e.speed_limit > 0 && e.speed_limit < 200 ? e.speed_limit : null;
+      edges.push({ km, toKm: km + len, kind, kmh });
+      km += len;
+    }
+  }
+  // Luka bez tagów między dwoma odcinkami zabudowanymi (do URBAN_GAP_KM) — nadal miasto; reszta bez danych = poza.
+  for (let i = 0; i < edges.length; i++) {
+    if (edges[i].kind !== null) continue;
+    let j = i;
+    while (j < edges.length && edges[j].kind === null) j++;
+    const urban = i > 0 && j < edges.length && edges[i - 1].kind === "urban" && edges[j].kind === "urban" && edges[j - 1].toKm - edges[i].km <= URBAN_GAP_KM;
+    for (let k = i; k < j; k++) edges[k].kind = urban ? "urban" : "rural";
+    i = j - 1;
+  }
+  const merge = (key) => {
+    const out = [];
+    for (const e of edges) {
+      if (e[key] === null) continue;
+      const last = out[out.length - 1];
+      if (last && last.v === e[key] && e.km - last.toKm < 0.01) last.toKm = e.toKm;
+      else out.push({ km: e.km, toKm: e.toKm, v: e[key] });
+    }
+    return out.filter((r) => r.toKm - r.km > 0.001).map((r) => ({ km: round(r.km, 3), toKm: round(r.toKm, 3), v: r.v }));
+  };
+  return {
+    speedLimits: merge("kmh").map(({ km, toKm, v }) => ({ km, toKm, kmh: v })),
+    roads: merge("kind").map(({ km, toKm, v }) => ({ km, toKm, kind: v })),
   };
 }

@@ -1,9 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 import { fmtDuration, fmtKm } from "../format";
 import { isAlert, jamMatters, jamTone, NavRoute } from "../nav";
-import { routeSlice } from "../core/navmatch";
+import { locate, routeSlice } from "../core/navmatch";
 import { routeRefs } from "./HudView";
-import { LatLon, MapView, worldPx } from "./MapView";
+import { LatLon, MapView, MAX_VIEW_ZOOM, MIN_VIEW_ZOOM, moveView, useMapGestures, worldPx } from "./MapView";
+import { GlLine, GlMapView, GlVector } from "./GlMap";
+import { inVtiles, useVtiles } from "../vtiles";
 
 export const ROUTE_COLORS = ["#42d392", "#4ea1ff", "#e8b44c"];
 const LETTERS = ["A", "B", "C"];
@@ -31,7 +33,10 @@ const thin = (pts: [number, number, number][]) => {
  * Porównanie tras: mapa z wszystkimi wariantami i zestawienie — czas (z korkami), różnica do najszybszej,
  * długość, korki, ograniczenia dla pojazdu, fotoradary. Dotknięcie wybiera trasę.
  */
-export function RouteCompare({ routes, selectedAt, token, onPick }: { routes: NavRoute[]; selectedAt: number | undefined; token: string; onPick: (r: NavRoute) => void }) {
+const rgba = (hex: string, a = 1): [number, number, number, number] => [parseInt(hex.slice(1, 3), 16) / 255, parseInt(hex.slice(3, 5), 16) / 255, parseInt(hex.slice(5, 7), 16) / 255, a];
+const JAM_COLOR = { slow: "#f2c230", jam: "#e8322c", closed: "#8a1010" } as const;
+
+export function RouteCompare({ routes, selectedAt, token, onPick, mapStyle }: { routes: NavRoute[]; selectedAt: number | undefined; token: string; onPick: (r: NavRoute) => void; /** Styl własnej mapy — w jej zasięgu zamiast kafelków TomTom. */ mapStyle?: GlVector }) {
   const fastest = Math.min(...routes.map((r) => r.travelMin));
   // Dopasowanie do faktycznego rozmiaru ramki (w HUD jest szersza niż na karcie).
   const box = useRef<HTMLDivElement>(null);
@@ -43,15 +48,76 @@ export function RouteCompare({ routes, selectedAt, token, onPick }: { routes: Na
     ro.observe(el);
     return () => ro.disconnect();
   }, []);
-  const view = fit(routes, size.w, size.h);
+  // Widok przesunięty / przybliżony palcem; null = dopasowany do wszystkich tras (też po nowym wyznaczeniu).
+  const [manual, setManual] = useState<{ center: LatLon; zoom: number } | null>(null);
+  const routesKey = routes.map((r) => r.at).join(",");
+  useEffect(() => setManual(null), [routesKey]);
+  const view = manual ?? fit(routes, size.w, size.h);
+  const zoomBy = (d: number) => setManual({ center: view.center, zoom: Math.max(MIN_VIEW_ZOOM, Math.min(MAX_VIEW_ZOOM, view.zoom + d)) });
   const order = routes.map((r, i) => ({ r, i })).sort((a, b) => Number(a.r.at === selectedAt) - Number(b.r.at === selectedAt));
+  // Własna mapa, gdy start i cel każdej trasy są w zasięgu kafelków (Polska).
+  const vtiles = useVtiles(token);
+  const own = !!mapStyle && routes.every((r) => inVtiles(vtiles, r.from) && inVtiles(vtiles, r.to));
+  const pickRef = useRef<((x: number, y: number) => LatLon | undefined) | null>(null);
+  const viewRef = useRef(view);
+  viewRef.current = view;
+  const gestures = useMapGestures(
+    (g) => {
+      const [center, zoom] = moveView(viewRef.current, g, { w: size.w, h: size.h });
+      setManual({ center, zoom });
+    },
+    undefined,
+    {
+      // Dotknięcie linii wybiera trasę: najbliższa w promieniu ~24 px ekranu.
+      onTap: (x, y) => {
+        const p = pickRef.current?.(x, y);
+        if (!p) return;
+        const mPerPx = (40_075_000 * Math.cos((p.lat * Math.PI) / 180)) / (512 * 2 ** viewRef.current.zoom);
+        const best = routes.map((r) => ({ r, d: locate(r.points, p)?.offM ?? Infinity })).sort((a, b) => a.d - b.d)[0];
+        if (best && best.d <= 24 * mPerPx) onPick(best.r);
+      },
+    },
+  );
+  const glLines = (): GlLine[] => {
+    const sel = routes.find((r) => r.at === selectedAt);
+    const out: GlLine[] = [];
+    for (const { r, i } of order) {
+      const pts = thin(r.points).map((p) => ({ lat: p[0], lon: p[1] }));
+      const on = r.at === selectedAt;
+      out.push({ pts, color: rgba("#08111a", on ? 0.9 : 0.6), widthPx: on ? 11 : 8 }, { pts, color: rgba(ROUTE_COLORS[i], on ? 1 : 0.75), widthPx: on ? 7 : 5 });
+    }
+    for (const t of sel?.traffic?.filter(jamMatters) ?? []) {
+      const pts = routeSlice(sel!.points, t.km, Math.max(t.toKm, t.km + 0.3));
+      if (pts.length > 1) out.push({ pts, color: rgba(JAM_COLOR[jamTone(t)]), widthPx: 5 });
+    }
+    return out;
+  };
+  const zoomButtons = (
+    <>
+      <div className="map-zoom">
+        <button onClick={() => zoomBy(1)} aria-label="Przybliż">+</button>
+        <button onClick={() => zoomBy(-1)} aria-label="Oddal">−</button>
+      </div>
+      {manual && <button className="map-fit" onClick={() => setManual(null)}>Cała trasa</button>}
+    </>
+  );
   return (
     <div className="route-compare">
       <div className="route-compare-map" ref={box}>
+        {own ? (
+          <>
+            <div className="rc-gl" {...gestures}>
+              <GlMapView token={token} center={view.center} zoom={view.zoom} lines={glLines()} markers={[]} vector={mapStyle} pickRef={pickRef} />
+            </div>
+            {zoomButtons}
+          </>
+        ) : (
+        <>
         <MapView
           token={token}
           center={view.center}
           zoom={view.zoom}
+          onMove={(center, zoom) => setManual({ center, zoom })}
           overlay={(px) => {
             const d = (pts: { lat: number; lon: number }[]) => pts.map((p, k) => `${k ? "L" : "M"}${px(p).map((v) => v.toFixed(1)).join(" ")}`).join("");
             const sel = routes.find((r) => r.at === selectedAt);
@@ -75,6 +141,9 @@ export function RouteCompare({ routes, selectedAt, token, onPick }: { routes: Na
             );
           }}
         />
+        {zoomButtons}
+        </>
+        )}
       </div>
       <ul className="rc-list">
         {routes.map((r, i) => {

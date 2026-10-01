@@ -1,6 +1,8 @@
 // Synchronizacja stanu z kontem. Telefon jest źródłem prawdy na bieżąco (działa offline), serwer — kopią między
-// urządzeniami. Zasada: ostatni zapis wygrywa. Zmiany wysyłamy co najwyżej co 30 s, od razu przy schowaniu aplikacji;
-// przy starcie i powrocie do aplikacji pobieramy nowszą wersję z konta, o ile tu nie ma niewysłanych zmian.
+// urządzeniami. Zmiany wysyłamy co najwyżej co 30 s, od razu przy schowaniu aplikacji; nowszą wersję z konta pobieramy
+// przy starcie, powrocie do aplikacji i co 30 s, o ile tu nie ma niewysłanych zmian. Zapis podaje wersję, od której
+// wyszedł (baseRev) — gdy w międzyczasie zapisało inne urządzenie (np. tablet „zaczynam przerwę”), serwer odpowiada 409,
+// a my bierzemy stan z konta zamiast go nadpisać. Jazdę z GPS dolicza tylko jedno urządzenie (AppState.tracker).
 
 import { Dispatch, SetStateAction, useCallback, useEffect, useRef, useState } from "react";
 import { api, ApiError, Auth } from "./api";
@@ -8,6 +10,8 @@ import { AppState, normalize } from "./state";
 
 const META_KEY = "roadpilot:sync";
 const PUSH_EVERY_MS = 30_000;
+/** Co tyle pobieramy zmiany z konta, gdy aplikacja jest widoczna (drugie urządzenie na tym samym koncie). */
+const PULL_EVERY_MS = 30_000;
 
 export type SyncStatus = { kind: "off" } | { kind: "syncing" } | { kind: "ok"; at: number } | { kind: "offline" } | { kind: "error"; message: string };
 
@@ -52,6 +56,8 @@ export function useSync(auth: Auth | null, state: AppState, setState: Dispatch<S
   const latest = useRef("");
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const busy = useRef(false);
+  const conflict = useRef(false);
+  const pullRef = useRef<(force?: boolean) => Promise<void>>(async () => {});
   const token = auth?.token;
   latest.current = JSON.stringify(syncable(state));
 
@@ -71,25 +77,31 @@ export function useSync(auth: Auth | null, state: AppState, setState: Dispatch<S
     busy.current = true;
     setStatus({ kind: "syncing" });
     try {
-      const r = await api<{ rev: number }>("PUT", "/state", { state: JSON.parse(body) }, token, keepalive);
+      const r = await api<{ rev: number }>("PUT", "/state", { state: JSON.parse(body), baseRev: meta.current.rev }, token, keepalive);
       sent.current = body;
       setMeta({ rev: r.rev, dirty: latest.current !== body });
       setStatus({ kind: "ok", at: Date.now() });
     } catch (e) {
-      fail(e);
+      if (e instanceof ApiError && e.status === 409) conflict.current = true;
+      else fail(e);
     } finally {
       busy.current = false;
     }
+    // Inne urządzenie zapisało w międzyczasie — jego wersja wygrywa (nasze niewysłane zmiany przepadają).
+    if (conflict.current) {
+      conflict.current = false;
+      await pullRef.current(true);
+    }
   }, [token, fail]);
 
-  const pull = useCallback(async () => {
+  const pull = useCallback(async (force = false) => {
     if (!token || busy.current) return;
     busy.current = true;
     setStatus({ kind: "syncing" });
     let needPush = false;
     try {
       const r = await api<{ state: AppState | null; rev: number }>("GET", "/state", undefined, token);
-      if (r.state && r.rev > meta.current.rev && !meta.current.dirty) {
+      if (r.state && (force || (r.rev > meta.current.rev && !meta.current.dirty))) {
         const incoming = normalize(r.state);
         sent.current = JSON.stringify(syncable(incoming));
         setMeta({ rev: r.rev, dirty: false });
@@ -107,6 +119,7 @@ export function useSync(auth: Auth | null, state: AppState, setState: Dispatch<S
     }
     if (needPush) await push();
   }, [token, setState, fail, push]);
+  pullRef.current = pull;
 
   // Start / zalogowanie i każdy powrót do aplikacji: pobierz. Schowanie aplikacji: wyślij zaległe zmiany.
   useEffect(() => {
@@ -124,7 +137,9 @@ export function useSync(auth: Auth | null, state: AppState, setState: Dispatch<S
     const onOnline = () => (meta.current.dirty ? push() : pull());
     document.addEventListener("visibilitychange", onVisibility);
     window.addEventListener("online", onOnline);
+    const poll = setInterval(() => document.visibilityState === "visible" && !meta.current.dirty && pull(), PULL_EVERY_MS);
     return () => {
+      clearInterval(poll);
       document.removeEventListener("visibilitychange", onVisibility);
       window.removeEventListener("online", onOnline);
     };

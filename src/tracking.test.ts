@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { distanceM, Fix } from "./core/gps";
 import { defaultState } from "./state";
-import { applyFix, endDay, finishStop, startDay, startStop } from "./tracking";
+import { applyFix, endDay, finishStop, startDay, startStop, TRACKER_TTL_MS } from "./tracking";
 
 const MIN = 60_000;
 const NOW = Date.UTC(2026, 8, 30, 12, 0);
@@ -85,5 +85,34 @@ describe("dzień pracy", () => {
     expect(s.stop).toBeNull();
     expect(s.driver.reducedRestsLeft).toBe(2);
     expect(s.driver.drivenTodayMin).toBeLessThanOrEqual(1);
+  });
+});
+
+describe("dwa urządzenia na jednym koncie", () => {
+  /** Jazda 60 km/h od `from` do `to` minut na urządzeniu `dev`. */
+  function drive(s: ReturnType<typeof defaultState>, dev: string, from: number, to: number) {
+    for (let m = from; m <= to; m += 0.25) s = applyFix(s, fix(m, m), dev);
+    return s;
+  }
+
+  it("jazdę dolicza tylko urządzenie, które ją liczy — drugie prowadzi tylko własny licznik", () => {
+    const phone = drive(defaultState(NOW), "phone", 0, 10);
+    expect(phone.tracker).toMatchObject({ device: "phone" });
+    expect(phone.driver.drivenTodayMin).toBeCloseTo(10, 0);
+    // Tablet dostał stan z konta i też ma GPS: nie dolicza tych samych minut drugi raz.
+    const tablet = drive({ ...phone, track: null }, "tablet", 10.25, 12);
+    expect(tablet.driver.drivenTodayMin).toBe(phone.driver.drivenTodayMin);
+    expect(tablet.track).not.toBeNull();
+  });
+
+  it("gdy liczące urządzenie milknie (aplikacja w tle), po TRACKER_TTL_MS przejmuje drugie — bez podwójnego liczenia", () => {
+    const phone = drive(defaultState(NOW), "phone", 0, 10);
+    const ttlMin = TRACKER_TTL_MS / MIN;
+    let tablet = drive({ ...phone, track: null }, "tablet", 10.25, 10 + ttlMin - 0.25);
+    expect(tablet.driver.drivenTodayMin).toBe(phone.driver.drivenTodayMin);
+    tablet = drive(tablet, "tablet", 10 + ttlMin + 0.25, 20);
+    expect(tablet.tracker).toMatchObject({ device: "tablet" });
+    // Doliczone tylko minuty od przejęcia (nie cały czas od startu licznika tabletu).
+    expect(tablet.driver.drivenTodayMin - phone.driver.drivenTodayMin).toBeCloseTo(20 - 10 - ttlMin, 0);
   });
 });

@@ -75,16 +75,19 @@ const ALERT_SPEECH: Record<string, string> = {
 };
 
 /** „Uwaga. Za 500 metrów fotoradar. Ograniczenie 70.” / „… odcinkowy pomiar prędkości na 3 kilometry. …” */
-function alertSpeech(w: RouteWarning, d: number) {
+function alertSpeech(w: RouteWarning, d: number, limit: number | null | undefined) {
   const len = w.toKm !== undefined ? ` na ${spokenDist(w.toKm - w.km)}` : "";
-  return `Uwaga. Za ${spokenDist(d)} ${ALERT_SPEECH[w.kind] ?? "kontrola"}${len}.${w.value ? ` Ograniczenie ${w.value}.` : ""}`;
+  return `Uwaga. Za ${spokenDist(d)} ${ALERT_SPEECH[w.kind] ?? "kontrola"}${len}.${limit ? ` Ograniczenie ${limit}.` : ""}`;
 }
+
+/** Odcinkowy pomiar w nawigacji: limit dla naszego pojazdu i średnia z przejazdu (gdy już go skończyliśmy). */
+export type SectionVoice = (w: RouteWarning) => { limit?: number; avgKmh?: number };
 
 /**
  * Mówi zapowiedzi manewrów i ostrzeżeń. `next` = następny manewr i odległość do niego; `warnings` z km trasy;
  * `km` — pozycja na trasie.
  */
-export function useNavVoice(enabled: boolean, next: { ins: NavInstruction; inKm: number } | undefined, km: number | undefined, warnings: RouteWarning[] | undefined, kmh: number | null) {
+export function useNavVoice(enabled: boolean, next: { ins: NavInstruction; inKm: number } | undefined, km: number | undefined, warnings: RouteWarning[] | undefined, kmh: number | null, section?: SectionVoice) {
   const said = useRef(new Set<string>());
   useEffect(() => {
     if (!enabled || !voiceSupported() || km === undefined) return;
@@ -107,11 +110,17 @@ export function useNavVoice(enabled: boolean, next: { ins: NavInstruction; inKm:
       const key = `w:${w.source}:${w.id}:${w.kind}`;
       if (d > 0 && d <= 1 && !said.current.has(key)) {
         said.current.add(key);
-        speak(isAlert(w) ? alertSpeech(w, d) : `Uwaga. ${warningText(w).replace(/(\d),(\d)/g, "$1 przecinek $2").replace(" m", " metra").replace(" t", " ton")} za ${spokenDist(d)}.`);
+        speak(isAlert(w) ? alertSpeech(w, d, w.kind === "section" && section ? section(w).limit : w.value) : `Uwaga. ${warningText(w).replace(/(\d),(\d)/g, "$1 przecinek $2").replace(" m", " metra").replace(" t", " ton")} za ${spokenDist(d)}.`);
       }
-      if (w.toKm !== undefined && km >= w.toKm && km - w.toKm < 0.3 && said.current.has(key) && !said.current.has(`${key}:end`)) {
+      if (w.toKm !== undefined && km >= w.km && km - w.km < 0.3 && km < w.toKm && !said.current.has(`${key}:start`)) {
+        said.current.add(`${key}:start`);
+        const limit = section?.(w).limit;
+        speak(`Początek odcinkowego pomiaru prędkości.${limit ? ` Limit ${limit}.` : ""}`);
+      }
+      if (w.toKm !== undefined && km >= w.toKm && km - w.toKm < 0.3 && said.current.has(`${key}:start`) && !said.current.has(`${key}:end`)) {
         said.current.add(`${key}:end`);
-        speak("Koniec odcinkowego pomiaru prędkości.");
+        const avg = section?.(w).avgKmh;
+        speak(`Koniec odcinkowego pomiaru prędkości.${avg ? ` Średnia ${Math.round(avg)}.` : ""}`);
       }
     }
   }, [enabled, next?.ins.km, next && Math.round(next.inKm * 100), km && Math.round(km * 20), kmh && Math.round(kmh / 10)]);

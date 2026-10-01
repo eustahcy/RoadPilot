@@ -18,7 +18,7 @@ import { launch, platform } from "../launch";
 import { HudItems, HudStyle } from "../hudConfig";
 import { locate } from "../core/navmatch";
 import { NavRoute } from "../nav";
-import { nearestOnRoute, NavInstruction, ON_ROUTE_M, speedLimitAt, speedTone } from "../core/navmatch";
+import { legalLimitAt, nearestOnRoute, NavInstruction, ON_ROUTE_M, speedTone } from "../core/navmatch";
 import { RouteWarning } from "../nav";
 import { HUD_STYLES } from "../hudConfig";
 import { ReportKind } from "../collect";
@@ -70,6 +70,8 @@ interface Props {
   navRoute?: NavRoute | null;
   /** Ogranicznik pojazdu (km/h) — do koloru prędkości, gdy niższy niż znak. */
   vehicleMaxKmh?: number;
+  /** Pojazd > 3,5 t — limity ciężarówki (wyższy znak go nie dotyczy). */
+  truck: boolean;
   /** Zgłoszenia z drogi do mapy RoadPilot — tylko ze zgodą kierowcy. */
   report?: { onSend: (kind: ReportKind, value: number | null) => Promise<void>; onVote: (w: RouteWarning, vote: 1 | -1) => Promise<void> };
   /** Znajomi z konta (kafelek „Najbliższy znajomy”, znaczniki na mapie) — undefined bez konta. */
@@ -122,7 +124,7 @@ export function HudView(p: Props) {
   const floatBtn = show.floating && p.floating.supported;
 
   // Kolor prędkości: limit z trasy (i ogranicznik pojazdu, gdy niższy) — zielony / żółty / czerwony.
-  const routeLimit = myRoute && p.navRoute ? speedLimitAt(p.navRoute.speedLimits, myRoute.km) : undefined;
+  const routeLimit = myRoute && p.navRoute ? legalLimitAt(p.navRoute, myRoute.km, p.truck)?.kmh : undefined;
   const vehicleMax = p.vehicleMaxKmh;
   const legal = routeLimit !== undefined && vehicleMax !== undefined ? Math.min(routeLimit, vehicleMax) : routeLimit ?? vehicleMax;
   const tone = speedTone(speed, legal);

@@ -1,3 +1,4 @@
+import { GlVector } from "./GlMap";
 import { useEffect, useState } from "react";
 import { ApiError } from "../api";
 import { currentPosition, fetchRoutes, NavEngine, NavPlace, NavRoute, RouteType, searchPlaces, Vehicle } from "../nav";
@@ -12,6 +13,8 @@ export interface HudPlanner {
   /** Pozycja z GPS HUD — inaczej pytamy telefon jednorazowo. */
   position: { lat: number; lon: number } | null;
   onRoute: (r: NavRoute) => void;
+  /** Styl własnej mapy do porównania tras. */
+  mapStyle?: GlVector;
 }
 
 const LETTERS = ["A", "B", "C"];
@@ -122,7 +125,7 @@ export function HudRoutePicker({ planner, dest: current, onClose }: { planner: H
       {routes.length > 0 && !editing && (
         <>
           {routes.length === 1 && <p className="muted small">Brak sensownych tras alternatywnych — jest tylko jedna.</p>}
-          <RouteCompare routes={routes} selectedAt={selectedAt} token={planner.token} onPick={(r) => setSelectedAt(r.at)} />
+          <RouteCompare routes={routes} selectedAt={selectedAt} token={planner.token} onPick={(r) => setSelectedAt(r.at)} mapStyle={planner.mapStyle} />
         </>
       )}
 

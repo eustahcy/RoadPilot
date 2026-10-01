@@ -6,6 +6,8 @@ export type NavAccess = "guest" | "noPremium" | "premium";
 
 import { api } from "./api";
 import { Segment } from "./core/route";
+import { locate, RoadSection } from "./core/navmatch";
+import { distanceM } from "./core/gps";
 
 export interface Vehicle {
   heightM: number;
@@ -60,10 +62,16 @@ export interface NavRoute {
   instructions: { km: number; maneuver: string; text: string; street?: string; signpost?: string; exit?: string; roundaboutExit?: string; angle?: number }[];
   lanes: { km: number; toKm: number; lanes: { dirs: string[]; follow?: string }[] }[];
   speedLimits: { km: number; toKm: number; kmh: number }[];
+  /** Rodzaj drogi wg przepisów (obszar zabudowany / poza / autostrada i ekspresowa) — limity ciężarówki; brak w starszych trasach. */
+  roads?: RoadSection[];
   /** Korki, roboty i zamknięcia na trasie (TomTom, w chwili wyznaczenia); level 1 = małe … 3 = duże, 4 = zamknięte. */
   traffic?: TrafficSection[];
   /** Ograniczenia na trasie, których pojazd nie spełnia (nasze dane: OSM + zgłoszenia) — brak = nie sprawdzono. */
   warnings?: RouteWarning[];
+  /** Stacje, MOP-y i parkingi przy trasie (pinezki) — dociągane razem z ostrzeżeniami. */
+  pois?: RoutePoi[];
+  /** Punkty pośrednie (dodane przytrzymaniem na mapie), w kolejności przejazdu. */
+  via?: NavPlace[];
 }
 
 export interface TrafficSection {
@@ -104,6 +112,21 @@ export interface RouteWarning {
   lon: number;
 }
 
+/** Miejsce przy trasie (pinezka na mapie): stacja paliw, MOP z obsługą, MOP, parking TIR — z OSM (server/pois.mjs). */
+export interface RoutePoi {
+  km: number;
+  id: string;
+  kind: "fuel" | "services" | "mop" | "parking";
+  name: string;
+  /** Oznaczone dla ciężarówek (hgv / olej HGV). */
+  truck: boolean;
+  lat: number;
+  lon: number;
+  /** Po której stronie drogi względem kierunku jazdy. */
+  side: "left" | "right";
+  offM: number;
+}
+
 /** Fotoradary, odcinkowe pomiary i kontrole — tylko ostrzegamy (nie są ograniczeniem dla pojazdu). */
 export const ALERT_KINDS = new Set(["camera", "red_light", "section", "police", "itd"]);
 export const isAlert = (w: RouteWarning) => ALERT_KINDS.has(w.kind);
@@ -138,8 +161,8 @@ const fmtLen = (km: number) => (km < 1 ? `${Math.round(km * 1000)} m` : `${Strin
 /** Ostrzeżenia dla trasy z naszej bazy — błąd nie blokuje nawigacji (trasa zostaje bez ostrzeżeń). */
 export async function withWarnings(token: string, route: NavRoute, vehicle: Vehicle): Promise<NavRoute> {
   try {
-    const r = await api<{ warnings: RouteWarning[] }>("POST", "/nav/warnings", { points: route.points, vehicle }, token);
-    return { ...route, warnings: r.warnings };
+    const r = await api<{ warnings: RouteWarning[]; pois?: RoutePoi[] }>("POST", "/nav/warnings", { points: route.points, vehicle }, token);
+    return { ...route, warnings: r.warnings, pois: r.pois ?? [] };
   } catch {
     return route;
   }
@@ -163,7 +186,7 @@ export async function refreshWarnings(token: string, route: NavRoute, km: number
   const points = route.points.filter((p) => p[2] >= lo && p[2] <= hi);
   if (points.length < 2) return null;
   try {
-    const r = await api<{ warnings: RouteWarning[] }>("POST", "/nav/warnings", { points, vehicle }, token);
+    const r = await api<{ warnings: RouteWarning[] }>("POST", "/nav/warnings", { points, vehicle, pois: false }, token);
     const [a, b] = [points[0][2], points[points.length - 1][2]];
     return [...(route.warnings ?? []).filter((w) => w.km < a || w.km > b), ...r.warnings].sort((x, y) => x.km - y.km);
   } catch {
@@ -182,9 +205,28 @@ export async function searchPlaces(token: string, q: string, near?: { lat: numbe
   return r.results;
 }
 
-export async function fetchRoute(token: string, from: { lat: number; lon: number }, to: NavPlace, vehicle: Vehicle, now: number, engine: NavEngine = "tomtom", routeType: RouteType = "fastest"): Promise<NavRoute> {
-  const r = await api<{ route: Omit<NavRoute, "at" | "from" | "to"> }>("POST", "/nav/route", { from, to: { lat: to.lat, lon: to.lon }, vehicle, engine, routeType }, token);
-  return withWarnings(token, { ...r.route, at: now, from, to }, vehicle);
+export async function fetchRoute(token: string, from: { lat: number; lon: number }, to: NavPlace, vehicle: Vehicle, now: number, engine: NavEngine = "tomtom", routeType: RouteType = "fastest", via: NavPlace[] = []): Promise<NavRoute> {
+  const r = await api<{ route: Omit<NavRoute, "at" | "from" | "to"> }>("POST", "/nav/route", { from, to: { lat: to.lat, lon: to.lon }, vehicle, engine, routeType, via: via.map((p) => ({ lat: p.lat, lon: p.lon })) }, token);
+  return withWarnings(token, { ...r.route, at: now, from, to, via }, vehicle);
+}
+
+/** Punkty pośrednie, których jeszcze nie minęliśmy (km po trasie dalej niż my, a nie tuż obok nas). */
+export function viaAhead(route: NavRoute, pos: { lat: number; lon: number } | null): NavPlace[] {
+  const via = route.via ?? [];
+  if (!pos) return via;
+  const me = locate(route.points, pos)?.km ?? 0;
+  return via.filter((v) => {
+    const at = locate(route.points, v);
+    return (at ? at.km > me + 0.2 : true) && distanceM(pos, v) > 300;
+  });
+}
+
+/** Nowy punkt pośredni w kolejności przejazdu: przed pierwszym punktem, który na trasie leży dalej niż on. */
+export function insertVia(route: NavRoute, via: NavPlace[], p: NavPlace): NavPlace[] {
+  const km = (x: NavPlace) => locate(route.points, x)?.km ?? Infinity;
+  const at = km(p);
+  const i = via.findIndex((v) => km(v) > at);
+  return i < 0 ? [...via, p] : [...via.slice(0, i), p, ...via.slice(i)];
 }
 
 /** Trasa z alternatywami (do porównania) — każda już z ostrzeżeniami z naszej bazy. Pierwsza = najlepsza wg silnika. */

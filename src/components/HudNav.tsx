@@ -1,8 +1,9 @@
 import { useEffect, useRef } from "react";
 import { Live } from "../core/gps";
 import { alongRoute, bearingAtKm, isOffRoute, lanesAhead, locate, NAV, NavInstruction, nextInstruction, pointAtKm, RoutePos, routeSlice, speedLimitAt } from "../core/navmatch";
-import { isAhead, jamMatters, jamTone, NavPlace, NavRoute, TrafficSection, warningText } from "../nav";
+import { isAhead, jamMatters, jamTone, NavPlace, NavRoute, RoutePoi, TrafficSection, warningText } from "../nav";
 import { GlLine, GlMapView, GlMarker, GlVector } from "./GlMap";
+import { LatLon, moveView, useMapGestures } from "./MapView";
 import { Friend, STATUS_LABEL } from "../core/friends";
 import { fmtDuration } from "../core/scenarios";
 import { distanceM } from "../core/gps";
@@ -15,6 +16,8 @@ export interface HudNavData {
   onReroute: () => void;
   /** Otwiera wyszukiwarkę celu i porównanie tras w HUD (gdy jest). */
   onPlan?: () => void;
+  /** Nowe punkty pośrednie → trasa liczona od nowa (od pozycji GPS, bez GPS od startu trasy). */
+  onVia?: (via: NavPlace[]) => Promise<void>;
 }
 
 export interface NavTrack {
@@ -133,7 +136,8 @@ function detail(ins: NavInstruction) {
 }
 
 /** Panel nawigacji w HUD: następny manewr, pasy ruchu, ograniczenie prędkości; stan „poza trasą” i „brak trasy”. */
-export function HudNav({ nav, track, compact, card }: { nav: HudNavData; track: NavTrack; compact?: boolean; card?: boolean }) {
+/** `section` — odcinkowy pomiar rysuje NavView (pasek ze średnią); wtedy nie powtarzamy go jako zwykłego ostrzeżenia. */
+export function HudNav({ nav, track, compact, card, section }: { nav: HudNavData; track: NavTrack; compact?: boolean; card?: boolean; section?: React.ReactNode | null }) {
   const { route } = nav;
   const { pos, off } = track;
   // card — styl Nawigacja: duża zielona strzałka, ograniczenie prędkości jest na mapie.
@@ -171,13 +175,13 @@ export function HudNav({ nav, track, compact, card }: { nav: HudNavData; track: 
   const limit = speedLimitAt(route.speedLimits, pos.km);
   const arrived = !next || route.lengthKm - pos.km < 0.05;
   // Najbliższe ostrzeżenie przed nami (nasze dane) — pokazujemy od WARN_AHEAD_KM; odcinkowy pomiar do jego końca.
-  const warn = route.warnings?.find((w) => isAhead(w, pos.km) && w.km - pos.km <= WARN_AHEAD_KM);
+  const warn = route.warnings?.find((w) => isAhead(w, pos.km) && w.km - pos.km <= WARN_AHEAD_KM && (section === undefined || w.kind !== "section"));
   const inSection = warn?.toKm !== undefined && pos.km >= warn.km;
   // Najbliższy korek, spowolnienie (od minuty) albo zamknięcie przed nami — od TRAFFIC_AHEAD_KM.
   const jam = route.traffic?.find((t) => jamMatters(t) && t.toKm > pos.km && t.km - pos.km <= TRAFFIC_AHEAD_KM);
 
   return (
-    <div className={`${cls} ${warn ? "with-warn" : ""} ${jam ? "with-jam" : ""}`}>
+    <div className={`${cls} ${warn || section ? "with-warn" : ""} ${jam ? "with-jam" : ""}`}>
       {arrived ? (
         <div className="hud-man">
           <ManeuverIcon ins={{ km: 0, maneuver: "ARRIVE", text: "" }} />
@@ -210,6 +214,7 @@ export function HudNav({ nav, track, compact, card }: { nav: HudNavData; track: 
       {limit !== undefined && !card && (
         <span className="hud-limit" aria-label={`Ograniczenie ${limit} km/h`}>{limit}</span>
       )}
+      {section}
       {warn && (
         <div className={`hud-warn ${inSection || warn.km - pos.km <= 0.5 ? "near" : ""}`} role="alert">
           <b><WarnIcon /> {warningText(warn)}</b>
@@ -320,7 +325,137 @@ function useSmoothPosition(route: NavRoute | null, pos: RoutePos | undefined, of
  * czerwono z opóźnieniem „+10 min”), punkt manewru,
  * cel; zielona strzałka = my (obrócona o różnicę między naszym kierunkiem a kierunkiem trasy).
  */
-export function HudRouteMap({ nav, track, live, token, anchorY = 0.8, zoomOffset = 0, friends, vector }: { nav: HudNavData; track: NavTrack; live: Live | null; token: string; anchorY?: number; zoomOffset?: number; friends?: Friend[]; /** Własny styl mapy (kafelki wektorowe); brak = TomTom. */ vector?: GlVector }) {
+/** Na tyle km przed nami rysujemy pinezki w prowadzeniu (dalej i tak giną przy horyzoncie). */
+const PINS_AHEAD_KM = 20;
+/** Najwięcej pinezek naraz — przy przeglądaniu długiej trasy najpierw fotoradary i odcinki, potem najbliższe miejsca. */
+const PINS_MAX = 160;
+
+/** Typ drogi trasy na danym km (z odcinków trasy). */
+function roadTypeAt(route: NavRoute, km: number) {
+  let at = 0;
+  for (const s of route.segments) {
+    at += s.km;
+    if (km <= at) return s.type;
+  }
+  return route.segments.at(-1)?.type;
+}
+
+/** Pinezka: kropla z główką (r 15) nad punktem; w główce ikona. */
+function Pin({ id, fill, stroke = "#fff", children }: { id: string; fill: string; stroke?: string; children: React.ReactNode }) {
+  return (
+    <g className="map-pin" data-pin={id}>
+      <path d="M0 0 C-4 -9 -15 -14 -15 -26 A15 15 0 1 1 15 -26 C15 -14 4 -9 0 0 Z" fill={fill} stroke={stroke} strokeWidth="2.5" />
+      <g transform="translate(0 -26)">{children}</g>
+    </g>
+  );
+}
+
+const PIN_P = <text x="0" y="6.5" textAnchor="middle" fontSize="19" fontWeight="900" fill="#fff" fontFamily="Inter, system-ui, sans-serif">P</text>;
+const PIN_FUEL = <path d="M-7 8V-8h9v16zM-5 -6v5h5v-5zM2 -3h2.5l2 2v7a1.5 1.5 0 0 0 3 0V-5l-3-3" fill="#fff" stroke="#fff" strokeWidth="1.2" strokeLinejoin="round" />;
+const PIN_CAMERA = <><rect x="-9" y="-5" width="14" height="10" rx="2" fill="#1b2229" /><path d="M5 -2l5-3v10l-5-3z" fill="#1b2229" /><circle cx="-2" cy="0" r="2.6" fill="#fff" /></>;
+/** Odcinkowy pomiar: dwie kreski z odcinkiem między nimi i „km/h” ukryte w prostym symbolu |—|. */
+const PIN_SECTION = <><path d="M-9 -7v14M9 -7v14M-9 0h18" stroke="#1b2229" strokeWidth="3" strokeLinecap="round" /><circle cx="0" cy="0" r="3.2" fill="#e8322c" /></>;
+
+/** Co n-ty punkt długiej łamanej — przy podglądzie całej trasy wystarczy kilka tysięcy. */
+const thinPts = <T,>(pts: T[]) => {
+  const step = Math.max(1, Math.floor(pts.length / 3000));
+  return pts.filter((_, i) => i % step === 0 || i === pts.length - 1);
+};
+
+/** Odstęp pinezek (km) przy przeglądaniu: ok. 34 px ekranu przy danym zoomie — inaczej po oddaleniu leżą jedna na drugiej. */
+function pinGapKm(v: MapBrowse) {
+  const kmPerPx = (40_075 * Math.cos((v.center.lat * Math.PI) / 180)) / (512 * 2 ** v.zoom);
+  return kmPerPx * 34;
+}
+
+/** Co to za pinezka — do karty po dotknięciu. `km` — km trasy (od jej startu). */
+export interface PinInfo {
+  key: string;
+  kind: RoutePoi["kind"] | "camera" | "red_light" | "section" | "section_end" | "via";
+  title: string;
+  name: string;
+  details: string[];
+  km: number;
+  lat: number;
+  lon: number;
+  /** Numer punktu pośredniego (od 0) — dla „Usuń z trasy”. */
+  viaIndex?: number;
+}
+
+const POI_TITLE: Record<RoutePoi["kind"], string> = { fuel: "Stacja paliw", services: "MOP ze stacją i barem", mop: "MOP — miejsce odpoczynku", parking: "Parking dla ciężarówek" };
+
+/** Stacje / MOP-y / parkingi, fotoradary / odcinki i punkty pośrednie na kawałku trasy [fromKm, toKm] → znaczniki mapy; `gapKm` — min. odstęp. */
+function routePins(route: NavRoute, fromKm: number, toKm: number, gapKm = 0): { markers: GlMarker[]; info: PinInfo[] } {
+  const pins: { info: PinInfo; prio: number; node: React.ReactNode }[] = [];
+  const inRange = (k: number) => k >= fromKm && k <= toKm;
+  const add = (info: PinInfo, prio: number, node: React.ReactNode) => pins.push({ info, prio, node });
+  for (const w of route.warnings ?? []) {
+    const base = { name: w.name, details: w.source === "report" ? ["Zgłoszenie kierowcy"] : [], lat: w.lat, lon: w.lon };
+    if (w.kind === "camera" || w.kind === "red_light") {
+      const key = `w${w.source}${w.id}`;
+      if (inRange(w.km)) add({ ...base, key, kind: w.kind, title: warningText(w), km: w.km }, 0, <Pin id={key} fill="#fff" stroke="#e8322c">{PIN_CAMERA}</Pin>);
+    } else if (w.kind === "section") {
+      const len = w.toKm !== undefined ? ` · ${(w.toKm - w.km).toFixed(1).replace(".", ",")} km` : "";
+      const start = pointAtKm(route.points, w.km);
+      const key = `ss${w.id}`;
+      if (start && inRange(w.km)) add({ ...base, ...start, key, kind: "section", title: `Początek odcinkowego pomiaru${len}`, details: [warningText(w), ...base.details], km: w.km }, 0, <Pin id={key} fill="#fff" stroke="#e8322c">{PIN_SECTION}</Pin>);
+      const end = w.toKm !== undefined ? pointAtKm(route.points, w.toKm) : undefined;
+      const keyEnd = `se${w.id}`;
+      if (end && inRange(w.toKm!)) {
+        add({ ...base, ...end, key: keyEnd, kind: "section_end", title: "Koniec odcinkowego pomiaru", details: [warningText(w)], km: w.toKm! }, 0, (
+          <Pin id={keyEnd} fill="#e9edf0" stroke="#8a949c">
+            <g opacity="0.55">{PIN_SECTION}</g>
+            <path d="M-11 11L11 -11" stroke="#e8322c" strokeWidth="3.4" strokeLinecap="round" />
+          </Pin>
+        ));
+      }
+    }
+  }
+  for (const p of route.pois ?? []) {
+    if (!inRange(p.km) || !poiVisible(route, p)) continue;
+    const key = `p${p.id}`;
+    const details = [`${p.side === "right" ? "Po prawej" : "Po lewej"} stronie, ok. ${Math.round(p.offM / 10) * 10} m od trasy`, ...(p.truck && p.kind !== "parking" ? ["Oznaczone dla ciężarówek"] : [])];
+    const node = p.kind === "fuel"
+      ? <Pin id={key} fill="#e07a1f">{PIN_FUEL}</Pin>
+      : <Pin id={key} fill="#2f6fd6">{PIN_P}{p.kind === "services" && <circle cx="11" cy="-11" r="5" fill="#e07a1f" stroke="#fff" strokeWidth="1.5" />}</Pin>;
+    add({ key, kind: p.kind, title: POI_TITLE[p.kind], name: p.name, details, km: p.km, lat: p.lat, lon: p.lon }, 1, node);
+  }
+  // Punkty pośrednie zawsze (bez rozrzedzania) — to Twój wybór.
+  const vias: typeof pins = [];
+  (route.via ?? []).forEach((v, i) => {
+    const at = locate(route.points, v);
+    const key = `v${i}`;
+    vias.push({ info: { key, kind: "via", title: `Punkt pośredni ${i + 1}`, name: v.label, details: v.sub ? [v.sub] : [], km: at?.km ?? 0, lat: v.lat, lon: v.lon, viaIndex: i }, prio: -1, node: (
+      <Pin id={key} fill="#8b5cf6"><text x="0" y="6.5" textAnchor="middle" fontSize="17" fontWeight="900" fill="#fff" fontFamily="Inter, system-ui, sans-serif">{i + 1}</text></Pin>
+    ) });
+  });
+  // Najpierw fotoradary i odcinki, potem miejsca; pinezka za blisko już wybranej (po km trasy) odpada.
+  const kept: typeof pins = [];
+  for (const p of pins.sort((a, b) => a.prio - b.prio || a.info.km - b.info.km)) {
+    if (kept.length >= PINS_MAX) break;
+    if (gapKm > 0 && kept.some((q) => Math.abs(q.info.km - p.info.km) < gapKm)) continue;
+    kept.push(p);
+  }
+  // Dalsze rysujemy pierwsze — bliższe pinezki leżą na wierzchu; punkty pośrednie na samej górze.
+  const all = [...kept.sort((a, b) => b.info.km - a.info.km), ...vias];
+  return { markers: all.map((p) => ({ key: p.info.key, lat: p.info.lat, lon: p.info.lon, node: p.node })), info: all.map((p) => p.info) };
+}
+
+/** Na autostradzie i ekspresówce miejsce po lewej jest dla przeciwnego kierunku — nie zjedziemy tam. */
+function poiVisible(route: NavRoute, p: RoutePoi) {
+  if (p.side === "right") return true;
+  const t = roadTypeAt(route, p.km);
+  return t !== "motorway" && t !== "expressway";
+}
+
+/** Przeglądanie mapy palcem: widok z góry (bez pochylenia), mapa nie jedzie za pozycją. */
+export interface MapBrowse {
+  center: LatLon;
+  zoom: number;
+  bearing: number;
+}
+
+export function HudRouteMap({ nav, track, live, token, anchorY = 0.8, zoomOffset = 0, friends, vector, browse = null, onBrowse, onPin, onHold }: { nav: HudNavData; track: NavTrack; live: Live | null; token: string; anchorY?: number; zoomOffset?: number; friends?: Friend[]; /** Własny styl mapy (kafelki wektorowe); brak = TomTom. */ vector?: GlVector; browse?: MapBrowse | null; /** Przesunięcie / szczypanie mapy — brak = mapa bez gestów. */ onBrowse?: (b: MapBrowse) => void; /** Dotknięcie pinezki (null = dotknięcie mapy obok). */ onPin?: (p: PinInfo | null) => void; /** Przytrzymanie palca na mapie — miejsce pod palcem. */ onHold?: (p: LatLon) => void }) {
   const route = nav.route;
   const lastBearing = useRef(0);
   const zoomRef = useRef<number | null>(null);
@@ -335,11 +470,57 @@ export function HudRouteMap({ nav, track, live, token, anchorY = 0.8, zoomOffset
   // Zoom zmienia się płynnie (bez skakania przy każdej zmianie prędkości).
   const target = navZoom(live?.kmh ?? null);
   zoomRef.current = zoomRef.current === null ? target : zoomRef.current + (target - zoomRef.current) * 0.15;
-  const zoom = Math.max(12, Math.min(18, Math.round(zoomRef.current * 20) / 20 + zoomOffset));
+  const zoom = Math.max(10, Math.min(18, Math.round(zoomRef.current * 20) / 20 + zoomOffset));
+
+  // Gesty: pierwszy ruch palcem przechodzi z prowadzenia do przeglądania (od bieżącej pozycji i kierunku),
+  // kolejne przesuwają / przybliżają widok. Bieżący widok w refie — gest i przejście dzieją się w tym samym zdarzeniu.
+  const box = useRef<HTMLDivElement>(null);
+  const view = useRef<MapBrowse | null>(browse);
+  view.current = browse;
+  const followView = { center: center ?? { lat: 0, lon: 0 }, zoom, bearing };
+  const pinInfo = useRef(new Map<string, PinInfo>());
+  const pickRef = useRef<((x: number, y: number) => LatLon | undefined) | null>(null);
+  /** Pinezka pod palcem: najwyżej leżąca (ostatnia w SVG), z zapasem 10 px — pinezki są małe. */
+  const pinAt = (x: number, y: number) => {
+    const el = box.current;
+    if (!el) return null;
+    const r = el.getBoundingClientRect();
+    const [cx, cy] = [r.left + x, r.top + y];
+    let hit: PinInfo | null = null;
+    el.querySelectorAll<SVGGElement>("[data-pin]").forEach((g) => {
+      if (g.parentElement?.getAttribute("display") === "none") return;
+      const b = g.getBoundingClientRect();
+      if (cx >= b.left - 10 && cx <= b.right + 10 && cy >= b.top - 10 && cy <= b.bottom + 10) hit = pinInfo.current.get(g.dataset.pin!) ?? hit;
+    });
+    return hit;
+  };
+  const gestures = useMapGestures(
+    (g) => {
+      const v = view.current;
+      if (!v || !onBrowse || !box.current) return;
+      const [c, z] = moveView(v, g, { w: box.current.clientWidth, h: box.current.clientHeight, bearing: v.bearing });
+      view.current = { ...v, center: c, zoom: z };
+      onBrowse(view.current);
+    },
+    () => {
+      if (!view.current && onBrowse) view.current = { center: followView.center, zoom: followView.zoom, bearing: followView.bearing };
+    },
+    {
+      onTap: (x, y) => onPin?.(pinAt(x, y)),
+      onLongPress: (x, y) => {
+        const p = pickRef.current?.(x, y);
+        if (p && onHold) {
+          navigator.vibrate?.(30);
+          onHold(p);
+        }
+      },
+    },
+  );
 
   if (!center) return <div className="hud-map empty"><span>Czekam na pozycję GPS…</span></div>;
   const km = pos?.km ?? 0;
-  const ahead = route ? routeSlice(route.points, km, km + 12) : [];
+  // Przy przeglądaniu cała trasa przed nami (co n-ty punkt), w prowadzeniu 12 km.
+  const ahead = route ? (browse ? thinPts(routeSlice(route.points, km, Infinity)) : routeSlice(route.points, km, km + 12)) : [];
   const behind = route && pos ? routeSlice(route.points, Math.max(0, km - 1), km) : [];
   const next = route && pos ? nextInstruction(route.instructions, km) : undefined;
   // Utrudnienia na widocznym kawałku trasy — żółty wolniej, czerwony korek; etykieta z opóźnieniem na początku odcinka.
@@ -379,6 +560,10 @@ export function HudRouteMap({ nav, track, live, token, anchorY = 0.8, zoomOffset
     const w = text.length * 8 + 14;
     markers.push({ key: `l${j.t.km}`, ...at, node: <g className={`hud-map-delay ${j.tone}`}><rect x={-w / 2} y={-34} width={w} height={22} rx={11} /><text x={0} y={-18}>{text}</text></g> });
   }
+  // Pinezki: stacje, MOP-y, parkingi, fotoradary, odcinkowe pomiary. W prowadzeniu tylko kawałek przed nami, przy przeglądaniu cała trasa.
+  const pins = route ? routePins(route, browse ? -Infinity : km - 0.3, browse ? Infinity : km + PINS_AHEAD_KM, browse ? pinGapKm(browse) : 0) : { markers: [], info: [] };
+  markers.push(...pins.markers);
+  pinInfo.current = new Map(pins.info.map((p) => [p.key, p]));
   for (const { f, p, km: fkm } of mates) {
     const moving = p.status === "driving";
     // Etykieta: imię · km od nas · prędkość (w ruchu) albo rodzaj postoju i ile trwa.
@@ -391,9 +576,20 @@ export function HudRouteMap({ nav, track, live, token, anchorY = 0.8, zoomOffset
     markers.push({ key: `f${f.id}`, lat: p.lat, lon: p.lon, node: <g className="hud-map-friend"><rect x={-w / 2} y={-48} width={w} height={22} rx={11} /><text x={0} y={-32}>{text}</text></g> });
   }
 
+  if (browse) {
+    // Przy przeglądaniu strzałka „my” to zwykły znacznik na mapie (widok nie jedzie za nami).
+    const me = smooth ?? live;
+    if (me) markers.push({ key: "me", lat: me.lat, lon: me.lon, rotate: (b) => bearing - b, node: <path className="hud-map-me" d="M0 -30 L22 24 L0 12 L-22 24 Z" /> });
+    return (
+      <div className="hud-map" ref={box} {...(onBrowse ? gestures : {})}>
+        <GlMapView token={token} center={browse.center} zoom={browse.zoom} bearing={browse.bearing} pitch={0} anchorY={0.5} lines={lines} markers={markers} vector={vector} pickRef={pickRef} />
+      </div>
+    );
+  }
+
   return (
-    <div className="hud-map">
-      <GlMapView token={token} center={center} zoom={zoom} bearing={bearing} pitch={MAP_PITCH} anchorY={anchorY} lines={lines} markers={markers} follow={predict} vector={vector}>
+    <div className="hud-map" ref={box} {...(onBrowse ? gestures : {})}>
+      <GlMapView token={token} center={center} zoom={zoom} bearing={bearing} pitch={MAP_PITCH} anchorY={anchorY} lines={lines} markers={markers} follow={predict} vector={vector} pickRef={pickRef}>
         <svg className="hud-map-me-wrap" style={{ left: "50%", top: `${anchorY * 100}%` }} viewBox="-30 -34 60 64" aria-hidden>
           <path className="hud-map-me-halo" transform={`rotate(${arrowTurn})`} d="M0 -30 L22 24 L0 12 L-22 24 Z" />
           <path className="hud-map-me" transform={`rotate(${arrowTurn})`} d="M0 -30 L22 24 L0 12 L-22 24 Z" />

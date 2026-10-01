@@ -16,11 +16,40 @@ export function tripTotalKm(s: AppState) {
   return s.trip.profile === "custom" ? s.trip.segments.reduce((a, x) => a + x.km, 0) : s.trip.distance;
 }
 
-/** Nakłada odczyt GPS na stan: odlicza km od trasy, dolicza jazdę i zaliczone postoje. */
-export function applyFix(s: AppState, fix: Fix): AppState {
+/**
+ * Bez odczytów od tylu ms urządzenie liczące jazdę traci tę rolę — przejmuje ją inne z GPS (ta sama wartość
+ * w server/index.mjs nie jest potrzebna: serwer pilnuje tylko wersji zapisu).
+ */
+export const TRACKER_TTL_MS = 3 * 60_000;
+
+/** Stały identyfikator tego urządzenia (przeglądarki) — do wyboru, które liczy jazdę. */
+export const DEVICE_ID = (() => {
+  try {
+    let id = localStorage.getItem("roadpilot:device");
+    if (!id) {
+      id = Math.random().toString(36).slice(2, 10);
+      localStorage.setItem("roadpilot:device", id);
+    }
+    return id;
+  } catch {
+    return Math.random().toString(36).slice(2, 10);
+  }
+})();
+
+/** Czy jazdę liczy inne urządzenie (świeże odczyty w ciągu TRACKER_TTL_MS). */
+export function otherTracker(s: AppState, t: number, device = DEVICE_ID) {
+  return !!s.tracker && s.tracker.device !== device && t - s.tracker.at < TRACKER_TTL_MS;
+}
+
+/**
+ * Nakłada odczyt GPS na stan: odlicza km od trasy, dolicza jazdę i zaliczone postoje. Gdy jazdę liczy inne urządzenie
+ * na tym koncie, prowadzimy tylko własny licznik (bez doliczania) — przy przejęciu nie zaliczymy drugi raz tego samego czasu.
+ */
+export function applyFix(s: AppState, fix: Fix, device = DEVICE_ID): AppState {
   if (!s.track) return fix.accuracy <= GPS.maxAccuracyM ? { ...s, track: startTrack(fix) } : s;
   const r = addFix(s.track, fix);
   if (r.track === s.track) return s;
+  if (otherTracker(s, fix.t, device)) return { ...s, track: r.track };
   let driver = s.driver;
   let stop = s.stop;
   let history = s.history;
@@ -37,7 +66,7 @@ export function applyFix(s: AppState, fix: Fix): AppState {
   driver = creditDriving(driver, r.driveMin);
   history = recordDrive(history, fix.t, r.driveMin, r.km);
   const doneKm = Math.min(tripTotalKm(s), s.trip.doneKm + r.km);
-  return { ...s, track: r.track, driver, stop, history, odoKm: s.odoKm + r.km, trip: doneKm === s.trip.doneKm ? s.trip : { ...s.trip, doneKm } };
+  return { ...s, track: r.track, driver, stop, history, odoKm: s.odoKm + r.km, trip: doneKm === s.trip.doneKm ? s.trip : { ...s.trip, doneKm }, tracker: { device, at: fix.t } };
 }
 
 /** Kierowca zaczyna postój. */
@@ -133,7 +162,8 @@ export function useAutoStop(enabled: boolean, live: Live | null, stopActive: boo
       auto.current = r.auto;
       const startAt = r.startAt;
       // Nie wiemy, jak długo będziemy stać — postój bez limitu, kończy go ruszenie.
-      if (startAt !== undefined) setState((s) => (s.stop ? s : startStop(s, startAt, null, true)));
+      // Postój sam włącza tylko urządzenie, które liczy jazdę — inne dostanie go z konta.
+      if (startAt !== undefined) setState((s) => (s.stop || otherTracker(s, t) ? s : startStop(s, startAt, null, true)));
     };
     step(live?.t ?? Date.now());
     const id = setInterval(() => step(Date.now()), 1000);

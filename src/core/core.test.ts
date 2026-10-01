@@ -202,6 +202,20 @@ describe("plan pod rozładunek", () => {
     expect(d.plan!.departure).toBe(at(200));
   });
 
+  it("w trakcie jazdy: jedź dalej od teraz — bez odpoczynku przed wyjazdem i bez „wyjedź później”", () => {
+    // Stojąc dostałby długi odpoczynek przed wyjazdem; w trakcie jazdy: 270 + 45 + 30 min → przyjazd at(345).
+    expect(planForDeadline(flat(300), fresh(), NOW, OFF, at(1200), 30).kind).toBe("rest");
+    const d = planForDeadline(flat(300), fresh(), NOW, OFF, at(1200), 30, true);
+    expect(d.onTime).toBe(true);
+    expect(d.kind).toBe("now");
+    expect(d.plan!.departure).toBe(NOW);
+    expect(d.plan!.arrival).toBe(at(345));
+    expect(d.slackMin).toBe(1200 - 345);
+    const short = planForDeadline(flat(100), fresh(), NOW, OFF, at(300), 0, true);
+    expect(short.plan!.departure).toBe(NOW);
+    expect(short.plan!.arrival).toBe(at(100));
+  });
+
   it("gdy się nie da — pokazuje spóźnienie i co pomoże", () => {
     // 600 km bez wydłużenia wymaga odpoczynku po drodze; z wydłużeniem 690 min.
     const d = planForDeadline(flat(600), fresh({ extensionsLeft: 1 }), NOW, OFF, at(720), 0);

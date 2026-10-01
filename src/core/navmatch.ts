@@ -1,6 +1,8 @@
 // Prowadzenie po trasie z nawigacji: gdzie na trasie jesteśmy, następny manewr, pasy i ograniczenie prędkości.
 // Czyste funkcje — geometria trasy: [lat, lon, km od startu] (server/nav.mjs → parseRoute).
 
+import { TRUCK_SPEED } from "./rules";
+
 export type RoutePoint = [number, number, number];
 
 export interface NavInstruction {
@@ -105,6 +107,40 @@ export function speedLimitAt(list: SpeedLimit[], km: number): number | undefined
   let last: SpeedLimit | undefined;
   for (const x of list) if (x.toKm <= km && (!last || x.toKm > last.toKm)) last = x;
   return last && km - last.toKm <= NAV.limitCarryKm ? last.kmh : undefined;
+}
+
+/** Rodzaj drogi wg przepisów o prędkości: obszar zabudowany, poza nim, autostrada / droga ekspresowa. */
+export type RoadKind = "urban" | "rural" | "motorway";
+
+export interface RoadSection {
+  km: number;
+  toKm: number;
+  kind: RoadKind;
+}
+
+export function roadKindAt(list: RoadSection[] | undefined, km: number): RoadKind | undefined {
+  return list?.find((x) => km >= x.km && km <= x.toKm)?.kind;
+}
+
+export interface LegalLimit {
+  /** Limit dla naszego pojazdu (na znaku w aplikacji). */
+  kmh: number;
+  /** Znak na drodze, gdy jest wyższy niż limit ciężarówki (np. 70 w mieście — nas dalej obowiązuje 50). */
+  ignoredSign?: number;
+  kind?: RoadKind;
+}
+
+/**
+ * Ograniczenie dla pojazdu na danym km: znak z trasy i — dla ciężarówki — limit z przepisów dla rodzaju drogi
+ * (TRUCK_SPEED); obowiązuje niższy. Bez znaku i bez rodzaju drogi — brak danych.
+ */
+export function legalLimitAt(route: { speedLimits: SpeedLimit[]; roads?: RoadSection[] }, km: number, truck: boolean): LegalLimit | undefined {
+  const sign = speedLimitAt(route.speedLimits, km);
+  const kind = roadKindAt(route.roads, km);
+  const cap = truck && kind ? TRUCK_SPEED[kind] : undefined;
+  if (cap === undefined) return sign === undefined ? undefined : { kmh: sign, kind };
+  if (sign === undefined || sign >= cap) return { kmh: cap, kind, ...(sign !== undefined && sign > cap ? { ignoredSign: sign } : {}) };
+  return { kmh: sign, kind };
 }
 
 export type SpeedTone = "ok" | "warn" | "over";

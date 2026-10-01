@@ -96,6 +96,11 @@ export interface AppState {
   navRoute: NavRoute | null;
   /** Historia dzienna z GPS (najnowszy dzień pierwszy). */
   history: DayLog[];
+  /**
+   * Urządzenie, które liczy jazdę z GPS (telefon + tablet na jednym koncie): tylko ono dolicza minuty i km,
+   * inne biorą stan z konta. at = ostatni zaliczony odczyt (ms); po TRACKER_TTL_MS bez odczytów przejmuje inne.
+   */
+  tracker: { device: string; at: number } | null;
 }
 
 const KEY = "roadpilot:v1";
@@ -124,6 +129,7 @@ export function defaultState(now = Date.now()): AppState {
     navRoute: null,
     navOpen: false,
     history: [],
+    tracker: null,
   };
 }
 

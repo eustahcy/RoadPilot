@@ -7,6 +7,8 @@ export const fmtFriendDist = (km: number) => (km < 10 ? `${km.toFixed(1).replace
 import { FriendsApi } from "../friends";
 import { Toggle } from "./fields";
 import { MapView } from "./MapView";
+import { GlMapView, GlVector } from "./GlMap";
+import { inVtiles, useVtiles } from "../vtiles";
 
 interface CardProps {
   api: FriendsApi;
@@ -93,6 +95,8 @@ interface SettingsProps {
   now: number;
   /** Token do kafelków mapy (Premium) — bez niego zamiast mapy link do aplikacji map. */
   mapToken: string | null;
+  /** Styl własnej mapy (dzień / noc, pojazd do zakazów) — jak w Nawigacji. */
+  mapStyle?: GlVector;
 }
 
 /** Co znajomy robi: „Jedzie · 82 km/h · w trasie 3 h 10 min → Gdańsk” albo „Przerwa · 25 min z 45 min”. */
@@ -122,12 +126,20 @@ function FriendStatus({ f, me, now }: { f: Friend; me: { lat: number; lon: numbe
 const fmtAgo = (ms: number) => (ms < 90_000 ? "przed chwilą" : `${Math.round(ms / 60_000)} min temu`);
 
 /** Gdzie stoi znajomy: mapa (Premium, kafelki przez nasz serwer) albo link do aplikacji map w telefonie. */
-function FriendMap({ f, mapToken }: { f: Friend; mapToken: string | null }) {
+function FriendMap({ f, mapToken, mapStyle }: { f: Friend; mapToken: string | null; mapStyle?: GlVector }) {
   const p = f.presence!;
   const moving = p.status === "driving";
+  // W Polsce nasza mapa (kafelki wektorowe, jak w Nawigacji); poza jej zasięgiem kafelki TomTom.
+  const vtiles = useVtiles(mapToken);
+  const own = !!mapStyle && inVtiles(vtiles, p);
+  const arrow = <path className={`hud-map-friend-arrow ${moving ? "" : "stopped"}`} d="M0 -24 L17 19 L0 10 L-17 19 Z" />;
   return (
     <div className="friend-map-wrap">
-      {mapToken ? (
+      {mapToken && own ? (
+        <div className="friend-map">
+          <GlMapView token={mapToken} center={p} zoom={14} lines={[]} vector={mapStyle} markers={[{ key: "friend", lat: p.lat, lon: p.lon, rotate: moving && p.heading !== null ? () => p.heading! : undefined, node: arrow }]} />
+        </div>
+      ) : mapToken ? (
         <div className="friend-map">
           <MapView
             token={mapToken}
@@ -152,7 +164,7 @@ function FriendMap({ f, mapToken }: { f: Friend; mapToken: string | null }) {
 }
 
 /** Ustawienia → Znajomi: zaproszenie po e-mailu, lista, akceptacja i usuwanie, przełącznik udostępniania. */
-export function FriendsSettings({ api, share, onShare, gpsOn, onLogin, me, now, mapToken }: SettingsProps) {
+export function FriendsSettings({ api, share, onShare, gpsOn, onLogin, me, now, mapToken, mapStyle }: SettingsProps) {
   const [email, setEmail] = useState("");
   const [shownMap, setShownMap] = useState<number | null>(null);
   const [msg, setMsg] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
@@ -216,7 +228,7 @@ export function FriendsSettings({ api, share, onShare, gpsOn, onLogin, me, now, 
                   )}
                   {g.action(f)}
                 </span>
-                {shownMap === f.id && f.presence && <FriendMap f={f} mapToken={mapToken} />}
+                {shownMap === f.id && f.presence && <FriendMap f={f} mapToken={mapToken} mapStyle={mapStyle} />}
               </li>
             ))}
           </ul>

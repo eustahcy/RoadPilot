@@ -1,3 +1,4 @@
+import { TRUCK_SPEED } from "./core/rules";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, ApiError, Auth, isGuest, loadAuth, saveAuth, setGuest, User } from "./api";
 import { AuthScreen, ResetPasswordScreen } from "./components/AuthScreen";
@@ -13,7 +14,7 @@ import { NavView } from "./components/NavView";
 import { PlanView } from "./components/PlanView";
 import { RouteView } from "./components/RouteView";
 import { SettingsCategory, SettingsView } from "./components/SettingsView";
-import { ALERTS_REFRESH, fetchRoute, NavAccess, NavRoute, refreshWarnings, voteAlert, withWarnings } from "./nav";
+import { ALERTS_REFRESH, fetchRoute, NavAccess, NavPlace, NavRoute, refreshWarnings, viaAhead, voteAlert, withWarnings } from "./nav";
 import { locate } from "./core/navmatch";
 import { planForDeadline } from "./core/deadline";
 import { GPS, recentSpeed, uniformSpeeds } from "./core/gps";
@@ -24,6 +25,7 @@ import { planAfterStop } from "./core/stop";
 import { fmtClock, fmtTime } from "./format";
 import { AppState, defaultState, floorMinute, useNow, usePersistentState } from "./state";
 import { useParkings, useRoads, useWeather } from "./nearby";
+import { inVtiles, useVtiles } from "./vtiles";
 import { dayKey, daySummary } from "./core/history";
 import { ongoingInfo, useOngoingNotification } from "./ongoing";
 import { resetSync, useSync } from "./sync";
@@ -112,7 +114,9 @@ function App() {
     if (!auth || !navDest || !live || rerouting) return;
     setRerouting(true);
     try {
-      const next = await fetchRoute(auth.token, { lat: live.lat, lon: live.lon }, navDest, settings.vehicle, Date.now(), settings.navEngine, settings.routeType);
+      // Punkty pośrednie, których jeszcze nie minęliśmy, zostają na nowej trasie.
+      const via = state.navRoute ? viaAhead(state.navRoute, live) : [];
+      const next = await fetchRoute(auth.token, { lat: live.lat, lon: live.lon }, navDest, settings.vehicle, Date.now(), settings.navEngine, settings.routeType, via);
       setState((s) => ({ ...s, navRoute: next, trip: tripFromRoute(s.trip, next) }));
     } catch {
       /* brak sieci lub limit — HUD spróbuje ponownie za minutę */
@@ -120,9 +124,22 @@ function App() {
       setRerouting(false);
     }
   };
+  /** Zmiana punktów pośrednich (dodanie z mapy / usunięcie) — trasa od razu od nowa; błąd idzie do ekranu nawigacji. */
+  const setVia = async (via: NavPlace[]) => {
+    if (!auth || !navDest) return;
+    const from = live ? { lat: live.lat, lon: live.lon } : state.navRoute?.from;
+    if (!from) throw new Error("Brak pozycji startu — włącz GPS.");
+    setRerouting(true);
+    try {
+      const next = await fetchRoute(auth.token, from, navDest, settings.vehicle, Date.now(), settings.navEngine, settings.routeType, via);
+      setState((s) => ({ ...s, navRoute: next, trip: tripFromRoute(s.trip, next) }));
+    } finally {
+      setRerouting(false);
+    }
+  };
   // Trasa sprzed ostrzeżeń (albo z innej wersji) — dociągamy ostrzeżenia raz, bez nowej trasy z TomTom.
   const navRouteAt = state.navRoute?.at;
-  const needWarnings = navAccess === "premium" && !!state.navRoute && !state.navRoute.warnings;
+  const needWarnings = navAccess === "premium" && !!state.navRoute && (!state.navRoute.warnings || !state.navRoute.pois);
   useEffect(() => {
     if (!needWarnings || !auth || !state.navRoute) return;
     const r = state.navRoute;
@@ -132,11 +149,7 @@ function App() {
   // Nawigacja jest zawsze włączona dla Premium (bez przełącznika w Ustawieniach); cel można wybrać też w HUD.
   const navOn = navAccess === "premium";
   // Własne kafelki mapy (OSM, Polska): czy serwer je ma i czy jesteśmy w ich zasięgu — inaczej kafelki TomTom.
-  const [vtiles, setVtiles] = useState<{ available: boolean; bounds: number[] } | null>(null);
-  useEffect(() => {
-    if (!auth || !navOn) return;
-    api<{ available: boolean; bounds: number[] }>("GET", "/vtiles/meta", undefined, auth.token).then(setVtiles).catch(() => setVtiles(null));
-  }, [auth, navOn]);
+  const vtiles = useVtiles(navOn ? auth?.token : null);
   const dayOff = state.stop?.dayEnd === true;
   const work = workStatus(state.driver.shiftStart, now, settings.work, state.driver.reducedRestsLeft);
   useWorkReminders(settings.work, state.driver.shiftStart, state.driver.reducedRestsLeft, dayOff);
@@ -166,7 +179,9 @@ function App() {
   const parkings = useParkings(live, online, now);
   const weather = useWeather(live, online, now);
   const hudItems = settings.hudItems[settings.hudStyle];
-  const inVtiles = !!vtiles?.available && !!live && live.lon >= vtiles.bounds[0] && live.lat >= vtiles.bounds[1] && live.lon <= vtiles.bounds[2] && live.lat <= vtiles.bounds[3];
+  const inVtilesNow = inVtiles(vtiles, live);
+  /** Styl własnej mapy (dzień / noc, pojazd do zakazów) — Nawigacja i porównanie tras. */
+  const mapStyle = { theme: settings.mapTheme === "auto" ? autoTheme(weather.data?.isDay, now) : settings.mapTheme, vehicle: settings.vehicle };
   const roads = useRoads(live, online && hudItems.road, now);
   const today = state.history.find((d) => d.date === dayKey(now));
   const avgKmh = today ? daySummary(today).avgKmh : undefined;
@@ -184,9 +199,11 @@ function App() {
   const comparison = useMemo(() => compareScenarios(route, driver, planNow, options), [route, driver, planNow, options.allowExtension, options.allowReducedRest]);
   const hints = useMemo(() => whatIfs(route, driver, planNow, options), [route, driver, planNow, options.allowExtension, options.allowReducedRest]);
   const status = driverStatus(driver, planNow);
+  // Jedziemy (średnia z GPS z ostatnich minut, bez ręcznego postoju) — plan pod awizację nie każe wtedy stawać ani „wyjeżdżać później”.
+  const moving = settings.gps && recentKmh !== undefined && recentKmh >= GPS.minLiveKmh && !(state.stop && !state.stop.auto) && state.planTime === null;
   const deadline = useMemo(
-    () => (trip.unloadAt !== null ? planForDeadline(route, driver, planNow, options, trip.unloadAt, trip.unloadBufferMin) : undefined),
-    [route, driver, planNow, trip.unloadAt, trip.unloadBufferMin, options.allowExtension, options.allowReducedRest],
+    () => (trip.unloadAt !== null ? planForDeadline(route, driver, planNow, options, trip.unloadAt, trip.unloadBufferMin, moving) : undefined),
+    [route, driver, planNow, trip.unloadAt, trip.unloadBufferMin, options.allowExtension, options.allowReducedRest, moving],
   );
 
   const best = comparison.scenarios.find((s) => s.id === comparison.bestId);
@@ -298,7 +315,7 @@ function App() {
   if (state.navOpen) {
     return (
       <NavView
-        nav={navOn ? { route: state.navRoute, dest: navDest, rerouting, onReroute: reroute } : undefined}
+        nav={navOn ? { route: state.navRoute, dest: navDest, rerouting, onReroute: reroute, onVia: setVia } : undefined}
         planner={navOn && auth ? {
           token: auth.token,
           vehicle: settings.vehicle,
@@ -306,6 +323,7 @@ function App() {
           routeType: settings.routeType,
           position: live ? { lat: live.lat, lon: live.lon } : null,
           onRoute: (r: NavRoute) => setState((s) => ({ ...s, navRoute: r, trip: tripFromRoute(s.trip, r) })),
+          mapStyle,
         } : undefined}
         voice={{
           supported: voiceSupported(),
@@ -322,7 +340,7 @@ function App() {
           },
         }}
         mapToken={navOn ? auth?.token : undefined}
-        mapVector={navOn && inVtiles ? { theme: settings.mapTheme === "auto" ? autoTheme(weather.data?.isDay, now) : settings.mapTheme, vehicle: settings.vehicle } : undefined}
+        mapVector={navOn && inVtilesNow ? mapStyle : undefined}
         report={consent && auth ? {
           onSend: async (kind, value) => {
             if (!live) throw new Error("Brak pozycji GPS.");
@@ -342,6 +360,7 @@ function App() {
         deadline={deadline}
         stopControls={stopProps}
         vehicleMaxKmh={settings.vehicle.maxKmh}
+        truck={settings.vehicle.weightKg > TRUCK_SPEED.minWeightKg}
         onExit={exitNav}
       />
     );
@@ -393,6 +412,7 @@ function App() {
         friends={auth ? friends.friends : undefined}
         navRoute={state.navRoute}
         vehicleMaxKmh={settings.vehicle.maxKmh}
+        truck={settings.vehicle.weightKg > TRUCK_SPEED.minWeightKg}
       />
     );
   }
@@ -480,6 +500,7 @@ function App() {
               onRoute: (r: NavRoute) => setState((s) => ({ ...s, navRoute: r, trip: tripFromRoute(s.trip, r) })),
               onClear: () => setState((s) => ({ ...s, navRoute: null })),
               onSettings: () => { go("settings"); setSettingsCat("vehicle"); },
+              mapStyle,
             }}
           />
         )}

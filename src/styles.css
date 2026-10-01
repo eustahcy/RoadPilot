@@ -927,7 +927,9 @@ input[type="number"]::-webkit-inner-spin-button, input[type="number"]::-webkit-o
   .nm-info .hud-ico { display: none; }
   .nm-info b { font-size: calc(4 * var(--u)); }
   .nm-side, .nm-speed, .nm-limit { bottom: calc(24% + 1.4 * var(--u)); }
-  .nm-side { top: calc(1.6 * var(--u)); bottom: auto; }
+  /* Menu (trzy kropki) w prawym górnym rogu ekranu, przyciski boczne pod nim */
+  .nm-top .hud-menu-wrap { position: fixed; z-index: 4; top: calc(1.6 * var(--u) + env(safe-area-inset-top)); right: calc(2 * var(--u) + env(safe-area-inset-right)); }
+  .nm-side { top: calc(12.8 * var(--u) + env(safe-area-inset-top)); bottom: auto; }
   .nm-limit { bottom: calc(24% + 2 * var(--u)); right: calc(2 * var(--u) + env(safe-area-inset-right)); }
 }
 .nm-top .hud-menu-wrap { align-self: flex-start; }
@@ -998,3 +1000,93 @@ input[type="number"]::-webkit-inner-spin-button, input[type="number"]::-webkit-o
   .hud.navmode.day .nm-map::after { background: linear-gradient(to bottom, #dfe6ee 0, #dfe6ee 17%, rgba(238, 240, 230, .97) 24%, rgba(238, 240, 230, .6) 31%, transparent 40%, transparent 64%, rgba(20, 24, 28, .55) 100%); }
 }
 .hud.navmode.day .hud-map-done { stroke: #9aa3ab; }
+
+/* Parking przy celu (opinie kierowców) */
+.bad-text { color: var(--red); }
+.dest-parking { display: grid; gap: 8px; margin-top: 12px; }
+.dest-parking > .ghost { justify-self: start; }
+.parking-summary { display: flex; flex-wrap: wrap; gap: 12px; margin: 0; font-size: 14px; font-weight: 800; }
+.parking-list { list-style: none; padding: 0; margin: 0; display: grid; gap: 6px; }
+.parking-list li { display: flex; gap: 10px; align-items: flex-start; justify-content: space-between; padding: 10px 11px; border-radius: 12px; background: #10161d; border: 1px solid #222b35; font-size: 12.5px; }
+.parking-list li.disputed { opacity: .55; }
+.parking-list p { margin: 4px 0 0; color: var(--dim); overflow-wrap: anywhere; }
+.parking-votes { display: flex; gap: 6px; flex-shrink: 0; }
+.parking-votes .ghost { padding: 6px 9px; }
+.parking-votes .ghost.active { border-color: var(--green); color: var(--green); }
+.parking-form { display: grid; gap: 8px; }
+.parking-status { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+.parking-status .profile { text-align: center; padding: 10px 6px; }
+
+/* Pro tip: wydruk z tachografu */
+.tips { list-style: none; padding: 0; margin: 12px 0 0; display: grid; gap: 6px; }
+.tips li { border-radius: 12px; border: 1px solid #222b35; background: #10161d; }
+.tips li.open { border-color: var(--line-2); }
+.tip-head { display: grid; gap: 3px; width: 100%; text-align: left; padding: 11px; background: none; border: 0; color: var(--text); }
+.tip-head strong { font-size: 13px; }
+.tip-head span { color: var(--mute); font-size: 11.5px; line-height: 1.35; }
+.tip-body { display: grid; gap: 8px; padding: 0 11px 11px; }
+.tip-body pre { margin: 0; padding: 10px; border-radius: 10px; background: var(--field); border: 1px dashed var(--line-2); white-space: pre-wrap; font: 12.5px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; color: #dce2e8; }
+.tip-body .ghost { justify-self: start; }
+.tip-rules { margin: 12px 0 8px; padding-left: 18px; display: grid; gap: 4px; font-size: 12px; color: var(--dim); }
+
+/* Przeglądanie mapy palcem (Nawigacja): widok z góry — bez „nieba” i mgły u góry; przycisk powrotu do pozycji. */
+.hud.navmode .nm-map.browsing::after, .hud.navmode .nm-map.browsing::before { display: none; }
+.hud-map { touch-action: none; }
+.nm-btn.nm-recenter { background: var(--blue); border-color: transparent; color: #fff; }
+
+/* Mapa porównania tras: przybliżanie i „Cała trasa” */
+.map-zoom { position: absolute; right: 8px; top: 8px; display: grid; border-radius: 10px; overflow: hidden; background: rgba(12, 20, 28, .88); border: 1px solid rgba(140, 175, 195, .28); z-index: 2; }
+.map-zoom button { width: 34px; height: 34px; border: 0; background: none; color: #eef3f6; font-size: 19px; font-weight: 700; line-height: 1; }
+.map-zoom button + button { border-top: 1px solid rgba(140, 175, 195, .25); }
+.map-fit { position: absolute; left: 8px; top: 8px; z-index: 2; padding: 7px 11px; border-radius: 10px; border: 1px solid rgba(140, 175, 195, .28); background: rgba(12, 20, 28, .88); color: #eef3f6; font-size: 12px; font-weight: 750; }
+
+/* Karta pinezki / punktu pośredniego nad dolnym paskiem Nawigacji */
+.nm-pin-card { position: relative; display: grid; gap: 3px; padding: calc(2.2 * var(--u)) calc(2.6 * var(--u)); padding-right: 52px; border-radius: 16px; background: rgba(12, 20, 28, .94); border: 1px solid rgba(140, 175, 195, .28); box-shadow: 0 8px 24px rgba(0, 0, 0, .4); font-size: 13px; color: var(--dim); }
+.nm-pin-card b { color: var(--text); font-size: 16px; }
+.nm-pin-card .row-buttons { margin-top: 6px; }
+.route-compare-map .rc-gl { position: absolute; inset: 0; touch-action: none; }
+
+/* Odcinkowy pomiar prędkości (karta nawigacji): zapowiedź, pasek ze średnią w trakcie, podsumowanie po wyjeździe */
+.sc { flex-basis: 100%; display: flex; align-items: center; gap: calc(1.6 * var(--u)); padding: calc(1 * var(--u)) calc(1.6 * var(--u)); border-radius: calc(1.6 * var(--u)); background: rgba(232, 180, 76, .16); border: 2px solid rgba(232, 180, 76, .7); color: #eef3f6; min-width: 0; }
+.sc-ico { flex: none; width: calc(6.4 * var(--u)); height: calc(6.4 * var(--u)); fill: #fff; stroke: #1b2229; stroke-width: 2.6; stroke-linecap: round; }
+.sc-ico rect { stroke: #e8b44c; stroke-width: 2.4; }
+.sc-text { display: grid; flex: 1; min-width: 0; line-height: 1.15; }
+.sc-text b { color: var(--amber); font-size: calc(3.2 * var(--u)); font-weight: 900; text-transform: uppercase; letter-spacing: .02em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sc-text small { color: #e8dcc0; font-size: calc(2.6 * var(--u)); font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sc-limit { display: grid; place-items: center; flex: none; width: calc(8 * var(--u)); height: calc(8 * var(--u)); border-radius: 50%; background: #fff; border: calc(.9 * var(--u)) solid #e3342f; color: #111; font-size: calc(3.4 * var(--u)); font-weight: 900; font-variant-numeric: tabular-nums; }
+.sc.ahead.near { background: rgba(239, 106, 91, .22); border-color: rgba(239, 106, 91, .9); animation: warnpulse 1s ease-in-out infinite alternate; }
+.sc.ahead.near .sc-text b { color: #ff8a7a; }
+/* W trakcie: kolor wg średniej — zielony w limicie, żółty do 5 km/h ponad, czerwony wyżej */
+.sc.active { --sc: var(--hud-green); display: grid; gap: calc(.9 * var(--u)); background: rgba(10, 18, 26, .7); border-color: var(--sc); }
+.sc.active.warn { --sc: var(--amber); }
+.sc.active.over { --sc: var(--red); background: rgba(120, 24, 30, .45); }
+.sc-row { display: flex; align-items: center; gap: calc(2 * var(--u)); min-width: 0; }
+.sc-avg, .sc-left { display: grid; line-height: 1; }
+.sc-avg small, .sc-left small { color: var(--hud-dim); font-size: calc(2.2 * var(--u)); font-weight: 800; text-transform: uppercase; letter-spacing: .04em; }
+.sc-avg b { margin-top: calc(.4 * var(--u)); color: var(--sc); font-family: Bahnschrift, "DIN Alternate", "Roboto Condensed", "Arial Narrow", ui-sans-serif, sans-serif; font-size: calc(7.5 * var(--u)); font-weight: 800; font-variant-numeric: tabular-nums; }
+.sc-avg i { margin-left: calc(.8 * var(--u)); font-size: .36em; font-style: normal; font-weight: 750; }
+.sc-left { margin-left: auto; text-align: right; }
+.sc-left b { margin-top: calc(.6 * var(--u)); font-size: calc(4.2 * var(--u)); font-weight: 850; font-variant-numeric: tabular-nums; }
+.sc-bar { position: relative; height: calc(1.6 * var(--u)); margin: calc(.6 * var(--u)) calc(1 * var(--u)); border-radius: 99px; background: rgba(140, 175, 195, .25); }
+/* Bramki na początku i końcu odcinka */
+.sc-bar::before, .sc-bar::after { content: ""; position: absolute; top: calc(-1 * var(--u)); bottom: calc(-1 * var(--u)); width: calc(.6 * var(--u)); border-radius: 2px; background: #eef3f6; }
+.sc-bar::before { left: calc(-.3 * var(--u)); }
+.sc-bar::after { right: calc(-.3 * var(--u)); }
+.sc-fill { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 99px; background: var(--sc); }
+.sc-me { position: absolute; top: 50%; width: calc(3.2 * var(--u)); height: calc(3.2 * var(--u)); border-radius: 50%; background: #fff; border: calc(.6 * var(--u)) solid var(--sc); transform: translate(-50%, -50%); box-shadow: 0 2px 8px rgba(0, 0, 0, .45); }
+.sc-advice { color: #fff; font-size: calc(2.6 * var(--u)); font-weight: 850; }
+.sc.done { border-color: var(--hud-green); background: rgba(14, 60, 36, .55); }
+.sc.done.over { border-color: var(--red); background: rgba(120, 24, 30, .5); }
+.sc.done .sc-text b { color: var(--hud-green); text-transform: none; }
+.sc.done.over .sc-text b { color: #ff8a7a; }
+.sc-mark { display: grid; place-items: center; flex: none; width: calc(6 * var(--u)); height: calc(6 * var(--u)); border-radius: 50%; background: var(--hud-green); color: #0b2a16; font-size: calc(3.6 * var(--u)); font-weight: 900; }
+.sc.done.over .sc-mark { background: var(--red); color: #fff; }
+@media (prefers-reduced-motion: reduce) { .sc.ahead.near { animation: none; } }
+/* Niski ekran poziomo (telefon): mniejsze przyciski boczne, żeby kolumna pod menu nie wchodziła na dolny pasek */
+@media (orientation: landscape) and (max-height: 600px) {
+  .nm-top .hud-menu-wrap .hud-icon-btn { width: calc(8.4 * var(--u)); height: calc(8.4 * var(--u)); min-height: calc(8.4 * var(--u)); }
+  .nm-side { top: calc(11 * var(--u) + env(safe-area-inset-top)); gap: calc(1 * var(--u)); }
+  .nm-btn { width: calc(8.4 * var(--u)); height: calc(8.4 * var(--u)); }
+  .nm-zoom { width: calc(8.4 * var(--u)); }
+  .nm-zoom button { height: calc(8.4 * var(--u)); }
+}

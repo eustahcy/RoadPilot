@@ -107,25 +107,8 @@ export function MapView({ token, center, zoom, bearing = 0, pitch = 0, anchorY =
     return () => ro.disconnect();
   }, []);
 
-  // Przesuwanie (podgląd): przeciągnięcie przesuwa środek, kółko / przyciski zmieniają zoom.
-  const drag = useRef<{ x: number; y: number; c: [number, number] } | null>(null);
-  const onPointerDown = (e: React.PointerEvent) => {
-    if (!onMove) return;
-    (e.target as Element).setPointerCapture?.(e.pointerId);
-    drag.current = { x: e.clientX, y: e.clientY, c: worldPx(center, zoom) };
-  };
-  const onPointerMove = (e: React.PointerEvent) => {
-    const d = drag.current;
-    if (!d || !onMove) return;
-    onMove(fromWorldPx(d.c[0] - (e.clientX - d.x), d.c[1] - (e.clientY - d.y), zoom), zoom);
-  };
-  const onPointerUp = () => {
-    drag.current = null;
-  };
-  const onWheel = (e: React.WheelEvent) => {
-    if (!onMove) return;
-    onMove(center, Math.max(5, Math.min(18, zoom - Math.sign(e.deltaY) * 0.5)));
-  };
+  // Przesuwanie palcem / myszą i przybliżanie (szczypanie, kółko) — tylko gdy jest onMove.
+  const gestures = useMapGestures((g) => onMove?.(...moveView({ center, zoom }, g, { w: size.w, h: size.h, anchorY, bearing, pitch })));
 
   const z = Math.max(3, Math.min(18, Math.floor(zoom)));
   const scale = 2 ** (zoom - z);
@@ -206,11 +189,7 @@ export function MapView({ token, center, zoom, bearing = 0, pitch = 0, anchorY =
       ref={box}
       className={`map-view ${onMove ? "interactive" : ""} ${className}`}
       style={{ perspective: pitch > 0 ? `${Math.round(size.h * 1.05)}px` : undefined, perspectiveOrigin: `50% ${anchorY * 100}%` }}
-      onPointerDown={onPointerDown}
-      onPointerMove={onPointerMove}
-      onPointerUp={onPointerUp}
-      onPointerCancel={onPointerUp}
-      onWheel={onWheel}
+      {...(onMove ? gestures : {})}
     >
       <div className="map-layer" ref={layerRef} style={layer}>
         {backdrop.map((t) => (
@@ -229,6 +208,130 @@ export function MapView({ token, center, zoom, bearing = 0, pitch = 0, anchorY =
       <span className="map-credit">© TomTom</span>
     </div>
   );
+}
+
+/** Ruch mapy z gestu: przesunięcie (px ekranu) i zmiana zoomu (log2) wokół punktu (ax, ay) względem ramki. */
+export interface MapGesture {
+  dx: number;
+  dy: number;
+  dz: number;
+  ax: number;
+  ay: number;
+}
+
+export const MIN_VIEW_ZOOM = 4;
+/** Przytrzymanie palca na mapie (ms) — np. „dodaj punkt do trasy”. */
+export const LONG_PRESS_MS = 600;
+export const MAX_VIEW_ZOOM = 18;
+
+/**
+ * Nowy środek i zoom po geście. Punkt pod palcem zostaje pod palcem: przesunięcie ekranu obracamy o kierunek mapy
+ * (warstwa jest obrócona o −bearing), a przy pochyleniu pion ekranu to więcej świata (ok. 1/cos) — przybliżenie przy kotwicy.
+ */
+export function moveView(view: { center: LatLon; zoom: number }, g: MapGesture, o: { w: number; h: number; anchorY?: number; bearing?: number; pitch?: number }): [LatLon, number] {
+  const b = ((o.bearing ?? 0) * Math.PI) / 180;
+  const tilt = 1 / Math.max(0.3, Math.cos(((o.pitch ?? 0) * Math.PI) / 180));
+  const toWorld = (x: number, y: number): [number, number] => [x * Math.cos(b) - y * tilt * Math.sin(b), x * Math.sin(b) + y * tilt * Math.cos(b)];
+  const zoom = Math.max(MIN_VIEW_ZOOM, Math.min(MAX_VIEW_ZOOM, view.zoom + g.dz));
+  const k = 2 ** (zoom - view.zoom);
+  const [cx, cy] = worldPx(view.center, view.zoom);
+  const [px, py] = toWorld(g.dx, g.dy);
+  // Przesunięcie punktu zakotwiczenia (palec / środek szczypania) od środka widoku — po zoomie ma zostać w miejscu.
+  const [ox, oy] = toWorld(g.ax - o.w / 2, g.ay - o.h * (o.anchorY ?? 0.5));
+  const nx = cx - px + ox * (1 - 1 / k);
+  const ny = cy - py + oy * (1 - 1 / k);
+  return [fromWorldPx(nx * k, ny * k, zoom), zoom];
+}
+
+/**
+ * Gesty mapy bez bibliotek: jeden palec / mysz = przesuwanie, dwa palce = szczypanie (zoom + przesuwanie),
+ * kółko = zoom wokół kursora. Po przeciągnięciu tłumi kliknięcie (np. wybór trasy dotknięciem linii).
+ */
+export function useMapGestures(apply: (g: MapGesture) => void, onStart?: () => void, extra: { onTap?: (x: number, y: number, e: React.PointerEvent) => void; onLongPress?: (x: number, y: number) => void } = {}) {
+  const pts = useRef(new Map<number, { x: number; y: number }>());
+  const moved = useRef(0);
+  const cb = useRef({ apply, onStart, ...extra });
+  cb.current = { apply, onStart, ...extra };
+  /** Przytrzymanie: timer od dotknięcia jednym palcem; ruch, drugi palec albo puszczenie go kasuje. */
+  const hold = useRef<{ id: number; x: number; y: number; at: number } | null>(null);
+  const stopHold = () => {
+    if (hold.current) clearTimeout(hold.current.id);
+    hold.current = null;
+  };
+  const local = (e: { clientX: number; clientY: number; currentTarget: EventTarget }) => {
+    const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    return { x: e.clientX - r.left, y: e.clientY - r.top };
+  };
+  const pair = () => {
+    const [a, b] = [...pts.current.values()];
+    return { mx: (a.x + b.x) / 2, my: (a.y + b.y) / 2, d: Math.hypot(a.x - b.x, a.y - b.y) };
+  };
+  return {
+    onPointerDown: (e: React.PointerEvent) => {
+      if (e.pointerType === "mouse" && e.button !== 0) return;
+      (e.currentTarget as Element).setPointerCapture?.(e.pointerId);
+      if (!pts.current.size) moved.current = 0;
+      const p = local(e);
+      pts.current.set(e.pointerId, p);
+      stopHold();
+      if (pts.current.size === 1) {
+        const id = window.setTimeout(() => {
+          if (hold.current && moved.current <= 6) {
+            moved.current = 1000; // po przytrzymaniu puszczenie nie jest już dotknięciem
+            cb.current.onLongPress?.(p.x, p.y);
+          }
+          hold.current = null;
+        }, LONG_PRESS_MS);
+        hold.current = { id, x: p.x, y: p.y, at: Date.now() };
+      }
+    },
+    onPointerMove: (e: React.PointerEvent) => {
+      const prev = pts.current.get(e.pointerId);
+      if (!prev) return;
+      const before = pts.current.size === 2 ? pair() : null;
+      const p = local(e);
+      pts.current.set(e.pointerId, p);
+      if (before) {
+        stopHold();
+        const after = pair();
+        const dz = before.d > 0 && after.d > 0 ? Math.log2(after.d / before.d) : 0;
+        moved.current += Math.hypot(after.mx - before.mx, after.my - before.my) + Math.abs(dz) * 100;
+        if (moved.current > 6) cb.current.onStart?.();
+        cb.current.apply({ dx: after.mx - before.mx, dy: after.my - before.my, dz, ax: after.mx, ay: after.my });
+      } else if (pts.current.size === 1) {
+        const dx = p.x - prev.x;
+        const dy = p.y - prev.y;
+        // Drobne drgnięcie palca przy dotknięciu to jeszcze nie przesuwanie — do progu trzymamy punkt startu.
+        if (moved.current <= 6 && Math.hypot(dx, dy) <= 6) {
+          pts.current.set(e.pointerId, prev);
+          return;
+        }
+        moved.current += Math.hypot(dx, dy);
+        stopHold();
+        cb.current.onStart?.();
+        cb.current.apply({ dx, dy, dz: 0, ax: p.x, ay: p.y });
+      }
+    },
+    onPointerUp: (e: React.PointerEvent) => {
+      const h = hold.current;
+      const single = pts.current.size === 1;
+      pts.current.delete(e.pointerId);
+      stopHold();
+      if (single && h && moved.current <= 6 && Date.now() - h.at < LONG_PRESS_MS) cb.current.onTap?.(h.x, h.y, e);
+    },
+    onPointerCancel: (e: React.PointerEvent) => {
+      pts.current.delete(e.pointerId);
+      stopHold();
+    },
+    onWheel: (e: React.WheelEvent) => {
+      const p = local(e);
+      cb.current.onStart?.();
+      cb.current.apply({ dx: 0, dy: 0, dz: -Math.sign(e.deltaY) * 0.5, ax: p.x, ay: p.y });
+    },
+    onClickCapture: (e: React.MouseEvent) => {
+      if (moved.current > 6) e.stopPropagation();
+    },
+  };
 }
 
 /** Adres blob kafelka, jeśli już pobrany (do rysowania w WebGL i podkładu z sąsiednich poziomów). */

@@ -1120,56 +1120,47 @@ svg .rb-exit { fill: currentColor; stroke: none; font: 900 7.5px system-ui, sans
 
 /* Tablet (≥ 744 px w obu wymiarach — iPad pionowo i poziomo): karta manewru u góry z lewej, kafelki 2×2 obok, przyciski pod kartą, prędkość w lewym dole, „po drodze” i mapa w prawym. */
 @media (min-width: 744px) and (min-height: 744px) {
-  .hud.navmode { --u: min(.74vh, .58vw); grid-template-columns: minmax(0, 46%) 1fr auto; grid-template-rows: auto 1fr auto auto;
-    grid-template-areas: "top tiles tiles" "side . ." "side . ctl" "speed . ahead"; gap: calc(1.6 * var(--u)); }
+  /* Tablet (lżej): mapa na cały ekran, zwarta karta manewru w lewym górnym rogu, przyciski pod nią, prędkość w lewym dole,
+     „po drodze” i mapa w prawym; na dole jeden smukły pasek: do celu · przyjazd · przerwa · trasa + oś trasy. */
+  .hud.navmode { --u: min(.74vh, .58vw); grid-template-columns: minmax(0, 40%) 1fr auto; grid-template-rows: auto 1fr auto auto;
+    grid-template-areas: "top . ." "side . ctl" "speed . ahead" "progress progress progress"; gap: calc(1.4 * var(--u)); }
+  .nm-tiles { display: none; }
   .nm-side { align-self: start; justify-self: start; }
   .nm-ctl { justify-self: end; }
   .nm-recenter:not(.on) { display: grid; }
   .nm-ahead { justify-self: end; width: calc(40 * var(--u)); }
+  .nm-ahead strong { white-space: nowrap; }
   .nm-ahead-go { display: block; }
-  .nm-speed { padding-bottom: calc(3 * var(--u)); }
+  .nm-speed { padding-bottom: calc(2.6 * var(--u)); }
   .nm-speed-bar { display: block; }
-  .nm-speed strong { font-size: calc(12.5 * var(--u)); }
-  .nm-tiles { align-self: start; grid-template-columns: 1fr 1fr; gap: calc(1.4 * var(--u)); background: none; border: 0; box-shadow: none; }
-  .nm-tiles > .nm-tile { display: flex; border: 1px solid var(--nm-edge); border-radius: calc(2.6 * var(--u)); background: var(--nm-glass); box-shadow: 0 10px 28px rgba(0, 0, 0, .38), inset 0 1px 0 rgba(255, 255, 255, .07); padding: calc(2 * var(--u)) calc(2.4 * var(--u)) calc(2.6 * var(--u)); }
-  .nm-tiles-handle { display: none; }
-  .nm-tile > span { display: flex; flex-direction: column; }
-  .nm-tile small { order: 2; text-transform: none; letter-spacing: 0; font-size: calc(2.2 * var(--u)); font-weight: 650; }
-  .nm-tile b { order: 1; }
-  .nm-tile i { order: 3; }
-  .nm-tile-bar { display: block; }
-  .hud.navmode { grid-template-rows: auto 1fr auto auto; grid-template-areas: "top tiles tiles" "side . ctl" "speed . ahead" "progress progress progress"; }
-  .nm-card-more { display: none; }
-  /* Górny pas (karta manewru i kafelki) na czarnym tle, mapa dopiero pod nim — w siatce od 2. wiersza, do krawędzi ekranu. */
-  .hud.navmode { background: #05080b; }
-  .hud.navmode .nm-map { position: relative; inset: auto; grid-area: 2 / 1 / -1 / -1; margin: 0 calc(-2 * var(--u) - env(safe-area-inset-right)) calc(-1.6 * var(--u) - env(safe-area-inset-bottom)) calc(-2 * var(--u) - env(safe-area-inset-left)); overflow: hidden; }
-  /* Karta: po lewej kafelek kolejnego manewru (na całą wysokość), obok manewr, pasy i ostrzeżenia. */
-  .nm-top .hud-nav.card.with-after { display: grid; grid-template-columns: auto minmax(0, 1fr); column-gap: calc(2.2 * var(--u)); row-gap: calc(.8 * var(--u)); align-items: center; padding: calc(1.6 * var(--u)) calc(2.4 * var(--u)) calc(1.6 * var(--u)) calc(1.6 * var(--u)); }
-  .nm-top .hud-nav.card.with-after > * { grid-column: 2; min-width: 0; }
-  .nm-top .hud-nav.card.with-after > .hud-after { grid-column: 1; grid-row: 1 / span 3; align-self: stretch; }
+  .nm-speed strong { font-size: calc(11 * var(--u)); }
+  .nm-limit { width: calc(9.5 * var(--u)); height: calc(9.5 * var(--u)); font-size: calc(3.8 * var(--u)); }
+  /* Karta manewru zwarta i półprzezroczysta — nie zasłania drogi przed nami. */
+  .nm-top .hud-nav.card { background: linear-gradient(180deg, rgba(30, 46, 60, .86), rgba(12, 22, 32, .86)); padding: calc(1.4 * var(--u)) calc(2 * var(--u)); padding-right: calc(7 * var(--u)); }
+  .nm-top .hud-nav.card .hud-man svg { width: calc(8.5 * var(--u)); height: calc(8.5 * var(--u)); }
+  .nm-top .hud-nav.card .hud-man b { font-size: calc(5.6 * var(--u)); }
+  .nm-top .hud-nav.card .hud-man small { font-size: calc(2.8 * var(--u)); }
   .nm-top .hud-nav.card .hud-lanes-guide { justify-items: start; }
-  /* Przyciski mniejsze niż na telefonie — kolumna 6 przycisków mieści się między kartą a prędkością. */
-  .nm-btn, .nm-zoom { width: calc(8 * var(--u)); }
-  .nm-btn { height: calc(8 * var(--u)); }
-  .nm-zoom button { height: calc(8 * var(--u)); }
-  .nm-btn .hud-ico { width: calc(3.8 * var(--u)); height: calc(3.8 * var(--u)); }
-  .nm-side, .nm-ctl { gap: calc(1 * var(--u)); }
-  .nm-mode { font-size: calc(2.8 * var(--u)); }
-  .hud-after { display: grid; justify-items: center; align-content: center; gap: calc(.4 * var(--u)); min-width: calc(13 * var(--u)); padding: calc(1.4 * var(--u)) calc(1.4 * var(--u)); border-radius: calc(2.4 * var(--u)); background: linear-gradient(180deg, rgba(34, 110, 64, .6), rgba(14, 58, 34, .7)); border: 1px solid rgba(68, 240, 124, .5); color: var(--hud-green); font: inherit; }
-  .hud-after svg { width: calc(6 * var(--u)); height: calc(6 * var(--u)); fill: none; stroke: currentColor; stroke-width: 2.8; stroke-linecap: round; stroke-linejoin: round; }
-  .hud-after svg .head { fill: currentColor; stroke-width: 1.2; }
-  .hud-after svg .ring { opacity: .4; stroke-width: 2; }
-  .hud-after b { font-size: calc(2.6 * var(--u)); font-weight: 800; white-space: nowrap; }
-  .hud-after small { font-size: calc(2.2 * var(--u)); color: #d6f5df; white-space: nowrap; }
-  .hud-after .hud-after-more { width: calc(3.4 * var(--u)); height: calc(3.4 * var(--u)); opacity: .8; }
-  .nm-progress { grid-area: progress; display: flex; align-items: center; position: relative; z-index: 2; padding: calc(1.2 * var(--u)) calc(2.6 * var(--u)); border-radius: calc(2.6 * var(--u)); background: var(--nm-glass); border: 1px solid var(--nm-edge); box-shadow: 0 10px 28px rgba(0, 0, 0, .38), inset 0 1px 0 rgba(255, 255, 255, .07); color: #eef3f6; }
-  .nm-progress-item { display: flex; align-items: center; gap: calc(1.6 * var(--u)); padding-right: calc(3 * var(--u)); margin-right: calc(3 * var(--u)); border-right: 1px solid rgba(140, 175, 195, .2); }
-  .nm-progress-item .hud-ico { width: calc(4.6 * var(--u)); height: calc(4.6 * var(--u)); color: #dfe7ee; }
+  /* Przyciski mniejsze niż na telefonie. */
+  .nm-btn, .nm-zoom { width: calc(7.4 * var(--u)); }
+  .nm-btn { height: calc(7.4 * var(--u)); }
+  .nm-zoom button { height: calc(7.4 * var(--u)); }
+  .nm-btn .hud-ico { width: calc(3.6 * var(--u)); height: calc(3.6 * var(--u)); }
+  .nm-side, .nm-ctl { gap: calc(.9 * var(--u)); }
+  .nm-mode { font-size: calc(2.6 * var(--u)); }
+  /* Dolny pasek: smukły, cztery informacje + oś; na wąskim (iPad pionowo) oś przechodzi do drugiego wiersza. */
+  .nm-progress { grid-area: progress; display: flex; flex-wrap: wrap; align-items: center; row-gap: calc(.6 * var(--u)); position: relative; z-index: 2; padding: calc(.8 * var(--u)) calc(2.2 * var(--u)); border-radius: calc(2.4 * var(--u)); background: var(--nm-glass); border: 1px solid var(--nm-edge); box-shadow: 0 10px 28px rgba(0, 0, 0, .38), inset 0 1px 0 rgba(255, 255, 255, .07); color: #eef3f6; }
+  .nm-progress-item { display: flex; align-items: center; gap: calc(1.2 * var(--u)); padding-right: calc(2.2 * var(--u)); margin-right: calc(2.2 * var(--u)); border-right: 1px solid rgba(140, 175, 195, .2); }
+  .nm-progress-item .hud-ico { width: calc(3.8 * var(--u)); height: calc(3.8 * var(--u)); color: #dfe7ee; }
   .nm-progress-item > span { display: grid; line-height: 1.1; }
-  .nm-progress-item b { font-size: calc(3.8 * var(--u)); font-weight: 850; font-variant-numeric: tabular-nums; white-space: nowrap; }
-  .nm-progress-item small { color: var(--hud-dim); font-size: calc(2.1 * var(--u)); white-space: nowrap; }
+  .nm-progress-item b { font-size: calc(3.2 * var(--u)); font-weight: 850; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .nm-progress-item small { color: var(--hud-dim); font-size: calc(1.9 * var(--u)); white-space: nowrap; }
   .nm-progress-item.bad b { color: var(--red); }
-  .nm-progress-track { flex: 1; min-width: 0; }
+  .nm-progress-item.warn b { color: var(--amber); }
+  .nm-progress-item.active b, .nm-progress-item.active .hud-ico { color: var(--hud-green); }
+  button.nm-progress-item { background: none; border-top: 0; border-bottom: 0; border-left: 0; color: inherit; font: inherit; text-align: left; padding-top: 0; padding-bottom: 0; }
+  /* Odstęp nad osią na procent nad ciężarówką (w pionie oś jest w drugim wierszu, pod informacjami). */
+  .nm-progress-track { flex: 1 1 calc(60 * var(--u)); min-width: 0; padding-top: calc(2.6 * var(--u)); }
   /* Odcinkowy pomiar na tablecie jest w dolnym pasku, nie w karcie manewru. */
   .nm-section-card { display: none; }
   /* Odcinek jak oś trasy: przejechana część i średnia w kolorze średniej; meta z „do końca”. */
@@ -1186,6 +1177,9 @@ svg .rb-exit { fill: currentColor; stroke: none; font: 900 7.5px system-ui, sans
   /* Oś trasy z HUD w dolnym pasku — niższa niż w HUD. */
   .nm-progress .hud-route { gap: calc(1.2 * var(--u)); }
   .nm-progress .hud-track { height: calc(12.5 * var(--u)); }
+  .nm-progress .hud-marker b { font-size: calc(2.1 * var(--u)); }
+  .nm-progress .hud-marker small { font-size: calc(1.8 * var(--u)); }
+  .nm-progress .hud-marker .hud-ico { width: calc(3.4 * var(--u)); height: calc(3.4 * var(--u)); margin-bottom: 0; }
   .nm-progress .hud-route-end .hud-ico { width: calc(4.6 * var(--u)); height: calc(4.6 * var(--u)); }
   .nm-progress .hud-route-end b { font-size: calc(2.6 * var(--u)); }
   .nm-progress .hud-truck { width: calc(6 * var(--u)); left: calc(var(--p) * (100% - 6 * var(--u))); }

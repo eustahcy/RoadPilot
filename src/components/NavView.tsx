@@ -279,6 +279,8 @@ export function NavView(p: NavViewProps) {
       <div className="nm-progress">
         <span className="nm-progress-item"><Icon name="flag" /><span><b>{fmtKm(p.route.totalKm)}</b><small>Do celu</small></span></span>
         <span className={`nm-progress-item ${arrival.bad ? "bad" : ""}`}><Icon name="clock" /><span><b>{arrival.clock}</b><small>{arrival.left !== undefined ? `Przyjazd za ${arrival.left}` : arrival.note}</small></span></span>
+        <button className={`nm-progress-item ${stopItem.tone}`} onClick={openSheet}><Icon name="coffee" /><span><b>{stopItem.value}</b><small>{stopItem.label}</small></span></button>
+        <span className="nm-progress-item"><Icon name="road" /><span><b>{refs || (route ? "Drogi lokalne" : "Brak trasy")}</b><small>{route ? `Trasa · ${fmtKm(route.lengthKm)}` : "Trasa"}</small></span></span>
         {/* Oś trasy jak w HUD: Start → Cel, przejechane na zielono, ciężarówka z %, kubek przy planowanej przerwie („za 269 km 12:01”). */}
         {/* Odcinkowy pomiar (zapowiedź, w trakcie, podsumowanie) zajmuje miejsce osi — na tablecie nie w karcie manewru. */}
         <span className="nm-progress-track">

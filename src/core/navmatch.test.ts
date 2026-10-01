@@ -37,7 +37,7 @@ describe("prowadzenie po trasie", () => {
     expect(nextInstruction(ins, 9.5)).toBeUndefined();
 
     const lanes = [{ km: 3.9, toKm: 4, lanes: [{ dirs: ["STRAIGHT"] }, { dirs: ["RIGHT"], follow: "RIGHT" }] }];
-    expect(lanesAhead(lanes, 1.8)).toBeUndefined(); // 2,1 km przed — jeszcze za wcześnie (NAV.lanesAheadKm 2)
+    expect(lanesAhead(lanes, 3.9 - NAV.lanesAheadKm - 0.1)).toBeUndefined(); // dalej niż NAV.lanesAheadKm — jeszcze nie
     expect(lanesAhead(lanes, 3)!.inKm).toBeCloseTo(0.9, 6);
     expect(lanesAhead(lanes, 4.1)).toBeUndefined(); // za nami
     expect(speedLimitAt([{ km: 0, toKm: 5, kmh: 80 }], 3)).toBe(80);

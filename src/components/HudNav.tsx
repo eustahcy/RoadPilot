@@ -243,7 +243,10 @@ export function HudNav({ nav, track, compact, card, section, onManeuvers }: { na
   }
 
   const next = nextInstruction(route.instructions, pos.km);
-  const lanes = lanesAhead(route.lanes, pos.km);
+  // Pasy do najbliższego miejsca wyboru widać cały czas (NAV.lanesAheadKm), ale tylko dla najbliższego manewru albo przed nim.
+  const nextIns = nextInstruction(route.instructions, pos.km);
+  const ahead = lanesAhead(route.lanes, pos.km);
+  const lanes = ahead && (!nextIns || ahead.km <= nextIns.ins.km + 0.3) ? ahead : undefined;
   const hint = lanes && laneHint(lanes);
   // Bramki przed nami (OSM barrier=toll_booth na naszej jezdni) — od NAV.tollAheadKm.
   const toll = route.pois?.find((p) => p.kind === "toll" && p.km > pos.km - 0.05 && p.km - pos.km <= NAV.tollAheadKm);

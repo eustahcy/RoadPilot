@@ -136,9 +136,9 @@ src/components/NavView.tsx  nawigacja jako osobny system (nie HUD): HudRouteMap 
                    z numerem drogi (HudNav roadBadge: A/S/krajowe czerwone, wojewódzkie żółte, E zielone), „›” = lista najbliższych manewrów;
                    „⋯” = menu (zgłoszenie, postój, dzień, pełny ekran, zakończ nawigację, wyjdź).
                    Przycisk 2D/3D nad zoomem (Settings.navMap): 2D = HudRouteMap flat (pitch 0, FLAT_ZOOM −2, trasa na 25 km, bez horyzontu .nm-map.flat). Karty „szklane” gradientem, bez backdrop-filter;
-                   Tablet (wg makiety): górny pas (karta + kafelki 2×2) na czarnym tle, mapa w siatce od 2. wiersza (.nm-map grid-area 2/1/-1/-1);
-                   w karcie zielony kafelek kolejnego manewru (HudNav .hud-after, onManeuvers → lista), na dole .nm-progress: do celu, przyjazd i oś trasy jak w HUD
-                   (HudView RouteLine: Start, ciężarówka z %, postoje z planu „za X km” + godzina, Cel); odcinkowy pomiar na tablecie zastępuje tę oś
+                   Tablet (wersja lżejsza 2026-10-01): mapa na cały ekran, zwarta półprzezroczysta karta manewru w lewym górnym rogu (40%,
+                   bez kafelka kolejnego manewru — „›” = lista), przyciski pod nią, kafelki ukryte — dolny smukły pasek .nm-progress: do celu ·
+                   przyjazd · przerwa · trasa + oś trasy jak w HUD (HudView RouteLine: Start, ciężarówka z %, postoje z planu „za X km” + godzina, Cel); odcinkowy pomiar na tablecie zastępuje tę oś
                    w tym samym stylu (SectionControl SectionLine: limit, kwadraciki w kolorze średniej, ciężarówka ze średnią, meta „za X km”)
                    (w karcie ukryty .nm-section-card), na telefonach zostaje w karcie; mniejsza skala --u i przyciski 8u
                    strzałki (HudNav arrowGeom/Arrow): trzon + wypełniony grot (.head fill currentColor — kolor przez `color`, nie `stroke`), ostre skręty
@@ -187,7 +187,7 @@ server/valhalla.mjs  własny silnik tras (Valhalla, OSM Polska, VALHALLA_URL): v
                    (indications, valid, valid_indication = follow) → LaneSection jak TomTom; pomijane: mijany pojedynczy pas zjazdu (każdy pas „prosto” prowadzi,
                    bez manewru z trasy w LANE_MANEUVER_KM i bez rozjazdu ≥ 2 pasów — rozjazd S6/S7 musi być widoczny),
                    > LANE_MAX 5 pasów (plac poboru opłat), powtórka w tym samym miejscu. Asystent pasa: core/navmatch laneHint („Jedź skrajnie
-                   prawym pasem” — pas zjazdowy, którego jeszcze nie ma, osiągniemy z prawego), lanesAhead od NAV.lanesAheadKm 2 km, głos
+                   prawym pasem” — pas zjazdowy, którego jeszcze nie ma, osiągniemy z prawego), lanesAhead od NAV.lanesAheadKm 15 km (stała podpowiedź pasa do najbliższego miejsca wyboru, tylko dla najbliższego manewru), głos
                    (voice.ts LANE_SAY_KM 1,2 km autostrada / 0,35 km); bramki: osm_pois kind "toll" (barrier=toll_booth, TOLL_NEAR_M 12 m — tylko nasza
                    jezdnia), wysyłane tylko gdy aplikacja prosi (warnings {tolls:true}); karta: baner od NAV.tollAheadKm 3 km, głos „Za 1 km bramki”
                    /api/nav/route: zawsze własny silnik w PL (wybór silnika usunięty z aplikacji 2026-10-01); TomTom tylko awaryjnie — poza PL albo gdy Valhalla nie da trasy; valhallaRoute sprawdza trasę

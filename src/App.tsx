@@ -50,7 +50,10 @@ const TABS: { id: Tab; label: string; icon: string }[] = [
   { id: "history", label: "Historia", icon: "M5 4h14v16H5zM9 9h6M9 13h6M9 17h3" },
   { id: "settings", label: "Ustawienia", icon: "M4 7h10M18 7h2M4 17h4M12 17h8M14 5v4M8 15v4" },
 ];
-const NAV_AT = TABS.findIndex((t) => t.id === "nav");
+/** Tachograf nie ma własnej zakładki na pasku — jest w Trasie (przełącznik Trasa / Tachograf). */
+const BAR_TABS = TABS.filter((t) => t.id !== "driver");
+const BAR_NAV_AT = BAR_TABS.findIndex((t) => t.id === "nav");
+const barActive = (bar: Tab, tab: Tab) => bar === tab || (bar === "route" && tab === "driver");
 
 function App() {
   const [state, setState] = usePersistentState();
@@ -253,7 +256,7 @@ function App() {
     window.scrollTo({ top: 0 });
   };
   const tabButton = (t: (typeof TABS)[number]) => (
-    <button key={t.id} className={tab === t.id ? "active" : ""} onClick={() => go(t.id)} aria-current={tab === t.id ? "page" : undefined}>
+    <button key={t.id} className={barActive(t.id, tab) ? "active" : ""} onClick={() => go(t.id)} aria-current={barActive(t.id, tab) ? "page" : undefined}>
       <svg viewBox="0 0 24 24" aria-hidden><path d={t.icon} /></svg>
       <span>{t.label}</span>
     </button>
@@ -489,6 +492,12 @@ function App() {
             onOption={(option, value) => setState((s) => ({ ...s, settings: { ...s.settings, [option]: value } }))}
           />
         )}
+        {(tab === "route" || tab === "driver") && (
+          <div className="subtabs" role="tablist">
+            <button role="tab" aria-selected={tab === "route"} className={tab === "route" ? "active" : ""} onClick={() => go("route")}>Trasa</button>
+            <button role="tab" aria-selected={tab === "driver"} className={tab === "driver" ? "active" : ""} onClick={() => go("driver")}>Tachograf</button>
+          </div>
+        )}
         {tab === "route" && (
           <RouteView
             trip={trip}
@@ -552,12 +561,12 @@ function App() {
 
       <nav className="tabbar">
         {/* Nawigacja na środku w zielonej bańce — po bokach pozostałe zakładki. */}
-        <div className="tabbar-side">{TABS.slice(0, NAV_AT).map(tabButton)}</div>
+        <div className="tabbar-side">{BAR_TABS.slice(0, BAR_NAV_AT).map(tabButton)}</div>
         <button className="tabbar-nav" onClick={() => go("nav")}>
-          <i><svg viewBox="0 0 24 24" aria-hidden><path d={TABS[NAV_AT].icon} /></svg></i>
-          <span>{TABS[NAV_AT].label}</span>
+          <i><svg viewBox="0 0 24 24" aria-hidden><path d={BAR_TABS[BAR_NAV_AT].icon} /></svg></i>
+          <span>{BAR_TABS[BAR_NAV_AT].label}</span>
         </button>
-        <div className="tabbar-side">{TABS.slice(NAV_AT + 1).map(tabButton)}</div>
+        <div className="tabbar-side">{BAR_TABS.slice(BAR_NAV_AT + 1).map(tabButton)}</div>
       </nav>
     </div>
   );

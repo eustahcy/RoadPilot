@@ -142,8 +142,7 @@ input::-webkit-calendar-picker-indicator { filter: invert(.8); }
 .profile span { color: var(--mute); font-size: 11px; line-height: 1.35; }
 .profile.active { border-color: var(--green); background: rgba(66, 211, 146, .08); }
 .segments { display: grid; gap: 8px; margin-top: 12px; }
-.segment-row, .activities li { display: grid; grid-template-columns: 1fr 110px 36px; gap: 6px; align-items: center; }
-.activities { list-style: none; padding: 0; margin: 12px 0 8px; display: grid; gap: 6px; }
+.segment-row { display: grid; grid-template-columns: 1fr 110px 36px; gap: 6px; align-items: center; }
 .icon-btn { height: 36px; border-radius: 10px; border: 1px solid var(--line-2); background: var(--field); color: var(--mute); font-size: 18px; }
 .segbar-wrap { margin-top: 14px; }
 .segbar { display: flex; height: 10px; border-radius: 99px; overflow: hidden; gap: 2px; }
@@ -180,7 +179,7 @@ input::-webkit-calendar-picker-indicator { filter: invert(.8); }
 @media (max-width: 380px) {
   .form, .profiles, .stats { grid-template-columns: 1fr; }
   .eta-big { font-size: 40px; }
-  .segment-row, .activities li { grid-template-columns: 1fr 92px 36px; }
+  .segment-row { grid-template-columns: 1fr 92px 36px; }
   .scenario-eta strong { font-size: 19px; }
   .scenario-name { font-size: 14px; }
 }
@@ -298,9 +297,9 @@ input[type="number"]::-webkit-inner-spin-button, input[type="number"]::-webkit-o
 .auth { min-height: 100vh; min-height: 100dvh; display: grid; place-items: center; padding: 24px 16px; }
 .auth-box { width: 100%; max-width: 420px; }
 .auth-brand { font-size: 34px; }
-.auth-tabs { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin: 20px 0 10px; padding: 4px; border-radius: 14px; background: var(--field); border: 1px solid var(--line-2); }
-.auth-tabs button { border: 0; background: none; padding: 10px; border-radius: 10px; font-weight: 800; color: var(--dim); }
-.auth-tabs button.active { background: var(--green); color: #06120c; }
+.auth-tabs, .subtabs { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin: 20px 0 10px; padding: 4px; border-radius: 14px; background: var(--field); border: 1px solid var(--line-2); }
+.auth-tabs button, .subtabs button { border: 0; background: none; padding: 10px; border-radius: 10px; font-weight: 800; color: var(--dim); }
+.auth-tabs button.active, .subtabs button.active { background: var(--green); color: #06120c; }
 .auth-form { display: grid; gap: 13px; }
 .auth-form input, .delete-account input { width: 100%; }
 .auth-error { margin: 0; color: var(--red); font-weight: 750; font-size: 13px; }
@@ -314,11 +313,6 @@ input[type="number"]::-webkit-inner-spin-button, input[type="number"]::-webkit-o
 .danger-text { color: var(--red); display: block; margin-top: 10px; }
 
 /* Odtwórz dzień — godziny od–do */
-.activities.timed li { grid-template-columns: 1fr 92px 92px 36px; row-gap: 2px; }
-.activities.timed input[type="time"] { padding: 8px 6px; font-size: 14px; }
-.activities-head { font-size: 10px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; color: var(--mute); }
-.activity-len { grid-column: 1 / -1; font-size: 11px; color: var(--mute); padding-left: 4px; }
-@media (max-width: 360px) { .activities.timed li { grid-template-columns: 1fr 78px 78px 32px; } }
 .card > p.muted + .field { margin-top: 12px; }
 
 .auth-ok { margin: 0; color: var(--green); font-weight: 700; font-size: 13px; }
@@ -1098,3 +1092,29 @@ input[type="number"]::-webkit-inner-spin-button, input[type="number"]::-webkit-o
   .nm-zoom { width: calc(8.4 * var(--u)); }
   .nm-zoom button { height: calc(8.4 * var(--u)); }
 }
+
+/* Trasa / Tachograf — przełącznik w zakładce Trasa */
+.subtabs { margin: 0 0 12px; }
+
+/* Odtwórz dzień: pasek dnia i aktywności z godzinami od–do */
+.day-strip { margin: 12px 0 4px; }
+.day-strip-bar { position: relative; height: 14px; border-radius: 7px; background: #1c242d; overflow: hidden; }
+.day-strip-bar span { position: absolute; top: 0; bottom: 0; }
+.day-strip-axis { display: flex; justify-content: space-between; margin-top: 4px; font-size: 11px; color: var(--mute); font-variant-numeric: tabular-nums; }
+.act.drive, .day-strip-bar .drive { --act: var(--green); }
+.act.break, .day-strip-bar .break { --act: var(--blue); }
+.act.work, .day-strip-bar .work { --act: var(--amber); }
+.day-strip-bar span { background: var(--act); }
+.acts { list-style: none; padding: 0; margin: 10px 0 8px; display: grid; gap: 8px; }
+.act { display: grid; grid-template-columns: 1fr 1fr auto; grid-template-areas: "kinds kinds del" "from to len"; gap: 8px; align-items: center; padding: 10px; border-radius: 14px; background: #10161d; border: 1px solid var(--line-2); border-left: 4px solid var(--act); }
+.act-kinds { grid-area: kinds; display: flex; gap: 4px; }
+.act-kinds button { flex: 1; min-width: 0; padding: 7px 4px; border-radius: 9px; border: 1px solid var(--line-2); background: var(--field); color: var(--dim); font-size: 12px; font-weight: 750; }
+.act-kinds button.active { background: var(--act); border-color: var(--act); color: #06120c; }
+.act-del { grid-area: del; width: 36px; }
+.act-time { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.act-time:first-of-type { grid-area: from; }
+.act-time + .act-time { grid-area: to; }
+.act-time span { font-size: 11px; font-weight: 800; color: var(--mute); text-transform: uppercase; }
+.act-time input { flex: 1; min-width: 0; width: 100%; padding: 8px 6px; font-size: 16px; font-variant-numeric: tabular-nums; text-align: center; }
+.act-time input::-webkit-calendar-picker-indicator { display: none; }
+.act-len { grid-area: len; min-width: 52px; text-align: right; font-size: 14px; color: var(--text); font-variant-numeric: tabular-nums; }

@@ -17,7 +17,7 @@ import { MUSIC_APPS, musicLink, MusicApp } from "../core/apps";
 import { launch, platform } from "../launch";
 import { HudItems, HudStyle } from "../hudConfig";
 import { locate } from "../core/navmatch";
-import { NavRoute } from "../nav";
+import { NavRoute, useLimitHere } from "../nav";
 import { legalLimitAt, nearestOnRoute, NavInstruction, ON_ROUTE_M, speedTone } from "../core/navmatch";
 import { RouteWarning } from "../nav";
 import { HUD_STYLES } from "../hudConfig";
@@ -68,6 +68,8 @@ interface Props {
   floating: Floating;
   /** Trasa z nawigacji — tylko jako dane: km po trasie do MOP-u i znajomych, limit prędkości do koloru. Nawigacja to osobny ekran (NavView). */
   navRoute?: NavRoute | null;
+  /** Token konta Premium — znak ograniczenia bez trasy (ślad GPS dopasowany na serwerze); undefined = tylko z trasy. */
+  limitToken?: string;
   /** Ogranicznik pojazdu (km/h) — do koloru prędkości, gdy niższy niż znak. */
   vehicleMaxKmh?: number;
   /** Pojazd > 3,5 t — limity ciężarówki (wyższy znak go nie dotyczy). */
@@ -124,15 +126,18 @@ export function HudView(p: Props) {
   const floatBtn = show.floating && p.floating.supported;
 
   // Kolor prędkości: limit z trasy (i ogranicznik pojazdu, gdy niższy) — zielony / żółty / czerwony.
-  const routeLimit = myRoute && p.navRoute ? legalLimitAt(p.navRoute, myRoute.km, p.truck)?.kmh : undefined;
+  // Znak: z trasy, a bez niej (albo poza nią) — z drogi, którą jedziemy.
+  const here = useLimitHere(p.limitToken, fresh, !myRoute);
+  const signLimit = myRoute && p.navRoute ? legalLimitAt(p.navRoute, myRoute.km, p.truck)?.kmh : here ? legalLimitAt(here, Math.max(0, here.km - 0.005), p.truck)?.kmh : undefined;
   const vehicleMax = p.vehicleMaxKmh;
-  const legal = routeLimit !== undefined && vehicleMax !== undefined ? Math.min(routeLimit, vehicleMax) : routeLimit ?? vehicleMax;
+  const legal = signLimit !== undefined && vehicleMax !== undefined ? Math.min(signLimit, vehicleMax) : signLimit ?? vehicleMax;
   const tone = speedTone(speed, legal);
   const speedEl = (
     <div className="hud-speed" aria-label="Prędkość">
       <div className={`hud-speed-num ${speed === null ? "none" : ""}`}>
         <strong className={speed === null ? "none" : tone ?? ""}>{speed ?? "—"}</strong>
         <span>km/h</span>
+        {signLimit !== undefined && <span className="hud-limit hud-speed-limit" aria-label={`Ograniczenie ${signLimit} km/h`}>{signLimit}</span>}
       </div>
       {(road || place) && (
         <div className="hud-where">

@@ -192,11 +192,14 @@ export function NavView(p: NavViewProps) {
           <button onClick={() => (browse ? zoomBrowse(-1) : setZoomOffset((z) => Math.max(-5, z - 0.5)))} aria-label="Oddal">−</button>
         </div>
       </div>
-      {limit !== undefined && <span className="hud-limit nm-limit" aria-label={`Ograniczenie ${limit} km/h`}>{limit}</span>}
 
+      {/* Nasza prędkość i obok ograniczenie — jedno spojrzenie, jak w nawigacjach. */}
       <div className="nm-speed">
-        <strong className={speed === null ? "none" : tone ?? ""}>{speed ?? "—"}</strong>
-        <span>km/h</span>
+        <div className="nm-speed-val">
+          <strong className={speed === null ? "none" : tone ?? ""}>{speed ?? "—"}</strong>
+          <span>km/h</span>
+        </div>
+        {limit !== undefined && <span className="hud-limit nm-limit" aria-label={`Ograniczenie ${limit} km/h`}>{limit}</span>}
       </div>
       {notice && <div className="nm-notice">{notice}</div>}
 

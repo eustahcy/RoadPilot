@@ -105,8 +105,9 @@ export function useSync(auth: Auth | null, state: AppState, setState: Dispatch<S
         const incoming = normalize(r.state);
         sent.current = JSON.stringify(syncable(incoming));
         setMeta({ rev: r.rev, dirty: false });
-        // Pozycja GPS, HUD, godzina planowania i trasa nawigacji zostają z tego urządzenia.
-        setState((s) => ({ ...incoming, track: s.track, hud: s.hud, planTime: s.planTime, navRoute: s.navRoute }));
+        // Pozycja GPS, HUD, otwarta nawigacja, godzina planowania i trasa zostają z tego urządzenia
+        // (bez navOpen każde pobranie z konta wyrzucało z nawigacji na ekran główny).
+        setState((s) => ({ ...incoming, track: s.track, hud: s.hud, navOpen: s.navOpen, planTime: s.planTime, navRoute: s.navRoute }));
         setStatus({ kind: "ok", at: Date.now() });
       } else {
         needPush = !r.state || meta.current.dirty;

@@ -210,7 +210,7 @@ export function NavView(p: NavViewProps) {
         </button>
         <div className="nm-tile extra">
           <Icon name="road" />
-          <span><small>Trasa</small><b>{refs || (route ? "Drogi lokalne" : "—")}</b><i>{route ? `${fmtKm(route.lengthKm)}${route.engine === "roadpilot" ? " · RoadPilot" : ""}` : ""}</i></span>
+          <span><small>Trasa</small><b>{refs || (route ? "Drogi lokalne" : "Brak trasy")}</b><i>{route ? `${fmtKm(route.lengthKm)}${route.engine === "roadpilot" ? " · RoadPilot" : ""}` : ""}</i></span>
         </div>
       </div>
 

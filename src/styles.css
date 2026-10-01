@@ -987,7 +987,12 @@ input[type="number"]::-webkit-inner-spin-button, input[type="number"]::-webkit-o
   grid-template-columns: auto 1fr auto; grid-template-rows: auto 1fr auto auto auto;
   grid-template-areas: "top top top" ". . side" "speed . ctl" "ahead . ctl" "tiles tiles tiles"; }
 .nm-top, .nm-tiles, .nm-side, .nm-ctl, .nm-speed, .nm-ahead { position: relative; z-index: 2; min-width: 0; }
-.nm-top { grid-area: top; }
+.nm-top { grid-area: top; display: flex; }
+.nm-top > .hud-nav.card { flex: 1; min-width: 0; }
+/* Bez trasy / czekanie na GPS: duży napis i przycisk — czytelne z odległości, karta na całą wysokość pasa. */
+.nm-top .hud-nav.card.off, .nm-top .hud-nav.card.waiting { flex-direction: column; align-items: flex-start; justify-content: center; gap: calc(2 * var(--u)); min-height: calc(18 * var(--u)); }
+.nm-top .hud-nav.card .hud-nav-msg { font-size: calc(4.2 * var(--u)); font-weight: 850; line-height: 1.2; }
+.nm-top .hud-nav.card .hud-nav-btn { padding: calc(1.6 * var(--u)) calc(3.4 * var(--u)); border-radius: calc(2 * var(--u)); background: var(--amber); border-color: var(--amber); color: #1a1406; font-size: calc(3.2 * var(--u)); }
 .nm-tiles { grid-area: tiles; }
 .nm-side { grid-area: side; align-self: end; display: grid; gap: calc(1.2 * var(--u)); justify-items: center; }
 .nm-ctl { grid-area: ctl; align-self: end; display: grid; gap: calc(1.2 * var(--u)); justify-items: center; }
@@ -1018,7 +1023,7 @@ input[type="number"]::-webkit-inner-spin-button, input[type="number"]::-webkit-o
 .nm-btn em { position: absolute; top: -4px; right: -4px; min-width: 20px; height: 20px; padding: 0 5px; border-radius: 99px; background: var(--amber); color: #111; font-size: 12px; font-style: normal; font-weight: 900; line-height: 20px; }
 .nm-more .more-chevron { display: none; transform: rotate(90deg); }
 .nm-zoom { display: grid; width: calc(10 * var(--u)); border-radius: calc(5 * var(--u)); overflow: hidden; }
-.nm-zoom button { height: calc(10 * var(--u)); border: 0; background: none; color: #eef3f6; font-size: calc(5 * var(--u)); font-weight: 700; line-height: 1; }
+.nm-zoom button { display: grid; place-items: center; width: 100%; min-width: 0; height: calc(10 * var(--u)); padding: 0; border: 0; background: none; color: #eef3f6; font-size: calc(5 * var(--u)); font-weight: 700; line-height: 1; }
 .nm-zoom button + button { border-top: 1px solid rgba(140, 175, 195, .25); }
 .nm-recenter:not(.on) { display: none; }
 /* Tylko tablet: kafelek kolejnego manewru w karcie i pasek postępu trasy na dole. */

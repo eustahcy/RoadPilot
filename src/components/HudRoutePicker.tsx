@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import { ApiError } from "../api";
 import { currentPosition, fetchRoutes, NavPlace, NavRoute, RouteType, searchPlaces, Vehicle } from "../nav";
 import { RouteCompare } from "./RouteCompare";
-import { PlaceActions, PlaceShortcuts } from "./SavedPlaces";
+import { PlaceActions, PlacesTab, PlaceShortcuts } from "./SavedPlaces";
 import { SavedPlaces } from "../core/places";
 
 /** Dane do wyznaczania trasy prosto z HUD (Premium). */
@@ -27,9 +27,12 @@ const LETTERS = ["A", "B", "C"];
  * Wyszukiwarka celu i porównanie do 3 tras w HUD: po wyborze celu od razu liczymy trasy (główna + alternatywy),
  * podgląd na mapie i zestawienie; „Jedź” ustawia wybraną trasę. Do tego czasu bieżąca nawigacja zostaje bez zmian.
  */
-export function HudRoutePicker({ planner, dest: current, onClose }: { planner: HudPlanner; dest: NavPlace | null; onClose: () => void }) {
-  const [dest, setDest] = useState<NavPlace | null>(current);
-  const [editing, setEditing] = useState(!current);
+/** Skąd zaczynamy (menu Nawigacji): `go` = od razu trasy do tego miejsca (Jedź do domu), `tab` = wyszukiwarka z otwartą zakładką. */
+export interface PickerStart { go?: NavPlace; tab?: PlacesTab }
+
+export function HudRoutePicker({ planner, dest: current, onClose, start }: { planner: HudPlanner; dest: NavPlace | null; onClose: () => void; start?: PickerStart }) {
+  const [dest, setDest] = useState<NavPlace | null>(start?.go ?? current);
+  const [editing, setEditing] = useState(start?.go ? false : !current || !!start?.tab);
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<NavPlace[]>([]);
   const [searching, setSearching] = useState(false);
@@ -77,6 +80,12 @@ export function HudRoutePicker({ planner, dest: current, onClose }: { planner: H
     }
   };
 
+  // „Jedź do domu”: trasy liczymy od razu po otwarciu.
+  useEffect(() => {
+    if (start?.go) compute(start.go);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const pick = (d: NavPlace) => {
     setDest(d);
     setEditing(false);
@@ -123,7 +132,7 @@ export function HudRoutePicker({ planner, dest: current, onClose }: { planner: H
               ))}
             </ul>
           )}
-          {query.trim().length < 3 && <PlaceShortcuts places={planner.places} onPlaces={planner.onPlaces} onPick={pick} />}
+          {query.trim().length < 3 && <PlaceShortcuts places={planner.places} onPlaces={planner.onPlaces} onPick={pick} initialTab={start?.tab} />}
           {dest && <button className="text-btn" onClick={() => { setEditing(false); setQuery(""); }}>Anuluj</button>}
         </div>
       )}

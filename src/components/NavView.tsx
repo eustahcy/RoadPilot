@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { ReactNode, useEffect, useState } from "react";
 import { DeadlinePlan } from "../core/deadline";
 import { Friend } from "../core/friends";
 import { Live } from "../core/gps";
@@ -17,7 +17,8 @@ import { GlVector } from "./GlMap";
 import { fmtDist, HudNav, HudNavData, HudRouteMap, ManeuverIcon, MapBrowse, NavTrack, PinInfo, POI_TITLE, poiVisible, useNavTrack } from "./HudNav";
 import { RULES } from "../core/rules";
 import { LatLon, MAX_VIEW_ZOOM, MIN_VIEW_ZOOM } from "./MapView";
-import { HudPlanner, HudRoutePicker } from "./HudRoutePicker";
+import { HudPlanner, HudRoutePicker, PickerStart } from "./HudRoutePicker";
+import { MenuItem, NavMenu } from "./NavMenu";
 import { arrivalInfo, fullscreenSupported, Icon, isStop, RouteLine, routeRefs, STALE_MS, toggleFullscreen, useFullscreen, useTick } from "./HudView";
 import { ReportKind, SnappedRoad } from "../collect";
 import { ReportSheet } from "./ReportSheet";
@@ -100,8 +101,11 @@ export function NavView(p: NavViewProps) {
   const [reportAt, setReportAt] = useState<SnappedRoad | null>(null);
   const [warnList, setWarnList] = useState(false);
   const [aheadList, setAheadList] = useState(false);
-  const [planning, setPlanning] = useState(false);
+  /** Wyszukiwarka celu: null = zamknięta; start = od czego zaczynamy (zakładka, od razu dom). */
+  const [planning, setPlanning] = useState<PickerStart | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [sideOpen, setSideOpen] = useState(() => readSideOpen());
+  const setSide = (open: boolean) => { setSideOpen(open); try { localStorage.setItem(SIDE_KEY, open ? "1" : "0"); } catch { /* bez pamięci — tylko na tę sesję */ } };
   const [zoomOffset, setZoomOffset] = useState(0);
   /** Mapa przesunięta palcem — null = prowadzenie (mapa jedzie za nami). */
   const [browse, setBrowse] = useState<MapBrowse | null>(null);
@@ -126,7 +130,7 @@ export function NavView(p: NavViewProps) {
     const id = setTimeout(() => setBrowse(null), 20_000);
     return () => clearTimeout(id);
   }, [browse, moving]);
-  const nav = p.nav && p.planner ? { ...p.nav, onPlan: () => { setPlanning(true); setMenu(false); } } : p.nav;
+  const nav = p.nav && p.planner ? { ...p.nav, onPlan: () => { setPlanning({}); setMenu(false); } } : p.nav;
   const route = p.nav?.route ?? null;
   const pos = track.pos;
   const next = route && pos && !track.off ? nextInstruction(route.instructions, pos.km) : undefined;
@@ -142,7 +146,16 @@ export function NavView(p: NavViewProps) {
     ? route.pois?.filter((x) => x.km > pos.km && x.km <= pos.km + p.ahead.km && poiVisible(route, x)).map((x) => ({ poi: x, km: x.km - pos.km, side: x.side, onRoute: true })) ?? []
     : nearby && fresh ? placesAhead(nearby, fresh, fresh.heading, p.ahead.km).map(({ item, km }) => ({ poi: item, km, onRoute: false })) : null;
   // Pod prędkością: najbliższy z każdego włączonego rodzaju (najwyżej 3).
-  const strip = stripOn && aheadItems ? AHEAD_STRIP.filter((k) => p.ahead.strip[k.id]).flatMap((k) => { const x = aheadItems.find((i) => k.kinds.includes(i.poi.kind)); return x ? [{ k, x }] : []; }).sort((a, b) => a.x.km - b.x.km) : [];
+  const placeRows: StripRow[] = stripOn && aheadItems ? AHEAD_STRIP.filter((k) => p.ahead.strip[k.id]).flatMap((k) => {
+    const x = aheadItems.find((i) => k.kinds.includes(i.poi.kind));
+    return x ? [{ key: k.id, icon: <AheadIcon kind={k.id === "fuel" ? "fuel" : x.poi.kind} />, label: k.id === "fuel" ? stationLabel(x.poi.name) : k.short, km: x.km }] : [];
+  }) : [];
+  // Fotoradar i początek odcinkowego pomiaru — z ostrzeżeń trasy, w czerwonej ramce (przejazd przez odcinek pokazuje karta / oś).
+  const alertRows: StripRow[] = p.mapToken && p.ahead.strip.camera !== false && onRoute ? ALERT_STRIP.flatMap((a) => {
+    const w = route.warnings?.filter((x) => x.kind === a.kind && !x.soft && x.km > pos.km && x.km - pos.km <= p.ahead.km).sort((x, y) => x.km - y.km)[0];
+    return w ? [{ key: a.kind, icon: <AlertIcon kind={a.kind} />, label: a.label, km: w.km - pos.km, alert: true }] : [];
+  }) : [];
+  const strip = [...placeRows, ...alertRows].sort((a, b) => a.km - b.km);
   const limit = routeLimit?.kmh ?? (here ? legalLimitAt(here, Math.max(0, here.km - 0.005), p.truck)?.kmh : undefined);
   const legal = limit !== undefined && p.vehicleMaxKmh !== undefined ? Math.min(limit, p.vehicleMaxKmh) : limit ?? p.vehicleMaxKmh;
   const tone = speedTone(speed, legal);
@@ -168,6 +181,28 @@ export function NavView(p: NavViewProps) {
     setHold(null);
     setBrowse(null);
   };
+  const go = (f: () => void) => () => { setMenu(false); f(); };
+  const home = p.planner?.places.home;
+  const menuItems: MenuItem[] = [
+    ...(p.planner ? [
+      { id: "search", icon: "search" as const, label: "Szukaj", onClick: go(() => setPlanning({ tab: undefined })) },
+      { id: "home", icon: "home" as const, label: "Jedź do domu", onClick: go(() => setPlanning(home ? { go: home } : { tab: "home" })) },
+      { id: "recent", icon: "recent" as const, label: "Ostatnie cele", onClick: go(() => setPlanning({ tab: "recent" })) },
+    ] : []),
+    ...(route ? [{ id: "route", icon: "route" as const, label: "Aktualna trasa", onClick: go(() => setManeuvers(true)) }] : []),
+    ...(p.planner ? [{ id: "places", icon: "places" as const, label: "Moje miejsca", onClick: go(() => setPlanning({ tab: "fav" })) }] : []),
+    { id: "break", icon: "break", label: sc.stop ? (sc.stop.dayEnd ? "Odpoczynek" : "Trwający postój") : "Przerwa", dot: !!sc.stop, onClick: go(() => setSheet(true)) },
+    sc.stop?.dayEnd
+      ? { id: "day", icon: "dayStart", label: "Rozpocznij dzień", onClick: go(() => { if (confirmStartDay(sc.stop, now)) sc.onStartDay(); }) }
+      : { id: "day", icon: "dayEnd", label: "Zakończ dzień", onClick: go(() => { endDay(); }) },
+    ...(p.report ? [{ id: "report", icon: "report" as const, label: "Zgłoś", onClick: go(() => { setReportAt(null); setReporting(true); }) }] : []),
+    ...(p.gapReview && p.onGapAnswer ? [{ id: "gap", icon: "gap" as const, label: "Co robiłem bez aplikacji", dot: !p.gapReview.answer, onClick: go(() => setGapOpen(true)) }] : []),
+    ...(p.settings ? [{ id: "settings", icon: "settings" as const, label: "Ustawienia", onClick: go(() => setSettingsOpen(true)) }] : []),
+    ...(fullscreenSupported() ? [{ id: "fs", icon: "fullscreen" as const, label: fullscreen ? "Zamknij pełny ekran" : "Pełny ekran", onClick: go(toggleFullscreen) }] : []),
+    ...(p.nav?.onEnd && (p.nav.route || p.nav.dest) ? [{ id: "end", icon: "endNav" as const, label: "Zakończ nawigację", tone: "danger" as const, onClick: go(endNav) }] : []),
+    { id: "exit", icon: "exit", label: "Wyjdź z nawigacji", onClick: p.onExit },
+  ];
+
   const stopItem = sc.stop
     ? { label: sc.stop.dayEnd ? "Odpoczynek" : "Postój", value: fmtTimer(Math.max(0, (now - sc.stop.start) / 60_000)), sub: sc.stop.targetMin !== null ? `z ${fmtDuration(sc.stop.targetMin)}` : "do ruszenia", tone: "active" }
     : (() => {
@@ -225,14 +260,16 @@ export function NavView(p: NavViewProps) {
         </div>
       </div>
 
-      <div className="nm-side">
+      {/* Panel przycisków po lewej — zwijany do lewej krawędzi (stan zapamiętany w tym urządzeniu); „⋯” zostaje zawsze. */}
+      <div className={`nm-side ${sideOpen ? "" : "folded"}`}>
+        <div className="nm-side-btns">
         {p.voice.supported && (
           <button className={`nm-btn ${p.voice.on ? "" : "off"}`} onClick={p.voice.toggle} aria-label={p.voice.on ? "Wycisz komunikaty" : "Włącz komunikaty głosowe"} aria-pressed={p.voice.on}>
             <Icon name={p.voice.on ? "sound" : "mute"} />
           </button>
         )}
         {p.planner && (
-          <button className="nm-btn" onClick={() => setPlanning(true)} aria-label="Cel i trasy alternatywne">
+          <button className="nm-btn" onClick={() => setPlanning({})} aria-label="Cel i trasy alternatywne">
             <Icon name="search" />
           </button>
         )}
@@ -248,9 +285,13 @@ export function NavView(p: NavViewProps) {
             <Icon name="flag" />
           </button>
         )}
-        <button className="nm-btn nm-more" onClick={() => setMenu(true)} aria-label="Więcej: zgłoszenie, postój, zakończ nawigację">
+        </div>
+        <button className="nm-btn nm-more" onClick={() => setMenu(true)} aria-label="Menu: cel, dom, przerwa, ustawienia">
           <Icon name="dots" className="more-dots" />
           <Icon name="chevron" className="more-chevron" />
+        </button>
+        <button className="nm-fold" onClick={() => setSide(!sideOpen)} aria-expanded={sideOpen} aria-label={sideOpen ? "Zwiń przyciski" : "Rozwiń przyciski"}>
+          <Icon name="chevron" />
         </button>
       </div>
 
@@ -279,11 +320,11 @@ export function NavView(p: NavViewProps) {
 
       {strip.length > 0 && (
         <button className="nm-ahead" onClick={() => setAheadList(true)} aria-label="Po drodze — pokaż listę">
-          {strip.map(({ k, x }) => (
-            <span key={k.id}>
-              <AheadIcon kind={k.id === "fuel" ? "fuel" : x.poi.kind} />
-              <b>{k.id === "fuel" ? stationLabel(x.poi.name) : k.short}</b>
-              <strong>{fmtAheadKm(x.km)}</strong>
+          {strip.map((r) => (
+            <span key={r.key} className={r.alert ? "alert" : ""}>
+              {r.icon}
+              <b>{r.label}</b>
+              <strong>{fmtAheadKm(r.km)}</strong>
               <Icon name="chevron" className="nm-ahead-go" />
             </span>
           ))}
@@ -323,29 +364,7 @@ export function NavView(p: NavViewProps) {
         )}
       </footer>
 
-      {menu && (
-        <div className="hud-sheet" onClick={(e) => e.target === e.currentTarget && setMenu(false)}>
-          <div className="hud-sheet-body">
-            <button className="hud-sheet-close" aria-label="Zamknij" onClick={() => setMenu(false)}>×</button>
-            <div className="stop-label">{refs ? `${refs} · ` : ""}{route ? fmtKm(route.lengthKm) : "Bez trasy"}{p.nav?.dest ? ` → ${p.nav.dest.label}` : ""}</div>
-            <div className="nm-tiles-menu">
-              <MenuTile icon="coffee" tone={sc.stop ? "green on" : "green"} label={sc.stop ? (sc.stop.dayEnd ? "Odpoczynek" : "Trwający postój") : "Przerwa"} onClick={openSheet} />
-              {sc.stop?.dayEnd ? (
-                <MenuTile icon="sun" tone="blue" label="Rozpocznij dzień" onClick={() => { if (confirmStartDay(sc.stop, now)) sc.onStartDay(); setMenu(false); }} />
-              ) : (
-                <MenuTile icon="moon" tone="blue" label="Zakończ dzień" onClick={() => { if (endDay()) setMenu(false); }} />
-              )}
-              {p.planner && <MenuTile icon="search" tone="teal" label="Cel i trasy" onClick={() => { setPlanning(true); setMenu(false); }} />}
-              {p.report && <MenuTile icon="flag" tone="orange" label="Zgłoś" onClick={() => { setReportAt(null); setReporting(true); setMenu(false); }} />}
-              {p.settings && <MenuTile icon="gear" tone="slate" label="Ustawienia" onClick={() => { setSettingsOpen(true); setMenu(false); }} />}
-              {p.gapReview && p.onGapAnswer && <MenuTile icon="clock" tone={p.gapReview.answer ? "amber" : "amber on"} label="Co robiłem bez aplikacji" onClick={() => { setGapOpen(true); setMenu(false); }} />}
-              {fullscreenSupported() && <MenuTile icon="expand" tone="slate" label={fullscreen ? "Zamknij pełny ekran" : "Pełny ekran"} onClick={() => { toggleFullscreen(); setMenu(false); }} />}
-              <MenuTile icon="exit" tone="slate" label="Wyjdź z nawigacji" onClick={p.onExit} />
-            </div>
-            {p.nav?.onEnd && (p.nav.route || p.nav.dest) && <button className="nm-menu-end" onClick={() => { setMenu(false); endNav(); }}><Icon name="close" />Zakończ nawigację</button>}
-          </div>
-        </div>
-      )}
+      {menu && <NavMenu items={menuItems} title={p.nav?.dest ? `${refs ? `${refs} · ` : ""}${route ? fmtKm(route.lengthKm) : ""} → ${p.nav.dest.label}` : undefined} voice={p.voice} onClose={() => setMenu(false)} />}
       {gapOpen && p.gapReview && p.onGapAnswer && (
         <div className="hud-sheet" onClick={(e) => e.target === e.currentTarget && setGapOpen(false)}>
           <div className="hud-sheet-body">
@@ -442,24 +461,14 @@ export function NavView(p: NavViewProps) {
         </div>
       )}
       {planning && p.planner && (
-        <div className="hud-sheet" onClick={(e) => e.target === e.currentTarget && setPlanning(false)}>
+        <div className="hud-sheet" onClick={(e) => e.target === e.currentTarget && setPlanning(null)}>
           <div className="hud-sheet-body wide">
-            <button className="hud-sheet-close" aria-label="Zamknij" onClick={() => setPlanning(false)}>×</button>
-            <HudRoutePicker planner={p.planner} dest={p.nav?.dest ?? null} onClose={() => setPlanning(false)} />
+            <button className="hud-sheet-close" aria-label="Zamknij" onClick={() => setPlanning(null)}>×</button>
+            <HudRoutePicker planner={p.planner} dest={p.nav?.dest ?? null} onClose={() => setPlanning(null)} start={planning} />
           </div>
         </div>
       )}
     </div>
-  );
-}
-
-/** Kafelek menu ⋯ (styl kafelków Windows): duża ikona na kolorowym polu i podpis. */
-function MenuTile({ icon, label, tone, onClick }: { icon: Parameters<typeof Icon>[0]["name"]; label: string; tone: string; onClick: () => void }) {
-  return (
-    <button className={`nm-mtile ${tone}`} onClick={onClick}>
-      <Icon name={icon} />
-      <span>{label}</span>
-    </button>
   );
 }
 
@@ -489,6 +498,30 @@ const AHEAD_FILTERS: { id: AheadFilter; label: string; kinds: RoutePoi["kind"][]
   { id: "fuel", label: "Stacje", kinds: ["fuel", "services"] },
 ];
 /** Pasek pod prędkością: rodzaje w kolejności wyświetlania (MOP ze stacją liczy się jako MOP i jako stacja). */
+/** Zwinięty panel przycisków — wygoda jednego urządzenia (localStorage), nie stan synchronizowany. */
+const SIDE_KEY = "roadpilot:navSide";
+function readSideOpen() {
+  try { return localStorage.getItem(SIDE_KEY) !== "0"; } catch { return true; }
+}
+
+interface StripRow { key: string; icon: ReactNode; label: string; km: number; alert?: boolean }
+
+const ALERT_STRIP: { kind: "camera" | "section"; label: string }[] = [
+  { kind: "camera", label: "Fotoradar" },
+  { kind: "section", label: "Odcinkowy" },
+];
+
+/** Fotoradar / odcinkowy pomiar: biała tarcza w czerwonej obwódce (jak znak). */
+function AlertIcon({ kind }: { kind: "camera" | "section" }) {
+  return (
+    <i className={`nm-ahead-ico k-${kind}`} aria-hidden>
+      {kind === "camera"
+        ? <svg viewBox="-12 -12 24 24"><path d="M-8 -4h10v8H-8zM2 -1l6-3v8l-6-3" fill="#1b1f24" /><circle cx="-3" cy="0" r="2.2" fill="#fff" /></svg>
+        : <svg viewBox="-12 -12 24 24"><path d="M-8 4a8 8 0 0 1 16 0" fill="none" stroke="#1b1f24" strokeWidth="2.6" strokeLinecap="round" /><path d="M0 4 4.5-3" stroke="#e5484d" strokeWidth="2.4" strokeLinecap="round" /><circle cx="0" cy="4" r="2" fill="#1b1f24" /></svg>}
+    </i>
+  );
+}
+
 /** Stacja na pasku „po drodze”: marka (Orlen, Shell, BP…) — z OSM brand/name; ogólne nazwy i zgłoszenia kierowców → „Stacja”. */
 const GENERIC_STATION = /^(stacja( paliw| lpg)?|independent|zgłoszenie kierowcy|mop\b|miejsce obsługi)/i;
 const stationLabel = (name: string | undefined) => {

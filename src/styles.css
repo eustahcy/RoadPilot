@@ -498,11 +498,16 @@ input[type="number"]::-webkit-inner-spin-button, input[type="number"]::-webkit-o
 .hud-sheet-body.wide { width: min(720px, 100%); }
 .hud-planner { display: grid; gap: 10px; }
 .hud-planner .nav-search input { box-sizing: border-box; width: 100%; min-height: 48px; padding: 10px 14px; border-radius: 12px; border: 1px solid var(--line-2); background: var(--field); color: inherit; font: inherit; font-size: 17px; }
-.hud-planner .route-compare-map { height: clamp(160px, 34vh, 280px); }
+.hud-planner .route-compare-map { height: clamp(220px, 44vh, 420px); }
 .hud-planner .row-buttons { position: sticky; bottom: -18px; margin: 0 -4px -18px; padding: 10px 4px 14px; background: #0d1820; }
 @media (orientation: landscape) and (max-height: 600px) {
-  .hud-planner .route-compare { grid-template-columns: 1fr 1fr; align-items: start; }
-  .hud-planner .route-compare-map { height: 100%; min-height: 180px; }
+  /* Poziomo: mapa porównania na całą wysokość po lewej, cel, trasy i „Jedź” po prawej (.route-compare rozpuszczone w siatce). */
+  .hud-sheet-body.wide { width: 100%; }
+  .hud-planner:has(.route-compare) { grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr); column-gap: 14px; align-content: start; }
+  .hud-planner:has(.route-compare) > * { grid-column: 2; }
+  .hud-planner .route-compare { display: contents; }
+  .hud-planner .route-compare-map { grid-column: 1; grid-row: 1 / span 12; align-self: stretch; height: auto; min-height: calc(100dvh - 64px); }
+  .hud-planner:has(.route-compare) .place-actions { display: none; }
   .hud-planner .row-buttons { bottom: -12px; margin-bottom: -12px; }
 }
 .hud-sheet-close { position: absolute; top: 8px; right: 8px; width: 40px; height: 40px; border: 0; border-radius: 12px; background: rgba(120, 160, 180, .12); color: #cfd9e0; font-size: 24px; line-height: 1; }
@@ -879,18 +884,29 @@ svg .rb-exit { fill: currentColor; stroke: none; font: 900 7.5px system-ui, sans
 .rc-jam.jam { stroke: #e8322c; }
 .rc-jam.closed { stroke: #8a1010; stroke-dasharray: 4 4; }
 .rc-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
-.rc-item { display: flex; align-items: center; gap: 10px; width: 100%; padding: 10px; border-radius: 14px; border: 1px solid var(--line-2); background: var(--field); color: inherit; text-align: left; font: inherit; }
-.rc-item.on { border-color: var(--green); background: rgba(66, 211, 146, .08); }
-.rc-item > i { flex: none; display: grid; place-items: center; width: 28px; height: 28px; border-radius: 50%; color: #06120c; font-style: normal; font-weight: 900; }
-.rc-main { display: grid; gap: 2px; min-width: 0; flex: 1; }
-.rc-main b { font-size: 18px; }
-.rc-main b em { font-style: normal; font-size: 14px; color: var(--amber); }
+.rc-item { --rc: var(--green); position: relative; display: flex; align-items: center; gap: 12px; width: 100%; padding: 12px 14px 12px 18px; border-radius: 14px; border: 1px solid var(--line-2); background: var(--field); color: inherit; text-align: left; font: inherit; overflow: hidden; }
+.rc-item::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 6px; background: var(--rc); opacity: .55; }
+.rc-item.on { border-color: var(--rc); background: color-mix(in srgb, var(--rc) 12%, var(--field)); box-shadow: inset 0 0 0 1px var(--rc); }
+.rc-item.on::before { opacity: 1; }
+.rc-item > i { flex: none; display: grid; place-items: center; width: 34px; height: 34px; border-radius: 50%; background: var(--rc); color: #06120c; font-style: normal; font-size: 17px; font-weight: 900; }
+.rc-main { display: grid; gap: 3px; min-width: 0; flex: 1; }
+.rc-main b { font-size: 21px; font-weight: 850; }
+.rc-main b em { font-style: normal; font-size: 15px; color: var(--amber); }
 .rc-main b em.best { color: var(--green); }
-.rc-main small { color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.rc-tags { display: flex; flex-wrap: wrap; gap: 4px 10px; font-size: 12.5px; color: var(--dim); }
+.rc-main small { color: #c9d5de; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rc-tags { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 13px; color: var(--dim); }
 .rc-tags .t-bad { color: var(--amber); }
 .rc-tags .t-ok { color: var(--green); }
-.rc-pick { flex: none; font-weight: 800; color: var(--green); font-size: 14px; }
+.rc-pick { flex: none; display: grid; place-items: center; width: 28px; height: 28px; border-radius: 50%; border: 2px solid var(--line-2); color: #06120c; font-weight: 900; font-size: 15px; }
+.rc-item.on .rc-pick { background: var(--rc); border-color: var(--rc); }
+/* Dymki tras na mapie porównania. */
+.rc-callout text { fill: #06120c; font: 800 14px system-ui, sans-serif; text-anchor: middle; }
+.rc-callout rect, .rc-callout path { stroke: #04080c; stroke-width: 2; opacity: .8; }
+.rc-callout.on rect, .rc-callout.on path { opacity: 1; stroke: #fff; }
+.rc-start { fill: #fff; stroke: #04080c; stroke-width: 3; }
+.rc-end circle { fill: #04080c; stroke: #fff; stroke-width: 2.5; }
+.rc-end path { fill: #fff; stroke: #fff; stroke-width: 1.6; stroke-linejoin: round; }
+.gl-map.quiet .vl-place { opacity: .6; font-size: 13px; }
 .nav-warnings { display: grid; gap: 4px; margin-top: 6px; }
 .nav-warnings ul { margin: 0; padding-left: 18px; font-size: 13px; color: var(--text); display: grid; gap: 2px; }
 .ok-text { color: var(--green); font-size: 13px; font-weight: 650; }
@@ -985,6 +1001,8 @@ svg .rb-exit { fill: currentColor; stroke: none; font: 900 7.5px system-ui, sans
 .nm-ahead-ico.k-fuel { background: #e07a1f; }
 .nm-ahead-ico svg { width: 20px; height: 20px; }
 .nm-ahead-ico.k-services { box-shadow: inset 0 0 0 3px #e07a1f; }
+/* Fotoradar / odcinkowy: biała tarcza w czerwonej obwódce, wiersz paska w czerwonej ramce. */
+.nm-ahead-ico.k-camera, .nm-ahead-ico.k-section { background: #fff; box-shadow: inset 0 0 0 3px #e5484d; }
 .nm-ahead-name { flex: 1; min-width: 0; display: grid; gap: 2px; }
 .nm-ahead-name b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 15px; }
 .nm-ahead-name small { color: #9fb0bc; font-size: 12px; }
@@ -994,26 +1012,53 @@ svg .rb-exit { fill: currentColor; stroke: none; font: 900 7.5px system-ui, sans
 .nm-warn-list li { display: grid; padding: 10px 12px; border-radius: 12px; background: rgba(232, 180, 76, .1); border: 1px solid rgba(232, 180, 76, .35); }
 .nm-warn-list b { color: var(--amber); }
 .nm-warn-list span { color: #cfdae2; font-size: 13px; }
-/* Menu ⋯ — kafelki jak w Windows: kolorowe pola z dużą ikoną i podpisem, łatwe do trafienia w jeździe. */
-.nm-tiles-menu { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-top: 22px; }
-.nm-mtile { --t: #3b4f61; position: relative; display: flex; flex-direction: column; justify-content: space-between; gap: 10px; min-height: 96px; padding: 12px; border: 0; border-radius: 12px;
-  background: linear-gradient(160deg, color-mix(in srgb, var(--t) 92%, #fff 8%), var(--t)); color: #fff; font: inherit; font-size: 14px; font-weight: 750; line-height: 1.2; text-align: left;
-  box-shadow: 0 6px 16px rgba(0, 0, 0, .3), inset 0 1px 0 rgba(255, 255, 255, .12); transition: transform .12s ease, filter .12s ease; }
-.nm-mtile:active { transform: scale(.96); }
-.nm-mtile:hover, .nm-mtile:focus-visible { filter: brightness(1.12); }
-.nm-mtile .hud-ico { width: 30px; height: 30px; color: #fff; stroke-width: 2; }
-.nm-mtile.green { --t: #1d8a4e; }
-.nm-mtile.blue { --t: #2a5fa8; }
-.nm-mtile.teal { --t: #11808a; }
-.nm-mtile.orange { --t: #c4621d; }
-.nm-mtile.amber { --t: #a8781a; }
-.nm-mtile.slate { --t: #3b4f61; }
-.nm-mtile.on::after { content: ""; position: absolute; top: 10px; right: 10px; width: 10px; height: 10px; border-radius: 50%; background: #fff; box-shadow: 0 0 0 3px rgba(255, 255, 255, .3); }
-.nm-menu-end { display: flex; align-items: center; justify-content: center; gap: 10px; width: 100%; min-height: 52px; margin-top: 10px; border-radius: 12px; background: rgba(120, 24, 30, .85); border: 1px solid rgba(239, 106, 91, .55); color: #ffd7d1; font: inherit; font-size: 15px; font-weight: 800; }
-.nm-menu-end .hud-ico { width: 22px; height: 22px; color: #ff8a7a; }
-@media (orientation: landscape) and (max-height: 599px) {
-  .nm-tiles-menu { grid-template-columns: repeat(4, minmax(0, 1fr)); }
-  .nm-mtile { min-height: 78px; }
+/* Menu ⋯ jak w TomTom GO: pełny ekran nad przyciemnioną mapą, duże ikony białe + akcent (zieleń RoadPilot).
+   Pionowo — lista: ikona po lewej, podpis po prawej; poziomo — rząd przewijany w bok, podpis nad ikoną. */
+.nmm { --acc: var(--hud-green, #44f07c); position: absolute; inset: 0; z-index: 6; display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: auto 1fr auto;
+  padding: calc(14px + env(safe-area-inset-top)) calc(14px + env(safe-area-inset-right)) calc(14px + env(safe-area-inset-bottom)) calc(14px + env(safe-area-inset-left));
+  background: rgba(3, 6, 9, .9); color: #fff; animation: nmm-in .16s ease-out; }
+@keyframes nmm-in { from { opacity: 0; } to { opacity: 1; } }
+.nmm > * { grid-column: 1; }
+.nmm-back { grid-row: 1; justify-self: start; display: grid; place-items: center; width: 64px; height: 64px; padding: 0; border-radius: 50%; background: rgba(10, 16, 22, .6); border: 3px solid rgba(255, 255, 255, .75); }
+.nmm-back svg { width: 30px; height: 30px; fill: #fff; transform: translateX(-2px); }
+.nmm-title { grid-row: 1; justify-self: center; align-self: center; max-width: calc(100% - 160px); overflow: hidden; color: #b7c4ce; font-size: 13px; font-weight: 750; letter-spacing: .04em; text-overflow: ellipsis; text-transform: uppercase; white-space: nowrap; }
+.nmm-items { grid-row: 2; display: flex; flex-direction: column; gap: 4px; min-height: 0; overflow-y: auto; padding: 14px 4px; scrollbar-width: none; overscroll-behavior: contain; }
+.nmm-items::-webkit-scrollbar { display: none; }
+.nmm-item { display: flex; flex-direction: row-reverse; justify-content: flex-end; align-items: center; gap: 22px; flex: none; min-height: 104px; padding: 6px 10px; border: 0; border-radius: 18px; background: none; color: #fff; font: inherit; text-align: left; }
+.nmm-item:active, .nmm-item:focus-visible { background: rgba(255, 255, 255, .08); }
+.nmm-label { font-size: 26px; font-weight: 600; line-height: 1.2; letter-spacing: -.01em; }
+.nmm-ico { position: relative; flex: none; width: 84px; height: 84px; }
+.nmm-ico svg { width: 100%; height: 100%; overflow: visible; }
+.nmm-ico .w { stroke: #fff; }
+.nmm-ico .wf { fill: #fff; }
+.nmm-ico .a { stroke: var(--acc); }
+.nmm-ico .af { fill: var(--acc); }
+.nmm-ico .r { stroke: #ff6b5e; }
+.nmm-ico .bg { fill: #05090d; }
+.nmm-item.danger .nmm-label { color: #ff8a7a; }
+.nmm-dot { position: absolute; top: -2px; right: -2px; width: 16px; height: 16px; border-radius: 50%; background: var(--amber); box-shadow: 0 0 0 3px #05090d; }
+.nmm-voice { grid-row: 3; justify-self: end; display: flex; gap: 4px; padding: 5px; border-radius: 99px; border: 3px solid rgba(255, 255, 255, .7); background: rgba(10, 16, 22, .6); }
+.nmm-voice button { display: grid; place-items: center; width: 66px; height: 54px; padding: 0; border: 0; border-radius: 99px; background: none; }
+.nmm-voice svg { width: 30px; height: 30px; fill: none; stroke: #c7d2da; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; }
+.nmm-voice svg .f { fill: #c7d2da; stroke: none; }
+.nmm-voice button.on { background: #fff; }
+.nmm-voice button.on svg { stroke: #3a4651; }
+.nmm-voice button.on svg .f { fill: #3a4651; }
+@media (orientation: landscape) {
+  .nmm-items { flex-direction: row; align-items: center; gap: 8px; overflow-x: auto; overflow-y: hidden; padding: 0 4px; scroll-snap-type: x proximity; }
+  .nmm-item { flex-direction: column; justify-content: flex-end; gap: 16px; width: 168px; min-height: 0; height: min(250px, 100%); padding: 10px 6px; text-align: center; scroll-snap-align: start; }
+  .nmm-label { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; font-size: 22px; }
+  .nmm-ico { width: 96px; height: 96px; }
+}
+@media (orientation: landscape) and (max-height: 430px) {
+  .nmm-back { width: 52px; height: 52px; }
+  .nmm-item { width: 138px; gap: 10px; }
+  .nmm-label { font-size: 18px; }
+  .nmm-ico { width: 74px; height: 74px; }
+  .nmm-voice button { width: 56px; height: 44px; }
+}
+@media (min-width: 744px) and (min-height: 744px) and (orientation: portrait) {
+  .nmm-items { display: grid; grid-template-columns: 1fr 1fr; align-content: start; gap: 8px 24px; width: min(860px, 100%); justify-self: center; }
 }
 
 /* Ustawienia z menu ⋯ */
@@ -1042,7 +1087,7 @@ svg .rb-exit { fill: currentColor; stroke: none; font: 900 7.5px system-ui, sans
   display: grid; gap: calc(1.2 * var(--u));
   padding: calc(1.6 * var(--u) + env(safe-area-inset-top)) calc(2 * var(--u) + env(safe-area-inset-right)) calc(1.6 * var(--u) + env(safe-area-inset-bottom)) calc(2 * var(--u) + env(safe-area-inset-left));
   grid-template-columns: auto 1fr auto; grid-template-rows: auto 1fr auto auto auto;
-  grid-template-areas: "top top top" ". . side" "speed . ctl" "ahead . ctl" "tiles tiles tiles"; }
+  grid-template-areas: "top top top" "side . ." "speed . ctl" "ahead . ctl" "tiles tiles tiles"; }
 .nm-top, .nm-tiles, .nm-side, .nm-ctl, .nm-speed, .nm-ahead { position: relative; z-index: 2; min-width: 0; }
 .nm-top { grid-area: top; display: flex; }
 .nm-top > .hud-nav.card { flex: 1; min-width: 0; }
@@ -1051,7 +1096,14 @@ svg .rb-exit { fill: currentColor; stroke: none; font: 900 7.5px system-ui, sans
 .nm-top .hud-nav.card .hud-nav-msg { font-size: calc(4.2 * var(--u)); font-weight: 850; line-height: 1.2; }
 .nm-top .hud-nav.card .hud-nav-btn { padding: calc(1.6 * var(--u)) calc(3.4 * var(--u)); border-radius: calc(2 * var(--u)); background: var(--hud-green); border-color: var(--hud-green); color: #06210f; font-size: calc(3.2 * var(--u)); }
 .nm-tiles { grid-area: tiles; }
-.nm-side { grid-area: side; align-self: end; display: grid; gap: calc(1.2 * var(--u)); justify-items: center; }
+.nm-side { grid-area: side; align-self: start; justify-self: start; display: flex; flex-direction: column; align-items: center; gap: calc(1.2 * var(--u)); }
+.nm-side-btns { display: flex; flex-direction: column; align-items: center; gap: calc(1.2 * var(--u)); animation: nm-side-in .18s ease-out; }
+.nm-side.folded .nm-side-btns { display: none; }
+@keyframes nm-side-in { from { opacity: 0; transform: translateX(-30%); } to { opacity: 1; transform: none; } }
+/* Zwijanie do lewej: języczek ze strzałką — „‹” zwija, „›” rozwija. */
+.nm-fold { display: grid; place-items: center; width: calc(7 * var(--u)); height: calc(5.2 * var(--u)); padding: 0; border-radius: 99px; background: rgba(12, 22, 32, .72); border: 1px solid var(--nm-edge); color: #cfdae2; }
+.nm-fold .hud-ico { width: calc(3.4 * var(--u)); height: calc(3.4 * var(--u)); transform: rotate(180deg); transition: transform .18s ease; }
+.nm-side.folded .nm-fold .hud-ico { transform: none; }
 .nm-ctl { grid-area: ctl; align-self: end; display: grid; gap: calc(1.2 * var(--u)); justify-items: center; }
 .nm-speed { grid-area: speed; justify-self: start; align-self: end; }
 .nm-ahead { grid-area: ahead; justify-self: start; align-self: end; }
@@ -1101,7 +1153,7 @@ svg .rb-exit { fill: currentColor; stroke: none; font: 900 7.5px system-ui, sans
 .nm-zoom { display: grid; width: calc(10 * var(--u)); border-radius: calc(5 * var(--u)); overflow: hidden; }
 .nm-zoom button { display: grid; place-items: center; width: 100%; min-width: 0; height: calc(10 * var(--u)); padding: 0; border: 0; background: none; color: #eef3f6; font-size: calc(5 * var(--u)); font-weight: 700; line-height: 1; }
 .nm-zoom button + button { border-top: 1px solid rgba(140, 175, 195, .25); }
-.nm-recenter:not(.on) { display: none; }
+.nm-recenter.on { color: var(--hud-green); border-color: rgba(68, 240, 124, .6); }
 /* Tylko tablet: kafelek kolejnego manewru w karcie i pasek postępu trasy na dole. */
 .hud-after, .nm-progress { display: none; }
 .nm-mode { font-size: calc(3.4 * var(--u)); font-weight: 900; letter-spacing: .02em; }
@@ -1124,9 +1176,12 @@ svg .rb-exit { fill: currentColor; stroke: none; font: 900 7.5px system-ui, sans
 .nm-ahead { display: grid; padding: 0; border-radius: calc(2.6 * var(--u)); overflow: hidden; text-align: left; }
 .nm-ahead > span { display: flex; align-items: center; gap: calc(1.6 * var(--u)); padding: calc(1 * var(--u)) calc(2 * var(--u)) calc(1 * var(--u)) calc(1.2 * var(--u)); }
 .nm-ahead > span + span { border-top: 1px solid rgba(140, 175, 195, .16); }
+.nm-ahead > span.alert { margin: 2px; border-radius: calc(2 * var(--u)); background: rgba(229, 72, 77, .14); box-shadow: inset 0 0 0 2px #e5484d; }
+.nm-ahead > span.alert + span, .nm-ahead > span + span.alert { border-top: 0; }
+.nm-ahead > span.alert b { color: #ffd2d0; }
 .nm-ahead .nm-ahead-ico { width: calc(5.4 * var(--u)); height: calc(5.4 * var(--u)); font-size: calc(2.8 * var(--u)); }
 .nm-ahead .nm-ahead-ico svg { width: calc(3.2 * var(--u)); height: calc(3.2 * var(--u)); }
-.nm-ahead b { min-width: calc(9 * var(--u)); max-width: calc(17 * var(--u)); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: #b9c7d1; font-size: calc(2.7 * var(--u)); font-weight: 750; }
+.nm-ahead b { min-width: calc(9 * var(--u)); max-width: calc(21 * var(--u)); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: #b9c7d1; font-size: calc(2.7 * var(--u)); font-weight: 750; }
 .nm-ahead strong { margin-left: auto; padding-left: calc(1.4 * var(--u)); font-size: calc(3.1 * var(--u)); font-weight: 850; font-variant-numeric: tabular-nums; }
 .nm-ahead-go { display: none; width: calc(3 * var(--u)); height: calc(3 * var(--u)); color: #9aabb8; }
 
@@ -1163,17 +1218,18 @@ svg .rb-exit { fill: currentColor; stroke: none; font: 900 7.5px system-ui, sans
 
 /* Telefon poziomo: karta w lewej kolumnie, pod nią prędkość i „po drodze” obok siebie, kafelki paskiem na dole, przyciski przy prawej krawędzi. */
 @media (orientation: landscape) and (max-height: 599px) {
-  .hud.navmode { grid-template-columns: auto auto 1fr auto auto; grid-template-rows: auto 1fr auto auto;
-    grid-template-areas: "top top top . side" ". . . ctl side" "speed ahead . ctl side" "tiles tiles tiles tiles tiles"; }
+  .hud.navmode { grid-template-columns: auto auto 1fr auto; grid-template-rows: auto auto 1fr auto auto;
+    grid-template-areas: "top top top ctl" "side side . ctl" ". . . ctl" "speed ahead . ctl" "tiles tiles tiles tiles"; }
+  /* Poziomo: przyciski rzędem pod manewrem, zwijane do lewej; po prawej tylko mapa (2D/3D, zoom, pozycja). */
+  .nm-side, .nm-side-btns { flex-direction: row; }
   .nm-top .hud-nav.card { flex-wrap: nowrap; }
   .nm-top .hud-nav.card .hud-lanes-guide { flex-basis: auto; }
   .nm-top .hud-nav.card .hud-lanes-guide small { white-space: nowrap; }
-  .nm-side { align-self: start; gap: calc(1 * var(--u)); }
+  .nm-side, .nm-side-btns { gap: calc(1 * var(--u)); }
+  .nm-fold { width: calc(5.2 * var(--u)); height: calc(7 * var(--u)); align-self: center; }
   .nm-btn, .nm-zoom { width: calc(8.6 * var(--u)); }
   .nm-btn { height: calc(8.6 * var(--u)); }
   .nm-zoom button { height: calc(8.6 * var(--u)); }
-  .nm-more .more-dots { display: none; }
-  .nm-more .more-chevron { display: block; }
   .nm-ahead-go { display: block; }
   .nm-tiles { grid-template-columns: repeat(4, minmax(0, 1fr)); }
   .nm-tiles > .nm-tile { display: flex; border-top: 0; border-left: 1px solid rgba(140, 175, 195, .18); }
@@ -1194,7 +1250,6 @@ svg .rb-exit { fill: currentColor; stroke: none; font: 900 7.5px system-ui, sans
   .nm-tiles { display: none; }
   .nm-side { align-self: start; justify-self: start; }
   .nm-ctl { justify-self: end; }
-  .nm-recenter:not(.on) { display: grid; }
   .nm-ahead { justify-self: end; width: calc(40 * var(--u)); }
   .nm-ahead strong { white-space: nowrap; }
   .nm-ahead-go { display: block; }

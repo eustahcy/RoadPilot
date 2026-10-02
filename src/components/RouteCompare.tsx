@@ -4,7 +4,8 @@ import { isAlert, jamMatters, jamTone, NavRoute, TRAFFIC_ON } from "../nav";
 import { locate, routeSlice } from "../core/navmatch";
 import { routeRefs } from "./HudView";
 import { LatLon, MapView, MAX_VIEW_ZOOM, MIN_VIEW_ZOOM, moveView, useMapGestures, worldPx } from "./MapView";
-import { GlLine, GlMapView, GlVector } from "./GlMap";
+import { GlLine, GlMapView, GlMarker, GlVector } from "./GlMap";
+import { Vehicle } from "../nav";
 import { inVtiles, useVtiles } from "../vtiles";
 
 export const ROUTE_COLORS = ["#42d392", "#4ea1ff", "#e8b44c"];
@@ -19,8 +20,31 @@ function fit(routes: NavRoute[], w: number, h: number): { center: LatLon; zoom: 
   const max = { lat: Math.max(...lats), lon: Math.max(...lons) };
   const [x0, y0] = worldPx({ lat: max.lat, lon: min.lon }, 0);
   const [x1, y1] = worldPx({ lat: min.lat, lon: max.lon }, 0);
-  const zoom = Math.log2(Math.min((w * 0.82) / Math.max(1e-9, x1 - x0), (h * 0.8) / Math.max(1e-9, y1 - y0)));
+  // Z boków miejsce na dymki tras („B · 8 h 30 min” ~ 150 px, na wąskiej mapie sama litera), u góry i na dole na start i metę.
+  const zoom = Math.log2(Math.min((w < 420 ? w - 100 : Math.max(w * 0.4, w - 320)) / Math.max(1e-9, x1 - x0), (h - 70) / Math.max(1e-9, y1 - y0)));
   return { center: { lat: (min.lat + max.lat) / 2, lon: (min.lon + max.lon) / 2 }, zoom: Math.max(4, Math.min(15, zoom)) };
+}
+
+/** Mały pojazd do tła porównania: bez czerwonych zakazów — na mapie liczą się tylko trasy (ograniczenia są w zestawieniu). */
+const QUIET_VEHICLE: Vehicle = { heightM: 1, widthM: 1, lengthM: 2, weightKg: 1000, axleWeightKg: 500, axles: 2, adr: "none", maxKmh: 90 };
+
+/**
+ * Miejsce na dymek trasy: punkt najdalej od pozostałych tras (tam, gdzie warianty się rozchodzą), z dala od początku i końca,
+ * i strona dymka: na zewnątrz — od strony, po której nie ma innej trasy. Odległość w przybliżeniu równoodległościowym.
+ */
+function callout(r: NavRoute, others: NavRoute[]): { at: LatLon; side: 1 | -1 } {
+  const pts = thin(r.points);
+  const other = others.flatMap((o) => thin(o.points).filter((_, i) => i % 3 === 0));
+  const k = Math.cos((((pts[0]?.[0] ?? 52) * Math.PI) / 180));
+  let best = pts[Math.floor(pts.length / 2)], bestD = -1, near: [number, number, number] | undefined;
+  for (let i = Math.floor(pts.length * 0.15); i < pts.length * 0.85; i += 2) {
+    const p = pts[i];
+    let d = Infinity, n: [number, number, number] | undefined;
+    for (const o of other) { const x = (o[0] - p[0]) ** 2 + ((o[1] - p[1]) * k) ** 2; if (x < d) { d = x; n = o; } }
+    if (!other.length) d = 0;
+    if (d > bestD) { bestD = d; best = p; near = n; }
+  }
+  return { at: { lat: best[0], lon: best[1] }, side: near && near[1] > best[1] ? -1 : 1 };
 }
 
 /** Co n-ty punkt — na podglądzie całej trasy wystarczy kilkaset. */
@@ -84,11 +108,40 @@ export function RouteCompare({ routes, selectedAt, token, onPick, mapStyle }: { 
     for (const { r, i } of order) {
       const pts = thin(r.points).map((p) => ({ lat: p[0], lon: p[1] }));
       const on = r.at === selectedAt;
-      out.push({ pts, color: rgba("#08111a", on ? 0.9 : 0.6), widthPx: on ? 11 : 8 }, { pts, color: rgba(ROUTE_COLORS[i], on ? 1 : 0.75), widthPx: on ? 7 : 5 });
+      out.push({ pts, color: rgba("#04080c", on ? 0.95 : 0.7), widthPx: on ? 15 : 10 }, { pts, color: rgba(ROUTE_COLORS[i], on ? 1 : 0.6), widthPx: on ? 9 : 6 });
     }
     for (const t of TRAFFIC_ON ? sel?.traffic?.filter(jamMatters) ?? [] : []) {
       const pts = routeSlice(sel!.points, t.km, Math.max(t.toKm, t.km + 0.3));
       if (pts.length > 1) out.push({ pts, color: rgba(JAM_COLOR[jamTone(t)]), widthPx: 5 });
+    }
+    return out;
+  };
+  // Dymki na mapie: litera i czas przy każdej trasie (tam, gdzie się rozchodzą), start i meta.
+  const glMarkers = (): GlMarker[] => {
+    const out: GlMarker[] = routes.map((r, i) => {
+      const { at, side } = callout(r, routes.filter((o) => o !== r));
+      const on = r.at === selectedAt;
+      // Wąska mapa (telefon pionowo): sama litera — czas jest na kartach pod mapą.
+      const text = size.w < 420 ? LETTERS[i] : `${LETTERS[i]} · ${fmtDuration(r.travelMin)}`;
+      const w = Math.max(30, text.length * 8.4 + 22);
+      return {
+        key: `rc${r.at}`, ...at,
+        // Dymek obok linii, po stronie bez innej trasy (A i B rozchodzą się na boki — dymki nie nachodzą na siebie).
+        node: (
+          <g className={`rc-callout ${on ? "on" : ""}`}>
+            <rect x={side > 0 ? 12 : -12 - w} y={-14} width={w} height={28} rx={14} fill={ROUTE_COLORS[i]} />
+            <path d={side > 0 ? "M2 0 14 -7v14z" : "M-2 0-14 -7v14z"} fill={ROUTE_COLORS[i]} />
+            <text x={side * (12 + w / 2)} y={5}>{text}</text>
+          </g>
+        ),
+      };
+    });
+    const r0 = routes[0];
+    if (r0) {
+      out.unshift(
+        { key: "rc-start", lat: r0.from.lat, lon: r0.from.lon, node: <circle className="rc-start" r={7} /> },
+        { key: "rc-end", lat: r0.to.lat, lon: r0.to.lon, node: <g className="rc-end"><circle r={10} /><path d="M-3.5 5V-6M-3.5-6h7.5l-2 2.5 2 2.5h-7.5" /></g> },
+      );
     }
     return out;
   };
@@ -107,7 +160,7 @@ export function RouteCompare({ routes, selectedAt, token, onPick, mapStyle }: { 
         {own ? (
           <>
             <div className="rc-gl" {...gestures}>
-              <GlMapView token={token} center={view.center} zoom={view.zoom} lines={glLines()} markers={[]} vector={mapStyle} pickRef={pickRef} />
+              <GlMapView token={token} center={view.center} zoom={view.zoom} lines={glLines()} markers={glMarkers()} vector={mapStyle && { ...mapStyle, vehicle: QUIET_VEHICLE, quiet: true }} pickRef={pickRef} />
             </div>
             {zoomButtons}
           </>
@@ -154,8 +207,8 @@ export function RouteCompare({ routes, selectedAt, token, onPick, mapStyle }: { 
           const on = r.at === selectedAt;
           return (
             <li key={r.at}>
-              <button className={`rc-item ${on ? "on" : ""}`} onClick={() => onPick(r)} aria-pressed={on}>
-                <i style={{ background: ROUTE_COLORS[i] }}>{LETTERS[i]}</i>
+              <button className={`rc-item ${on ? "on" : ""}`} onClick={() => onPick(r)} aria-pressed={on} style={{ "--rc": ROUTE_COLORS[i] } as React.CSSProperties}>
+                <i>{LETTERS[i]}</i>
                 <span className="rc-main">
                   <b>{fmtDuration(r.travelMin)}{diff >= 1 ? <em> +{fmtDuration(diff)}</em> : <em className="best"> najszybsza</em>}</b>
                   <small>{fmtKm(r.lengthKm)} · {routeRefs(r.instructions) || "—"}</small>
@@ -165,7 +218,7 @@ export function RouteCompare({ routes, selectedAt, token, onPick, mapStyle }: { 
                     {cams > 0 && <span>fotoradary: {cams}</span>}
                   </span>
                 </span>
-                <span className="rc-pick">{on ? "✓" : "Wybierz"}</span>
+                <span className="rc-pick" aria-hidden>{on ? "✓" : ""}</span>
               </button>
             </li>
           );

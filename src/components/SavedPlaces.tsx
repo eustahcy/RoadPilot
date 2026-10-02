@@ -10,7 +10,7 @@ export interface PlacesProps {
   onPlaces: (p: SavedPlaces) => void;
 }
 
-type PlacesTab = "home" | "fav" | "recent";
+export type PlacesTab = "home" | "fav" | "recent";
 const PLACES_TABS: { id: PlacesTab; label: string; icon: string }[] = [
   { id: "home", label: "Dom", icon: "⌂" },
   { id: "fav", label: "Ulubione", icon: "★" },
@@ -18,9 +18,9 @@ const PLACES_TABS: { id: PlacesTab; label: string; icon: string }[] = [
 ];
 
 /** Skróty pod wyszukiwarką — zakładki Dom / Ulubione / Historia (dotknięcie = cel, „×” usuwa). */
-export function PlaceShortcuts({ places, onPlaces, onPick }: PlacesProps & { onPick: (p: Place) => void }) {
+export function PlaceShortcuts({ places, onPlaces, onPick, initialTab }: PlacesProps & { onPick: (p: Place) => void; initialTab?: PlacesTab }) {
   const { home, favorites, recent } = places;
-  const [tab, setTab] = useState<PlacesTab>(favorites.length ? "fav" : recent.length ? "recent" : "home");
+  const [tab, setTab] = useState<PlacesTab>(initialTab ?? (favorites.length ? "fav" : recent.length ? "recent" : "home"));
   const count: Record<PlacesTab, number> = { home: home ? 1 : 0, fav: favorites.length, recent: recent.length };
   return (
     <div className="places">

@@ -136,9 +136,17 @@ src/components/NavView.tsx  nawigacja jako osobny system (nie HUD): HudRouteMap 
                    przyciski przy prawej krawędzi, „więcej” jako strzałka w dół), tablet (min 744×744 px: kafelki 2×2 obok karty, przyciski pod kartą,
                    pasek prędkości względem limitu i pasek 4,5 h jazdy na kafelku przerwy, przycisk powrotu do pozycji zawsze). Karta manewru: tabliczka
                    z numerem drogi (HudNav roadBadge: A/S/krajowe czerwone, wojewódzkie żółte, E zielone), „›” = lista najbliższych manewrów;
-                   „⋯” = menu kafelkowe (NavView MenuTile .nm-mtile: przerwa, dzień, cel, zgłoś, ustawienia, pełny ekran, wyjdź; „Zakończ nawigację” pod spodem);
+                   „⋯” = menu jak w TomTom GO (NavMenu.tsx: pełny ekran nad przyciemnioną mapą, duże ikony białe + akcent; pionowo lista, poziomo
+                   przewijany rząd; Szukaj / Jedź do domu / Ostatnie cele / Aktualna trasa / Moje miejsca → HudRoutePicker start {go | tab}, przerwa, dzień,
+                   zgłoś, ustawienia, pełny ekran, zakończ nawigację, wyjdź; przełącznik głosu na dole);
                    „Ustawienia” → NavSettings.tsx (zakładki Trasa / Pojazd / Mapa / Miejsca: rodzaj trasy, Vehicle.avoid {tolls, motorways, ferries} → valhalla.mjs
                    use_tolls / use_highways / use_ferry = 0, TomTom avoid=…; wymiary, ADR, motyw, 2D/3D, głos, „po drodze”; „Przelicz trasę” = nav.onReroute).
+                   Panel przycisków (.nm-side) po lewej na każdym urządzeniu (poziomo rzędem pod manewrem), zwijany do lewej (.nm-fold, localStorage
+                   „roadpilot:navSide”), „⋯” zostaje; po prawej tylko 2D/3D, +/−, „namierz” (zawsze widoczny).
+                   Pasek „po drodze”: też najbliższy fotoradar i początek odcinkowego pomiaru z route.warnings (AheadStrip.camera, czerwona ramka .alert).
+                   Porównanie tras (RouteCompare): GlVector.quiet (tylko duże miasta, bez zakazów — QUIET_VEHICLE), dymki „A · 7 h 32” przy trasach
+                   (callout: punkt najdalej od innych tras, dymek na zewnątrz; wąska mapa < 420 px = sama litera), start i meta; poziomo
+                   .route-compare display: contents — mapa na całą wysokość po lewej.
                    Przycisk 2D/3D nad zoomem (Settings.navMap): 2D = HudRouteMap flat (pitch 0, FLAT_ZOOM −2, trasa na 25 km, bez horyzontu .nm-map.flat). Karty „szklane” gradientem, bez backdrop-filter;
                    Manewr na każdym urządzeniu i w każdej orientacji (2026-10-02) jako „napisy na horyzoncie” (.nm-top .hud-nav.card bez tła, z cieniem
                    pod tekstem; w dzień ciemne napisy z jasną poświatą) — telefon pionowo: pasy w drugim wierszu, poziomo i tablet: w jednym wierszu;

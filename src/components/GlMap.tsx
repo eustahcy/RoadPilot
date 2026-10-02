@@ -36,6 +36,8 @@ export interface GlVector {
   theme: MapTheme;
   /** Do zakazów: drogi, których pojazd nie spełnia, na czerwono. */
   vehicle: Vehicle;
+  /** Cicha mapa (porównanie tras): tylko duże miasta, przygaszone — na pierwszym planie trasy i ich znaczniki. */
+  quiet?: boolean;
 }
 
 export interface GlMapProps {
@@ -282,6 +284,7 @@ export function GlMapView({ token, center, zoom, bearing = 0, pitch = 0, anchorY
       if (!vt || vt === "loading") continue;
       for (const l of vt.labels) {
         if (l.kind === "street" && zoom < STREETS_FROM_ZOOM) continue;
+        if (vector?.quiet && l.kind !== "city") continue;
         const id = l.kind === "street" ? `${l.kind}:${l.text}:${t.k}` : `${l.kind}:${l.text}`;
         if (seen.has(id)) continue;
         seen.add(id);
@@ -305,8 +308,9 @@ export function GlMapView({ token, center, zoom, bearing = 0, pitch = 0, anchorY
     }
     return cand.sort((a, b) => a.rank - b.rank || a.d - b.d).slice(0, LABELS_MAX).map((c) => c.m);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [vector?.theme, tileGen, tiles.map((t) => t.k).join(","), z, cx, cy, zoom >= STREETS_FROM_ZOOM]);
-  const allMarkers = vector ? [...vlabels, ...markers] : markers;
+  }, [vector?.theme, vector?.quiet, tileGen, tiles.map((t) => t.k).join(","), z, cx, cy, zoom >= STREETS_FROM_ZOOM]);
+  // Cicha mapa: nasze znaczniki (np. „A · 7 h 32”) wygrywają z etykietami miast przy nachodzeniu.
+  const allMarkers = vector ? (vector.quiet ? [...markers, ...vlabels] : [...vlabels, ...markers]) : markers;
   const markerPx = useMemo(() => allMarkers.map((m) => { const [x, y] = worldPx(m, z); return { m, x: x - cx, y: y - cy }; }), [allMarkers, z, cx, cy]);
 
   // Wszystko, czego pętla klatek potrzebuje, w jednym ref — render Reacta tylko go podmienia.
@@ -595,7 +599,7 @@ export function GlMapView({ token, center, zoom, bearing = 0, pitch = 0, anchorY
   }, []);
 
   return (
-    <div ref={box} className={`gl-map ${vector ? `theme-${vector.theme}` : ""}`} style={{ "--label": palette.labelText, "--halo": palette.labelHalo } as React.CSSProperties}>
+    <div ref={box} className={`gl-map ${vector ? `theme-${vector.theme}` : ""} ${vector?.quiet ? "quiet" : ""}`} style={{ "--label": palette.labelText, "--halo": palette.labelHalo } as React.CSSProperties}>
       <canvas ref={canvas} className="gl-canvas" />
       <svg className="gl-markers" aria-hidden>
         {allMarkers.map((m) => (

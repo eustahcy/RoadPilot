@@ -116,6 +116,7 @@ export function NavSettings({ settings, onChange, voice, onReroute }: NavSetting
           <Toggle checked={settings.aheadStrip.mop} onChange={(mop) => onChange({ aheadStrip: { ...settings.aheadStrip, mop } })} label="Najbliższy MOP pod prędkością" />
           <Toggle checked={settings.aheadStrip.parking} onChange={(parking) => onChange({ aheadStrip: { ...settings.aheadStrip, parking } })} label="Najbliższy parking TIR pod prędkością" />
           <Toggle checked={settings.aheadStrip.fuel} onChange={(fuel) => onChange({ aheadStrip: { ...settings.aheadStrip, fuel } })} label="Najbliższa stacja pod prędkością" />
+          <Toggle checked={settings.aheadStrip.camera !== false} onChange={(camera) => onChange({ aheadStrip: { ...settings.aheadStrip, camera } })} label="Najbliższy fotoradar i odcinkowy pomiar pod prędkością" hint="W czerwonej ramce — tylko z trasą." />
         </div>
       )}
 

@@ -86,6 +86,8 @@ export interface AheadStrip {
   mop: boolean;
   parking: boolean;
   fuel: boolean;
+  /** Najbliższy fotoradar i początek odcinkowego pomiaru (z ostrzeżeń trasy) — w czerwonej ramce. */
+  camera: boolean;
 }
 
 export interface AppState {
@@ -138,7 +140,7 @@ export function defaultState(now = Date.now()): AppState {
       weekDrivenMin: 0,
       prevWeekDrivenMin: 0,
     },
-    settings: { speeds: { ...DEFAULT_SPEEDS }, parkingBufferMin: 45, allowExtension: false, allowReducedRest: false, gps: false, liveEta: false, service: { date: null, km: null, odoAtSet: 0 }, hudMirror: false, ongoing: false, autoStop: true, hudAnimation: true, hudStyle: "full", hudItems: { full: { ...DEFAULT_HUD_ITEMS.full }, minimal: { ...DEFAULT_HUD_ITEMS.minimal } }, work: { ...DEFAULT_WORK }, musicApp: "none", navEnabled: false, vehicle: { ...DEFAULT_VEHICLE }, routeType: "fastest", navVoice: true, friendsShare: true, mapTheme: "auto", aheadKm: 50, aheadStrip: { mop: true, parking: true, fuel: true }, places: EMPTY_PLACES, navMap: "3d" },
+    settings: { speeds: { ...DEFAULT_SPEEDS }, parkingBufferMin: 45, allowExtension: false, allowReducedRest: false, gps: false, liveEta: false, service: { date: null, km: null, odoAtSet: 0 }, hudMirror: false, ongoing: false, autoStop: true, hudAnimation: true, hudStyle: "full", hudItems: { full: { ...DEFAULT_HUD_ITEMS.full }, minimal: { ...DEFAULT_HUD_ITEMS.minimal } }, work: { ...DEFAULT_WORK }, musicApp: "none", navEnabled: false, vehicle: { ...DEFAULT_VEHICLE }, routeType: "fastest", navVoice: true, friendsShare: true, mapTheme: "auto", aheadKm: 50, aheadStrip: { mop: true, parking: true, fuel: true, camera: true }, places: EMPTY_PLACES, navMap: "3d" },
     planTime: null,
     track: null,
     odoKm: 0,

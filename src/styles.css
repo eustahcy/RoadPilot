@@ -1153,7 +1153,7 @@ svg .rb-exit { fill: currentColor; stroke: none; font: 900 7.5px system-ui, sans
   .nm-top .hud-nav.card .hud-man small { font-size: calc(3 * var(--u)); color: #fff; }
   .nm-top .hud-nav.card .hud-lanes-guide { flex-basis: auto; justify-items: center; }
   .nm-top .hud-nav.card .hud-lanes-guide small { font-size: calc(2.4 * var(--u)); color: #fff; }
-  .nm-top .hud-nav.card .hud-warn, .nm-top .hud-nav.card .hud-toll { flex: 0 1 auto; text-shadow: none; }
+  .nm-top .hud-nav.card .hud-warn, .nm-top .hud-nav.card .hud-toll { flex: 0 1 auto; text-shadow: none; background: rgba(14, 22, 32, .9); }
   .nm-top .hud-nav.card.off, .nm-top .hud-nav.card.waiting { flex-direction: row; align-items: center; min-height: 0; }
   /* Motyw dzienny: jasne niebo — ciemne napisy z jasną poświatą. */
   .hud.navmode.day .nm-top .hud-nav.card { text-shadow: 0 1px 8px rgba(255, 255, 255, .9); }
@@ -1170,8 +1170,13 @@ svg .rb-exit { fill: currentColor; stroke: none; font: 900 7.5px system-ui, sans
   .nm-side, .nm-ctl { gap: calc(1.1 * var(--u)); }
   .nm-mode { font-size: calc(3.2 * var(--u)); }
   /* Dolny pasek: smukły, cztery informacje + oś; na wąskim (iPad pionowo) oś przechodzi do drugiego wiersza. */
-  .nm-progress { grid-area: progress; display: flex; flex-wrap: wrap; align-items: center; row-gap: calc(.6 * var(--u)); position: relative; z-index: 2; padding: calc(.8 * var(--u)) calc(2.2 * var(--u)); border-radius: calc(2.4 * var(--u)); background: var(--nm-glass); border: 1px solid var(--nm-edge); box-shadow: 0 10px 28px rgba(0, 0, 0, .38), inset 0 1px 0 rgba(255, 255, 255, .07); color: #eef3f6; }
-  .nm-progress-item { display: flex; align-items: center; gap: calc(1.2 * var(--u)); padding-right: calc(2.2 * var(--u)); margin-right: calc(2.2 * var(--u)); border-right: 1px solid rgba(140, 175, 195, .2); }
+  .nm-progress { grid-area: progress; display: flex; flex-wrap: nowrap; align-items: center; position: relative; z-index: 2; padding: calc(.8 * var(--u)) calc(2.2 * var(--u)); border-radius: calc(2.4 * var(--u)); background: var(--nm-glass); border: 1px solid var(--nm-edge); box-shadow: 0 10px 28px rgba(0, 0, 0, .38), inset 0 1px 0 rgba(255, 255, 255, .07); color: #eef3f6; }
+  /* Cztery informacje zwężają się (tekst skracany), oś trasy ma zawsze co najmniej połowę paska — pasek nie rośnie w górę. */
+  .nm-progress-item { flex: 0 1 auto; display: flex; align-items: center; gap: calc(1 * var(--u)); padding-right: calc(1.6 * var(--u)); margin-right: calc(1.6 * var(--u)); border-right: 1px solid rgba(140, 175, 195, .2); }
+  /* Wartość zawsze w całości (limit zwężania); skraca się tylko podpis. */
+  .nm-progress-item b { flex: none; }
+  /* Podpis nie wyznacza minimalnej szerokości (width 0 + min-width 100%) — zwęża się do szerokości wartości i jest skracany. */
+  .nm-progress-item small { width: 0; min-width: 100%; overflow: hidden; text-overflow: ellipsis; }
   .nm-progress-item .hud-ico { width: calc(3.8 * var(--u)); height: calc(3.8 * var(--u)); color: #dfe7ee; }
   .nm-progress-item > span { display: grid; line-height: 1.1; }
   .nm-progress-item b { font-size: calc(3.2 * var(--u)); font-weight: 850; font-variant-numeric: tabular-nums; white-space: nowrap; }
@@ -1181,7 +1186,7 @@ svg .rb-exit { fill: currentColor; stroke: none; font: 900 7.5px system-ui, sans
   .nm-progress-item.active b, .nm-progress-item.active .hud-ico { color: var(--hud-green); }
   button.nm-progress-item { background: none; border-top: 0; border-bottom: 0; border-left: 0; color: inherit; font: inherit; text-align: left; padding-top: 0; padding-bottom: 0; }
   /* Odstęp nad osią na procent nad ciężarówką (w pionie oś jest w drugim wierszu, pod informacjami). */
-  .nm-progress-track { flex: 1 1 calc(60 * var(--u)); min-width: 0; padding-top: calc(2.6 * var(--u)); }
+  .nm-progress-track { flex: 1 1 50%; min-width: 40%; padding-top: calc(2.6 * var(--u)); }
   /* Odcinkowy pomiar na tablecie jest w dolnym pasku, nie w karcie manewru. */
   .nm-section-card { display: none; }
   /* Odcinek jak oś trasy: przejechana część i średnia w kolorze średniej; meta z „do końca”. */

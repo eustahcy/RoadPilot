@@ -341,7 +341,8 @@ function WarnIcon() {
 /** Zoom zależny od prędkości: w mieście bliżej, na autostradzie dalej — widać drogę kilka km przed nami. */
 function navZoom(kmh: number | null) {
   const v = Math.max(0, Math.min(1, ((kmh ?? 0) - 30) / 60));
-  return 17 - v * 1.6;
+  // Domyślnie najbliższe przybliżenie (18); przy dużej prędkości trochę dalej, żeby widzieć drogę przed sobą.
+  return 18 - v * 1.2;
 }
 
 /** Pochylenie mapy (stopnie) — mocniejsze = dalszy horyzont i większa perspektywa, jak w nawigacjach samochodowych. */
@@ -561,7 +562,8 @@ function routePins(route: NavRoute, fromKm: number, toKm: number, gapKm = 0): { 
 
 /** Na autostradzie i ekspresówce miejsce po lewej jest dla przeciwnego kierunku — nie zjedziemy tam. */
 export function poiVisible(route: NavRoute, p: RoutePoi) {
-  if (p.side === "right") return true;
+  // Bramki leżą na samej jezdni (strona z iloczynu wektorowego bywa „lewa”) — zawsze nasze.
+  if (p.side === "right" || p.kind === "toll") return true;
   const t = roadTypeAt(route, p.km);
   return t !== "motorway" && t !== "expressway";
 }
@@ -589,7 +591,7 @@ export function HudRouteMap({ nav, track, live, token, anchorY = 0.8, zoomOffset
   // Przed manewrem (zwłaszcza rondo, pasy, dwa manewry naraz) mapa sama się przybliża i wraca po jego minięciu.
   const target = navZoom(live?.kmh ?? null) + (route && pos && !track.off && !browse ? junctionZoom(route.instructions, route.lanes, pos.km) : 0);
   // Płynnie dochodzi GlMapView (smoothZoom) klatka po klatce — tu tylko zadany zoom (render raz na sekundę dawał skoki).
-  const zoom = Math.max(9, Math.min(18.5, Math.round(target * 20) / 20 + zoomOffset + (flat ? FLAT_ZOOM : 0)));
+  const zoom = Math.max(9, Math.min(19.5, Math.round(target * 20) / 20 + zoomOffset + (flat ? FLAT_ZOOM : 0)));
 
   // Gesty: pierwszy ruch palcem przechodzi z prowadzenia do przeglądania (od bieżącej pozycji i kierunku),
   // kolejne przesuwają / przybliżają widok. Bieżący widok w refie — gest i przejście dzieją się w tym samym zdarzeniu.

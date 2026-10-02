@@ -137,7 +137,7 @@ export function NavView(p: NavViewProps) {
     ? route.pois?.filter((x) => x.km > pos.km && x.km <= pos.km + p.ahead.km && poiVisible(route, x)).map((x) => ({ poi: x, km: x.km - pos.km, side: x.side, onRoute: true })) ?? []
     : nearby && fresh ? placesAhead(nearby, fresh, fresh.heading, p.ahead.km).map(({ item, km }) => ({ poi: item, km, onRoute: false })) : null;
   // Pod prędkością: najbliższy z każdego włączonego rodzaju (najwyżej 3).
-  const strip = stripOn && aheadItems ? AHEAD_STRIP.filter((k) => p.ahead.strip[k.id]).flatMap((k) => { const x = aheadItems.find((i) => k.kinds.includes(i.poi.kind)); return x ? [{ k, x }] : []; }) : [];
+  const strip = stripOn && aheadItems ? AHEAD_STRIP.filter((k) => p.ahead.strip[k.id]).flatMap((k) => { const x = aheadItems.find((i) => k.kinds.includes(i.poi.kind)); return x ? [{ k, x }] : []; }).sort((a, b) => a.x.km - b.x.km) : [];
   const limit = routeLimit?.kmh ?? (here ? legalLimitAt(here, Math.max(0, here.km - 0.005), p.truck)?.kmh : undefined);
   const legal = limit !== undefined && p.vehicleMaxKmh !== undefined ? Math.min(limit, p.vehicleMaxKmh) : limit ?? p.vehicleMaxKmh;
   const tone = speedTone(speed, legal);

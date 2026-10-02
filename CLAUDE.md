@@ -273,6 +273,24 @@ server/speeds.mjs  prędkości ciężarówek z gps_points: komórki ~250 m × ki
 src/core/gapfix.ts  luka z przesunięciem (≥ 15 min, ≥ 1 km): AppState.gapReview (stan tachografu sprzed luki, suma jazdy po niej; tylko lokalnie,
                    jak pendingGap) → GapSheet w Nawigacji (samo przy niewyjaśnionej, menu ⋯) i w Historii („Uzupełnij, co robiłem”): jazda / pauza (ile,
                    na początku / końcu) / postój → applyGapAnswer przelicza tachograf od stanu sprzed luki + postoje i jazda z historii po niej
+server/livetraffic.mjs  korki z jazdy kierowców RoadPilot (bez TomTom): gps_points z LIVE.windowMin 20 min rzutowane na trasę (makeLocator, ≤ 35 m,
+                   kierunek ±50°), mediana w kawałkach 0,5 km vs EXPECT_KMH rodzaju drogi → TrafficSection {live: true} (żółty < 70%, czerwony < 35%,
+                   delayMin); POST /api/nav/live; App co LIVE_TRAFFIC 2 min (nav.ts refreshLiveTraffic, SHOW_TRAFFIC), korki wliczone w przyjazd
+                   (core/route withSlowStretches). collect.ts zbiera też wolne odczyty (< 8 km/h co 30 s do 90 min od jazdy) i wysyła co 2 min.
+server/milestones.mjs  słupki kilometrowe OSM (osm_milestones, milestone-import.mjs w osm-update.sh) → route.milestones; core/navmatch roadAt /
+                   milestoneAt → nad paskiem „A1 · Autostrada Bursztynowa · 475. km” (.nm-roadline; instrukcje Valhalli mają names[]).
+Licencje (2026-10-02, bez kumulowania — premium.mjs redeemProblem: nowy klucz RENEW_BEFORE_DAYS 5 dni przed końcem): premium_keys z własnym kluczem (code = canonKey, label), for_user, max_uses (NULL = bez limitu), dni / bez terminu;
+                   użycia w premium_redemptions (1 na konto, warunkowy INSERT pilnuje limitu); components/License.tsx: LicensePanel (menu ⋯ → Licencja,
+                   Ustawienia → Licencja, Konto) i LicenseAdmin (Administracja → Licencje). Administracja w zakładkach (AdminPanel).
+Wsparcie: components/Support.tsx (menu ⋯, Ustawienia → Wsparcie, stopka); link do wpłat z app_config.supportUrl (GET /api/config publiczne,
+                   PUT /api/admin/config).
+Roboty drogowe (roadworks): rodzaj w note (works / narrow / contraflow), długość km w value (Tylko tutaj / 1–10 km / „Zaznaczę koniec” →
+                   POST /api/collect/report/end, przycisk „Koniec robót” w Nawigacji); na trasie odcinek pomarańczowy, najnowsze zgłoszenie wygrywa.
+Na mapie: znaki ograniczeń przy drogach (glVector limit labels: „10t”, „3,5m”, przekreślona ciężarówka; od zoomu 12) dla naszego zestawu.
+Propozycja przerwy: core/breakstop breakStopFor (najdalszy MOP / parking TIR przed przerwą z planu minus Settings.breakStop.marginMin) →
+                   karta „Dodaj do trasy” w Nawigacji (punkt pośredni z sub „Przerwa” = BREAK_VIA); gdy do niego nie zdążymy — karta „Zmień postój” z bliższym miejscem; ustawienia w Po drodze.
+                   Vehicle.avoid.unpaved → Valhalla exclude_unpaved, TomTom avoid=unpavedRoads.
+Menu ⋯ w Nawigacji to prostokąt .nm-menu-btn przy pasku na dole (grid area „more”).
 scripts/weekly-update.sh  timer systemd roadpilot-weekly (niedziela 01:00 UTC): osm-update → Valhalla w /opt/roadpilot-valhalla.new (Metin2 — jeśli
                    ktoś go uruchomi — zatrzymany na czas budowy i wznawiany) → podmiana + test trasy (błąd = powrót) → kafelki → speed-build, suspects-build → restart API;
                    log /var/log/roadpilot-weekly.log. Plan i stan: upgrade.md

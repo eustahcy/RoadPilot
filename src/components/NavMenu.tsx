@@ -6,7 +6,7 @@ import { ReactNode } from "react";
 // Podstrony (Aktualna trasa, Ustawienia → Wygląd…) mają duży tytuł obok przycisku powrotu, jak w TomTom GO.
 
 export type MenuIcon = "search" | "home" | "recent" | "route" | "places" | "break" | "dayEnd" | "dayStart" | "report" | "gap" | "settings" | "fullscreen" | "endNav" | "exit"
-  | "skipStop" | "altRoute" | "roadblock" | "avoidTolls" | "favRoute" | "directions" | "look" | "voice" | "planning" | "sounds" | "vehicle" | "ahead";
+  | "support" | "license" | "skipStop" | "altRoute" | "roadblock" | "avoidTolls" | "favRoute" | "directions" | "look" | "voice" | "planning" | "sounds" | "vehicle" | "ahead";
 
 export interface MenuItem {
   id: string;
@@ -122,6 +122,12 @@ const ICONS: Record<MenuIcon, ReactNode> = {
   ),
   endNav: (
     <svg viewBox="0 0 64 64"><circle cx="32" cy="32" r="25" className="r" fill="none" strokeWidth="6" /><path d="M22 22l20 20M42 22 22 42" className="r" strokeWidth="6" strokeLinecap="round" /></svg>
+  ),
+  support: (
+    <svg viewBox="0 0 64 64"><path d="M32 56S6 40 6 22a13 13 0 0 1 26-4 13 13 0 0 1 26 4c0 18-26 34-26 34z" className="w" fill="none" strokeWidth="6" strokeLinejoin="round" /><path d="M32 46s-14-9-14-19a7 7 0 0 1 14-2 7 7 0 0 1 14 2c0 10-14 19-14 19z" className="af" /></svg>
+  ),
+  license: (
+    <svg viewBox="0 0 64 64"><circle cx="20" cy="32" r="13" className="w" fill="none" strokeWidth="6" /><circle cx="20" cy="32" r="4" className="af" /><path d="M33 32h26M50 32v10M58 32v7" className="a" strokeWidth="6" strokeLinecap="round" /></svg>
   ),
   skipStop: (
     <svg viewBox="0 0 64 64"><path d="M20 50V8" className="w" strokeWidth="6" strokeLinecap="round" /><path d="M23 10l22 12-22 12z" className="wf" /><ellipse cx="20" cy="54" rx="11" ry="5" className="w" fill="none" strokeWidth="4" /><path d="M42 6l8 7-8 7M52 6l8 7-8 7" className="a" fill="none" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round" /></svg>

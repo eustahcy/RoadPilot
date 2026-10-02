@@ -1,3 +1,4 @@
+import { BREAK_STOP } from "../core/breakstop";
 import { useState } from "react";
 import { DEFAULT_VEHICLE, NO_AVOID, ROUTE_TYPES, RouteAvoid, Vehicle } from "../nav";
 import { Settings } from "../state";
@@ -13,6 +14,7 @@ const AVOID: { id: keyof RouteAvoid; label: string; hint: string }[] = [
   { id: "tolls", label: "Unikaj dróg płatnych", hint: "Bez bramek i odcinków płatnych (A1, A2, A4…), jeśli da się dojechać inaczej." },
   { id: "motorways", label: "Unikaj autostrad", hint: "Drogi krajowe i ekspresowe zamiast autostrad — zwykle dłużej." },
   { id: "ferries", label: "Unikaj promów", hint: "Bez przepraw promowych." },
+  { id: "unpaved", label: "Unikaj dróg gruntowych", hint: "Bez dróg nieutwardzonych (szutr, grunt) — ważne zwłaszcza dojazdy do firm i parkingów." },
 ];
 
 export interface NavSettingsProps {
@@ -69,7 +71,7 @@ export function NavSettingsPage({ section, settings, onChange, voice, onReroute 
           </div>
           <span className="field-label">Jakimi drogami</span>
           {AVOID.map((a) => (
-            <Toggle key={a.id} checked={avoid[a.id]} onChange={(on) => setV({ avoid: { ...avoid, [a.id]: on } })} label={a.label} hint={a.hint} />
+            <Toggle key={a.id} checked={!!avoid[a.id]} onChange={(on) => setV({ avoid: { ...avoid, [a.id]: on } })} label={a.label} hint={a.hint} />
           ))}
         </div>
       )}
@@ -108,6 +110,16 @@ export function NavSettingsPage({ section, settings, onChange, voice, onReroute 
           <Toggle checked={settings.aheadStrip.parking} onChange={(parking) => onChange({ aheadStrip: { ...settings.aheadStrip, parking } })} label="Najbliższy parking TIR pod prędkością" />
           <Toggle checked={settings.aheadStrip.fuel} onChange={(fuel) => onChange({ aheadStrip: { ...settings.aheadStrip, fuel } })} label="Najbliższa stacja pod prędkością" />
           <Toggle checked={settings.aheadStrip.camera !== false} onChange={(camera) => onChange({ aheadStrip: { ...settings.aheadStrip, camera } })} label="Najbliższy fotoradar i odcinkowy pomiar pod prędkością" hint="W czerwonej ramce — tylko z trasą." />
+          <Toggle checked={settings.aheadStrip.toll !== false} onChange={(toll) => onChange({ aheadStrip: { ...settings.aheadStrip, toll } })} label="Najbliższe bramki pod prędkością" hint="W fioletowej ramce — tylko z trasą." />
+          <Toggle checked={settings.breakStop.on} onChange={(on) => onChange({ breakStop: { ...settings.breakStop, on } })} label="Proponuj MOP na przerwę" hint="Nawigacja zaproponuje dodanie do trasy MOP-u lub parkingu TIR, do którego dojedziesz przed końcem 4,5 h jazdy." />
+          {settings.breakStop.on && (
+            <label className="field">
+              <span className="field-label">Zapas przed limitem jazdy</span>
+              <select value={settings.breakStop.marginMin} onChange={(e) => onChange({ breakStop: { ...settings.breakStop, marginMin: Number(e.target.value) } })}>
+                {BREAK_STOP.margins.map((m) => <option key={m} value={m}>{m} min</option>)}
+              </select>
+            </label>
+          )}
         </div>
       )}
 

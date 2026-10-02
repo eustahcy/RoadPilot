@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { distanceM } from "./gps";
 import { alongRoute, bearingAtKm, HERE, isOffRoute, junctionZoom, locateTrace, nextOffRoute, travelHeading, OFF_ROUTE_IDLE, pushTrail, TrailPoint, trailM, laneHint, lanesAhead, locate, NAV, nearestOnRoute, nextInstruction, pointAtKm, RoutePoint, routeSlice, speedLimitAt, speedTone } from "./navmatch";
+import { milestoneAt, roadAt } from "./navmatch";
 
 const KM_PER_DEG = distanceM({ lat: 0, lon: 0 }, { lat: 1, lon: 0 }) / 1000;
 /** Trasa na północ po południku 0, punkt co 100 m, 10 km. */
@@ -181,5 +182,19 @@ describe("przybliżenie przed manewrem", () => {
     expect(junctionZoom([ins(1.3, "TURN_RIGHT"), ins(1.5, "TURN_LEFT")], [], 1)).toBe(2.2);
     expect(junctionZoom([ins(2, "TURN_RIGHT")], [], 1)).toBe(0);
     expect(junctionZoom([ins(1.2, "STRAIGHT")], [], 1)).toBe(0);
+  });
+});
+
+describe("droga i pikietaż nad paskiem", () => {
+  it("roadAt: numer i patron z ostatniego manewru", () => {
+    const ins = [{ km: 0, maneuver: "DEPART", text: "", street: "Katowicka" }, { km: 5, maneuver: "STRAIGHT", text: "", street: "A1", names: ["A1", "E 75", "Autostrada Bursztynowa"] }];
+    expect(roadAt(ins, 2)).toEqual({ ref: undefined, name: "Katowicka" });
+    expect(roadAt(ins, 7)).toEqual({ ref: "A1", name: "Autostrada Bursztynowa" });
+  });
+  it("milestoneAt: interpolacja, kierunek malejący i inna droga pomijana", () => {
+    const ms = [{ km: 10, v: 432, ref: "S19" }, { km: 11, v: 431, ref: "S19" }, { km: 11.5, v: 88, ref: "91" }, { km: 12, v: 430, ref: "S19" }];
+    expect(milestoneAt(ms, 10.5, "S19")).toBeCloseTo(431.5);
+    expect(milestoneAt(ms, 13, "S19")).toBeCloseTo(429);
+    expect(milestoneAt(ms, 20, "S19")).toBeUndefined();
   });
 });

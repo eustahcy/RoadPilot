@@ -56,6 +56,7 @@ describe("silnik RoadPilot (Valhalla)", () => {
     expect(t).toMatchObject({ use_tolls: 0, use_ferry: 0 });
     expect(t.use_highways).toBeUndefined();
     expect(valhallaRequest({ lat: 52, lon: 19 }, { lat: 54, lon: 18 }, v).costing_options.truck.use_tolls).toBeUndefined();
+    expect(valhallaRequest({ lat: 52, lon: 19 }, { lat: 54, lon: 18 }, { ...v, avoid: { unpaved: true } }).costing_options.truck.exclude_unpaved).toBe(true);
   });
   it("punkty pośrednie jako „through” — bez alternatyw", () => {
     const v = { heightM: 4, widthM: 2.55, lengthM: 16.5, weightKg: 40000, axleWeightKg: 11500, axles: 5, adr: "none", maxKmh: 90 };

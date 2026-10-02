@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "react";
 import { Live } from "../core/gps";
 import { alongRoute, bearingAtKm, isOffRoute, laneHint, lanesAhead, locate, NAV, NavInstruction, nextInstruction, pointAtKm, RoutePos, routeSlice, speedLimitAt, nextOffRoute, OFF_ROUTE_IDLE, OffRouteState, locateTrace, TrackFix, travelHeading, junctionZoom } from "../core/navmatch";
-import { isAhead, jamMatters, jamTone, NavPlace, NavRoute, RoutePoi, RouteWarning, TRAFFIC_ON, TrafficSection, warningText } from "../nav";
+import { isAhead, jamMatters, jamTone, NavPlace, NavRoute, RoutePoi, RouteWarning, SHOW_TRAFFIC, TrafficSection, warningText } from "../nav";
 import { QUIET_VEHICLE } from "./RouteCompare";
 import { GlLine, GlMapView, GlMarker, GlVector } from "./GlMap";
 import { LatLon, moveView, useMapGestures } from "./MapView";
@@ -259,7 +259,7 @@ export function HudNav({ nav, track, compact, card, section, onManeuvers }: { na
   const warn = route.warnings?.find((w) => !w.soft && isAhead(w, pos.km) && w.km - pos.km <= WARN_AHEAD_KM && (section === undefined || w.kind !== "section"));
   const inSection = warn?.toKm !== undefined && pos.km >= warn.km;
   // Najbliższe utrudnienie przed nami: blisko (TRAFFIC_AHEAD_KM) każde ważne, dalej (TRAFFIC_FAR_KM) tylko korek / zamknięcie / duże opóźnienie.
-  const jam = TRAFFIC_ON && route.traffic?.find((t) => jamMatters(t) && t.toKm > pos.km && (t.km - pos.km <= TRAFFIC_AHEAD_KM || (t.km - pos.km <= TRAFFIC_FAR_KM && farJam(t))));
+  const jam = SHOW_TRAFFIC && route.traffic?.find((t) => jamMatters(t) && t.toKm > pos.km && (t.km - pos.km <= TRAFFIC_AHEAD_KM || (t.km - pos.km <= TRAFFIC_FAR_KM && farJam(t))));
 
   // Karta (tablet): kafelek z manewrem po najbliższym — „Skręć za 390 m”, dotknięcie = lista manewrów.
   const after = card && next ? route.instructions.find((x) => x.km > next.ins.km + 0.005 && x.maneuver !== "DEPART") : undefined;
@@ -496,6 +496,7 @@ function Pin({ id, fill, stroke = "#fff", children }: { id: string; fill: string
 }
 
 const PIN_P = <text x="0" y="6.5" textAnchor="middle" fontSize="19" fontWeight="900" fill="#fff" fontFamily="Inter, system-ui, sans-serif">P</text>;
+const PIN_M = <text x="0" y="6.5" textAnchor="middle" fontSize="18" fontWeight="900" fill="#fff" fontFamily="Inter, system-ui, sans-serif">M</text>;
 /** Bramki: szlaban (belka w pasy) na słupku. */
 const PIN_TOLL = <g><path d="M-8 8V-6" stroke="#fff" strokeWidth="3" strokeLinecap="round" /><rect x="-8" y="-8" width="17" height="5" rx="1.5" fill="#fff" /><path d="M-3 -8v5M3 -8v5" stroke="#e8322c" strokeWidth="2.4" /></g>;
 const PIN_FUEL = <path d="M-7 8V-8h9v16zM-5 -6v5h5v-5zM2 -3h2.5l2 2v7a1.5 1.5 0 0 0 3 0V-5l-3-3" fill="#fff" stroke="#fff" strokeWidth="1.2" strokeLinejoin="round" />;
@@ -607,7 +608,7 @@ function routePins(route: NavRoute, fromKm: number, toKm: number, gapKm = 0, far
       ? <Pin id={key} fill="#6d4bd1">{PIN_TOLL}</Pin>
       : p.kind === "fuel"
       ? <Pin id={key} fill="#e07a1f">{PIN_FUEL}</Pin>
-      : <Pin id={key} fill="#2f6fd6">{PIN_P}{p.kind === "services" && <circle cx="11" cy="-11" r="5" fill="#e07a1f" stroke="#fff" strokeWidth="1.5" />}</Pin>;
+      : <Pin id={key} fill="#2f6fd6">{p.kind === "parking" ? PIN_P : PIN_M}{p.kind === "services" && <circle cx="11" cy="-11" r="5" fill="#e07a1f" stroke="#fff" strokeWidth="1.5" />}</Pin>;
     // Miejsce zgłoszone przez kierowców (id „r…”) — z chorągiewką, żeby było widać, co sami dodaliśmy.
     const reported = p.id.startsWith("r");
     if (reported) details.push("Dodane przez kierowców RoadPilot");
@@ -723,7 +724,7 @@ export function HudRouteMap({ nav, track, live, token, anchorY = 0.8, zoomOffset
   const next = route && pos ? nextInstruction(route.instructions, km) : undefined;
   // Utrudnienia na widocznym kawałku trasy — żółty wolniej, czerwony korek; etykieta z opóźnieniem na początku odcinka.
   const jamTo = browse ? Infinity : km + 12;
-  const jams = (TRAFFIC_ON ? route?.traffic ?? [] : [])
+  const jams = (SHOW_TRAFFIC ? route?.traffic ?? [] : [])
     .filter((t) => t.toKm > km && t.km < jamTo)
     .map((t) => ({ t, tone: jamTone(t), pts: routeSlice(route!.points, Math.max(km, t.km), Math.min(jamTo, t.toKm)) }))
     .filter((j) => j.pts.length > 1);
@@ -747,6 +748,10 @@ export function HudRouteMap({ nav, track, live, token, anchorY = 0.8, zoomOffset
   const lines: GlLine[] = [
     ...(behind.length > 1 ? [{ pts: behind, color: rgba(vector?.theme === "day" ? "#8a949c" : "#5b6b78", 0.7), widthPx: 8 }] : []),
     ...(ahead.length > 1 ? [{ pts: ahead, color: rgba("#0b3d80"), widthPx: 15 }, { pts: ahead, color: rgba("#3d8bff"), widthPx: 10 }] : []),
+    // Roboty drogowe z długością (zgłoszenie kierowcy) — pomarańczowy odcinek na trasie.
+    ...(route?.warnings ?? []).filter((w) => w.kind === "roadworks" && w.toKm !== undefined && w.toKm > km && w.km < jamTo)
+      .map((w) => ({ pts: routeSlice(route!.points, Math.max(km, w.km), Math.min(jamTo, w.toKm!)), color: rgba("#f2a230"), widthPx: 9 }))
+      .filter((l) => l.pts.length > 1),
     ...jams.map((j) => ({ pts: j.pts, color: rgba(JAM[j.tone]), widthPx: 9 })),
   ];
   const markers: GlMarker[] = [];

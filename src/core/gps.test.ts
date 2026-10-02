@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { addFix, creditDriving, creditStop, distanceM, Fix, GPS, GpsTrack, recentSpeed, startTrack } from "./gps";
 import { DriverState } from "./plan";
-import { remainingSegments, Route, withLiveSpeed } from "./route";
+import { remainingSegments, Route, withLiveSpeed, withSlowStretches } from "./route";
 
 const MIN = 60_000;
 const NOW = Date.UTC(2026, 8, 30, 12, 0);
@@ -266,5 +266,14 @@ describe("withLiveSpeed — przyjazd z aktualnego tempa", () => {
   });
   it("remainingSegments zachowuje zmierzoną prędkość odcinka", () => {
     expect(remainingSegments([{ type: "rural", km: 20, kmh: 50 }], 5)).toEqual([{ type: "rural", km: 15, kmh: 50 }]);
+  });
+});
+
+describe("withSlowStretches — korek przed nami w przyjeździe", () => {
+  it("odcinek 10–14 km po 12 km/h wydłuża jazdę", () => {
+    const speeds = { motorway: 80, expressway: 75, rural: 60, urban: 30, mixed: 50 };
+    const segs = withSlowStretches([{ type: "motorway", km: 100 }], [{ fromKm: 10, toKm: 14, kmh: 12 }]);
+    expect(segs).toEqual([{ type: "motorway", km: 10 }, { type: "motorway", km: 4, kmh: 12 }, { type: "motorway", km: 86 }]);
+    expect(new Route(segs, speeds).driveMinutes(0)).toBeCloseTo((96 / 80) * 60 + 20, 0);
   });
 });

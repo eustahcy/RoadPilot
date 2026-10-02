@@ -33,14 +33,48 @@ export function extendPremium(current, days, now) {
   return new Date(from + days * 86_400_000);
 }
 
-/** Wiersz premium_keys → lista w Administracji. */
+/**
+ * Klucz licencyjny wymyślony przez administratora („LATO2026”, „Firma-Kowalski”) albo wygenerowany → postać do porównań:
+ * wielkie litery, bez spacji, myślników, podkreśleń i kropek. null = za krótki / niedozwolone znaki.
+ */
+export function canonKey(input) {
+  const c = String(input ?? "").toUpperCase().replace(/[\s\-_.]/g, "");
+  return /^[A-Z0-9ĄĆĘŁŃÓŚŹŻ]{4,40}$/.test(c) ? c : null;
+}
+
+/**
+ * Czy konto może użyć klucza: tylko dla wskazanego konta (for_user), limit użyć (max_uses, null = bez limitu),
+ * jedno użycie na konto. Zwraca null (można) albo komunikat dla kierowcy.
+ */
+/** Nowy klucz można użyć dopiero tyle dni przed końcem trwającej licencji (licencje się nie kumulują). */
+export const RENEW_BEFORE_DAYS = 5;
+
+export function redeemProblem(key, userId, usedCount, usedByMe, premiumUntil = null, now = Date.now()) {
+  if (!key) return "Nie ma takiego klucza — sprawdź, czy dobrze przepisany.";
+  const until = premiumUntil ? new Date(premiumUntil).getTime() : null;
+  if (until !== null && until >= FOREVER.getTime()) return "Masz licencję bez terminu — nowy klucz nie jest potrzebny.";
+  if (until !== null && until - now > RENEW_BEFORE_DAYS * 86_400_000) {
+    const from = new Date(until - RENEW_BEFORE_DAYS * 86_400_000).toLocaleDateString("pl-PL", { timeZone: "Europe/Warsaw" });
+    return `Licencja jest aktywna do ${new Date(until).toLocaleDateString("pl-PL", { timeZone: "Europe/Warsaw" })}. Nowy klucz możesz wpisać od ${from} (${RENEW_BEFORE_DAYS} dni przed końcem).`;
+  }
+  if (key.for_user !== null && key.for_user !== undefined && Number(key.for_user) !== Number(userId)) return "Ten klucz jest przypisany do innego konta.";
+  if (usedByMe) return "Ten klucz został już użyty na Twoim koncie.";
+  if (key.max_uses !== null && key.max_uses !== undefined && usedCount >= key.max_uses) return key.max_uses === 1 ? "Ten klucz został już użyty." : "Limit użyć tego klucza się wyczerpał.";
+  return null;
+}
+
+/** Wiersz premium_keys (+ liczba użyć, e-mail przypisanego konta, kto użył) → lista w Administracji. */
 export function keyView(r) {
   return {
-    key: r.code,
+    key: r.label || r.code,
+    code: r.code,
     days: r.days,
     note: r.note,
+    forEmail: r.for_email ?? null,
+    maxUses: r.max_uses ?? null,
+    uses: Number(r.uses ?? 0),
     createdAt: new Date(r.created_at).getTime(),
-    usedAt: r.used_at ? new Date(r.used_at).getTime() : null,
-    usedBy: r.used_email ?? null,
+    lastUsedAt: r.last_used ? new Date(r.last_used).getTime() : null,
+    usedBy: r.used_emails ? String(r.used_emails).split(",").slice(0, 5) : [],
   };
 }

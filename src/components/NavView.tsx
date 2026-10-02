@@ -2,12 +2,12 @@ import { ReactNode, useEffect, useState } from "react";
 import { DeadlinePlan } from "../core/deadline";
 import { Friend } from "../core/friends";
 import { Live } from "../core/gps";
-import { bearingAtKm, legalLimitAt, locate, NAV, nextInstruction, pointAtKm, speedTone } from "../core/navmatch";
+import { bearingAtKm, legalLimitAt, locate, milestoneAt, NAV, nextInstruction, pointAtKm, roadAt, speedTone } from "../core/navmatch";
 import { Plan, timeAtKm } from "../core/plan";
 import { Route } from "../core/route";
 import { fmtDuration } from "../core/scenarios";
 import { fmtClock, fmtKm } from "../format";
-import { insertVia, isAhead, NavPlace, NavRoute, RoutePoi, RouteWarning, useLimitHere, useNearbyPois, viaAhead, warningText } from "../nav";
+import { insertVia, isAhead, NO_AVOID, NavPlace, NavRoute, RoutePoi, RouteWarning, useLimitHere, useNearbyPois, viaAhead, warningText } from "../nav";
 import { placesAhead } from "../core/stations";
 import { AheadStrip } from "../state";
 import { GpsStatus, useWakeLock } from "../tracking";
@@ -29,6 +29,8 @@ import { SectionLine, SectionPanel, sectionKey, sectionView, useSectionRun } fro
 import { sectionLimit } from "../core/section";
 import { ActiveStopPanel, confirmStartDay, fmtTimer, StopControlsProps, StopPicker } from "./StopControls";
 import { NavSettingsPage, SettingsSection } from "./NavSettings";
+import { breakStopFor } from "../core/breakstop";
+import { SupportContent } from "./Support";
 import { isFavorite, toggleFavorite } from "../core/places";
 import { Settings } from "../state";
 
@@ -45,7 +47,7 @@ export interface NavViewProps {
   mapVector?: GlVector;
   voice: { supported: boolean; on: boolean; toggle: () => void };
   /** Zgłoszenia: `at` = miejsce przytrzymane na mapie (przyklejone do drogi przez onSnap), bez niego — nasza pozycja. */
-  report?: { onSend: (kind: ReportKind, value: number | null, at?: SnappedRoad) => Promise<void>; onVote: (w: RouteWarning, vote: 1 | -1) => Promise<void>; onSnap: (at: LatLon) => Promise<SnappedRoad | null>; /** „Zły manewr”: punkt tuż za manewrem, kierunek wyjazdu i opis manewru. */ onBadTurn?: (t: { lat: number; lon: number; heading: number; note: string }) => Promise<void> };
+  report?: { onSend: (kind: ReportKind, value: number | null, at?: SnappedRoad, note?: string) => Promise<{ id?: number } | void>; /** Koniec robót „zaznaczę koniec” w miejscu, w którym jesteśmy. */ onWorksEnd?: (id: number) => Promise<number>; onVote: (w: RouteWarning, vote: 1 | -1) => Promise<void>; onSnap: (at: LatLon) => Promise<SnappedRoad | null>; /** „Zły manewr”: punkt tuż za manewrem, kierunek wyjazdu i opis manewru. */ onBadTurn?: (t: { lat: number; lon: number; heading: number; note: string }) => Promise<void> };
   friends?: Friend[];
   live: Live | null;
   gpsOn: boolean;
@@ -69,6 +71,8 @@ export interface NavViewProps {
   /** Luka do wyjaśnienia (aplikacja była zamknięta) i zapis odpowiedzi — przelicza tachograf. */
   gapReview?: GapReview | null;
   onGapAnswer?: (a: GapAnswer) => void;
+  /** Licencja (menu ⋯ → Licencja): stan w podpisie i strona z wpisaniem klucza. */
+  license?: { status: string; page: ReactNode };
   /** Ustawienia prosto z menu ⋯ (pojazd, drogi, mapa, „po drodze”). */
   settings?: { value: Settings; onChange: (patch: Partial<Settings>) => void };
 }
@@ -100,6 +104,12 @@ export function NavView(p: NavViewProps) {
     if (gapKey !== null) setGapOpen(true);
   }, [gapKey]);
   const [sheet, setSheet] = useState(false);
+  /** Roboty „zaznaczę koniec”: id zgłoszenia — na mapie przycisk „Koniec robót” (zapamiętany w tym urządzeniu). */
+  const [worksOpen, setWorksOpenState] = useState<number | null>(() => { try { return Number(localStorage.getItem(WORKS_KEY)) || null; } catch { return null; } });
+  const setWorksOpen = (id: number | null) => { setWorksOpenState(id); try { if (id) localStorage.setItem(WORKS_KEY, String(id)); else localStorage.removeItem(WORKS_KEY); } catch { /* tylko na tę sesję */ } };
+  const [worksMsg, setWorksMsg] = useState<string | null>(null);
+  /** Odrzucona propozycja miejsca na przerwę (klucz: przerwa z planu + miejsce) — nie wraca, dopóki plan nie przesunie przerwy. */
+  const [breakDismissed, setBreakDismissed] = useState<string | null>(null);
   /** Kafelki „do celu / przyjazd” pokazują najbliższy punkt pośredni zamiast celu. */
   const [toVia, setToVia] = useState(false);
   const [reporting, setReporting] = useState(false);
@@ -155,7 +165,7 @@ export function NavView(p: NavViewProps) {
   // Pod prędkością: najbliższy z każdego włączonego rodzaju (najwyżej 3).
   const placeRows: StripRow[] = stripOn && aheadItems ? AHEAD_STRIP.filter((k) => p.ahead.strip[k.id]).flatMap((k) => {
     const x = aheadItems.find((i) => k.kinds.includes(i.poi.kind));
-    return x ? [{ key: k.id, icon: <AheadIcon kind={k.id === "fuel" ? "fuel" : x.poi.kind} />, label: k.id === "fuel" ? stationLabel(x.poi.name) : k.short, km: x.km }] : [];
+    return x ? [{ key: k.id, icon: <AheadIcon kind={k.id === "fuel" ? "fuel" : x.poi.kind} />, label: stripLabel(k.id, x.poi), km: x.km, tone: k.id === "toll" ? "toll" : undefined }] : [];
   }) : [];
   // Fotoradar i początek odcinkowego pomiaru — z ostrzeżeń trasy, w czerwonej ramce (przejazd przez odcinek pokazuje karta / oś).
   const alertRows: StripRow[] = p.mapToken && p.ahead.strip.camera !== false && onRoute ? ALERT_STRIP.flatMap((a) => {
@@ -187,6 +197,42 @@ export function NavView(p: NavViewProps) {
     const t = p.plan ? timeAtKm(p.plan, p.route, km) : undefined;
     const name = `punktu ${viaNext.n || 1}`;
     return { label: `Do ${name}`, arrLabel: `Przyjazd · pkt ${viaNext.n || 1}`, km, clock: t ? fmtClock(t, now) : "—", left: t ? fmtDuration(Math.max(0, t - now) / 60_000) : undefined, note: viaNext.v.label };
+  })();
+  // Nad paskiem: droga, którą jedziemy, i kilometr drogi (słupki z OSM), np. „S19 · Droga ekspresowa im. Lecha Kaczyńskiego · km 432”.
+  const road = onRoute ? roadAt(route.instructions, pos.km) : undefined;
+  const roadKm = onRoute ? milestoneAt(route.milestones, pos.km, road?.ref) : undefined;
+  const roadLine = road && (road.ref || road.name) ? (
+    <div className="nm-roadline">
+      {road.ref && <b className={`nm-roadref ${/^\d{3}$/.test(road.ref) ? "yellow" : /^E/.test(road.ref) ? "green" : ""}`}>{road.ref}</b>}
+      {road.name && <span>{road.name}</span>}
+      {roadKm !== undefined && <em>{Math.round(roadKm)}. km</em>}
+    </div>
+  ) : null;
+  // Propozycja miejsca na przerwę: najdalszy MOP / parking TIR, do którego dojedziemy z zapasem przed przerwą z planu.
+  const bs = p.settings?.value.breakStop;
+  const breakSuggest = (() => {
+    if (!bs?.on || !onRoute || sc.stop || !p.plan || !p.nav?.onVia || !route.pois) return undefined;
+    const evs = p.plan.events;
+    const iStop = evs.findIndex(isStop);
+    if (iStop < 0) return undefined;
+    const driveLeftMin = evs.slice(0, iStop).filter((e) => e.kind === "drive").reduce((a, e) => a + (e.end - Math.max(e.start, now)) / 60_000, 0);
+    const kmAfter = (min: number) => p.route.advance(0, min);
+    // Postój dodany wcześniej z propozycji (punkt pośredni „Przerwa”) — czy wciąż zdążymy (korek, wolniejsza jazda)?
+    const vias = viaAhead(route, fresh);
+    const planned = vias.map((v) => ({ v, km: locate(route.points, v)?.km })).find((x) => x.v.sub === BREAK_VIA && x.km !== undefined && x.km > pos.km);
+    if (planned) {
+      const needMin = p.route.driveMinutes(0, Math.max(0, planned.km! - pos.km));
+      if (needMin <= driveLeftMin) return undefined;
+      // Nie zdążymy — szukamy bliższego miejsca (bez zapasu, gdy z zapasem już nic nie ma).
+      const s2 = breakStopFor(route.pois.filter((x) => poiVisible(route, x) && x.km < planned.km! - 0.5), pos.km, driveLeftMin, bs.marginMin, kmAfter)
+        ?? breakStopFor(route.pois.filter((x) => poiVisible(route, x) && x.km < planned.km! - 0.5), pos.km, driveLeftMin, 0, kmAfter);
+      return s2 ? { ...s2, key: `late:${evs[iStop].start}:${s2.place.id}`, stop: evs[iStop], replace: planned.v } : undefined;
+    }
+    const s1 = breakStopFor(route.pois.filter((x) => poiVisible(route, x)), pos.km, driveLeftMin, bs.marginMin, kmAfter);
+    if (!s1) return undefined;
+    // Już jest punktem pośrednim (≤ 1 km) — nie proponujemy drugi raz.
+    if ((route.via ?? []).some((v) => Math.abs((locate(route.points, v)?.km ?? -99) - s1.place.km) < 1)) return undefined;
+    return { ...s1, key: `${evs[iStop].start}:${s1.place.id}`, stop: evs[iStop], replace: undefined as NavPlace | undefined };
   })();
   const flip = viaNext ? () => setToVia((x) => !x) : undefined;
   // Kafelek przerwy: w jeździe — ile z 4,5 h jazdy bez przerwy już za nami; na postoju — ile z zaplanowanego postoju minęło.
@@ -239,6 +285,8 @@ export function NavView(p: NavViewProps) {
     ...(p.settings ? [{ id: "settings", icon: "settings" as const, label: "Ustawienia", onClick: () => setMenuPage("settings") }] : []),
     ...(fullscreenSupported() ? [{ id: "fs", icon: "fullscreen" as const, label: fullscreen ? "Zamknij pełny ekran" : "Pełny ekran", onClick: go(toggleFullscreen) }] : []),
     ...(p.nav?.onEnd && (p.nav.route || p.nav.dest) ? [{ id: "end", icon: "endNav" as const, label: "Zakończ nawigację", tone: "danger" as const, onClick: go(endNav) }] : []),
+    ...(p.license ? [{ id: "license", icon: "license" as const, label: "Licencja", sub: p.license.status, onClick: () => setMenuPage("license") }] : []),
+    { id: "support", icon: "support", label: "Wsparcie", onClick: () => setMenuPage("support") },
     { id: "exit", icon: "exit", label: "Wyjdź z nawigacji", onClick: p.onExit },
   ];
   // Aktualna trasa (jak w TomTom): pomiń postój, inna trasa, omiń blokadę, płatne, ulubione, wskazówki.
@@ -256,7 +304,7 @@ export function NavView(p: NavViewProps) {
     }) },
     ...(p.settings ? [{ id: "tolls", icon: "avoidTolls" as const, label: avoidTolls ? "Nie omijaj dróg płatnych" : "Omijaj drogi płatne", sub: avoidTolls ? "teraz omijane" : undefined, onClick: go(() => {
       const v = p.settings!.value.vehicle;
-      p.settings!.onChange({ vehicle: { ...v, avoid: { tolls: !avoidTolls, motorways: !!v.avoid?.motorways, ferries: !!v.avoid?.ferries } } });
+      p.settings!.onChange({ vehicle: { ...v, avoid: { ...NO_AVOID, ...v.avoid, tolls: !avoidTolls } } });
       // Przeliczenie po zapisie ustawień (nowy pojazd trafia do App w następnym renderze).
       setTimeout(() => p.nav?.onReroute(), 50);
     }) }] : []),
@@ -269,6 +317,8 @@ export function NavView(p: NavViewProps) {
     if (k === "main") return { title: p.nav?.dest ? `${refs ? `${refs} · ` : ""}${route ? fmtKm(route.lengthKm) : ""} → ${p.nav.dest.label}` : undefined, items: menuItems };
     if (k === "route") return { heading: "Aktualna trasa", items: routeItems };
     if (k === "settings") return { heading: "Ustawienia", items: settingsItems };
+    if (k === "support") return { heading: "Wsparcie", content: <SupportContent /> };
+    if (k === "license") return { heading: "Licencja", content: p.license?.page };
     const sec = SETTINGS_PAGES.find((x) => x.id === k)!;
     return {
       heading: sec.label,
@@ -311,8 +361,14 @@ export function NavView(p: NavViewProps) {
         {route && pos && !track.off && <button className="nm-card-more" onClick={() => setManeuvers(true)} aria-label="Najbliższe manewry"><Icon name="chevron" /></button>}
       </header>
 
+      {/* Menu ⋯ — prostokąt przy pasku na dole po prawej (zawsze widoczny, także przy zwiniętym panelu). */}
+      <button className="nm-menu-btn" onClick={() => setMenu(true)} aria-label="Menu: cel, dom, przerwa, ustawienia, licencja">
+        <Icon name="dots" />
+      </button>
+
       {/* Kafelki: do celu, przyjazd, przerwa, trasa. Telefon pionowo: dwa pierwsze, reszta po dotknięciu uchwytu; poziomo: pasek na dole; tablet: 2×2 u góry. */}
       <div className={`nm-tiles ${tilesOpen ? "open" : ""}`}>
+        {roadLine}
         {/* Uchwyt = dyskretna przerwa (telefon pionowo): filiżanka, za ile i cienki pasek 4,5 h jazdy; dotknięcie rozwija kafelki. */}
         <button className={`nm-tiles-handle ${stopItem.tone}`} onClick={() => setTilesOpen(!tilesOpen)} aria-expanded={tilesOpen} aria-label={tilesOpen ? "Zwiń" : `${stopItem.label} ${stopItem.value} — przerwa i trasa`}>
           {!tilesOpen && (
@@ -329,7 +385,7 @@ export function NavView(p: NavViewProps) {
         </button>
         <button className={`nm-tile ${!showVia && arrival.bad ? "bad" : ""} ${flip ? "flip" : ""} ${showVia ? "via" : ""}`} onClick={flip} disabled={!flip}>
           <Icon name="clock" />
-          <span><small>{target.arrLabel}</small><b>{target.clock}</b><i>{target.left !== undefined ? `za ${target.left}` : target.note}</i></span>
+          <span><small>{target.arrLabel}</small><b>{clockOnly(target.clock).time}</b><i>{[clockOnly(target.clock).day, target.left !== undefined ? `za ${target.left}` : target.note].filter(Boolean).join(" · ")}</i></span>
         </button>
         <button className={`nm-tile extra ${stopItem.tone}`} onClick={openSheet}>
           <Icon name="coffee" />
@@ -369,10 +425,6 @@ export function NavView(p: NavViewProps) {
           </button>
         )}
         </div>
-        <button className="nm-btn nm-more" onClick={() => setMenu(true)} aria-label="Menu: cel, dom, przerwa, ustawienia">
-          <Icon name="dots" className="more-dots" />
-          <Icon name="chevron" className="more-chevron" />
-        </button>
         </div>
         <button className="nm-fold" onClick={() => setSide(!sideOpen)} aria-expanded={sideOpen} aria-label={sideOpen ? "Zwiń przyciski" : "Rozwiń przyciski"}>
           <Icon name="chevron" />
@@ -405,7 +457,7 @@ export function NavView(p: NavViewProps) {
       {strip.length > 0 && !browse?.overview && (
         <button className="nm-ahead" onClick={() => setAheadList(true)} aria-label="Po drodze — pokaż listę">
           {strip.map((r) => (
-            <span key={r.key} className={r.alert ? "alert" : ""}>
+            <span key={r.key} className={r.alert ? "alert" : r.tone ?? ""}>
               {r.icon}
               <b>{r.label}</b>
               <strong>{fmtAheadKm(r.km)}</strong>
@@ -415,9 +467,40 @@ export function NavView(p: NavViewProps) {
         </button>
       )}
       {notice && <div className="nm-notice">{notice}</div>}
+      {worksOpen && p.report?.onWorksEnd && (
+        <div className="nm-works-end">
+          <button className="end" onClick={async () => {
+            try { const km = await p.report!.onWorksEnd!(worksOpen); setWorksMsg(`Dziękujemy — roboty na ${String(km).replace(".", ",")} km`); setWorksOpen(null); setTimeout(() => setWorksMsg(null), 4000); }
+            catch (e) { setWorksMsg(e instanceof Error ? e.message : "Nie udało się wysłać."); }
+          }}><ReportIcon kind="roadworks" />Koniec robót</button>
+          <button className="x" aria-label="Anuluj zaznaczanie końca" onClick={() => setWorksOpen(null)}>×</button>
+        </div>
+      )}
+      {worksMsg && <div className="nm-works-msg">{worksMsg}</div>}
+      {breakSuggest && breakDismissed !== breakSuggest.key && !pin && !hold && !menu && (
+        <div className="nm-break-suggest" role="dialog" aria-label="Propozycja miejsca na przerwę">
+          <AheadIcon kind={breakSuggest.place.kind} />
+          <div className="bs-text">
+            <small className={breakSuggest.replace ? "late" : ""}>{breakSuggest.replace ? `Nie zdążysz do ${breakSuggest.replace.label} — zamiast tego` : `Przerwa ${breakSuggest.stop.kind === "break" ? "45 min" : "dzienna"} — proponuję`}</small>
+            <b>{breakSuggest.place.name && !/^zgłoszenie/i.test(breakSuggest.place.name) ? breakSuggest.place.name : AHEAD_KIND[breakSuggest.place.kind]}</b>
+            <span>za {fmtKm(breakSuggest.place.km - pos!.km)} · zapas ok. {fmtDuration(Math.max(0, breakSuggest.spareMin))} jazdy</span>
+          </div>
+          <div className="bs-actions">
+            <button className="primary" onClick={() => {
+              const pl = breakSuggest.place;
+              const place = { label: pl.name || AHEAD_KIND[pl.kind], sub: BREAK_VIA, lat: pl.lat, lon: pl.lon };
+              const keep = viaAhead(route!, fresh).filter((v) => v !== breakSuggest.replace);
+              p.nav!.onVia!(insertVia(route!, keep, place)).catch((e) => setWorksMsg(e instanceof Error ? e.message : "Nie udało się dodać."));
+              setBreakDismissed(breakSuggest.key);
+            }}>{breakSuggest.replace ? "Zmień postój" : "Dodaj do trasy"}</button>
+            <button className="ghost" onClick={() => setBreakDismissed(breakSuggest.key)}>Nie teraz</button>
+          </div>
+        </div>
+      )}
 
       {/* Tablet: pasek na dole — do celu, przyjazd i postęp trasy (zielone = przejechane, kropki = punkty pośrednie i postoje). */}
       <div className="nm-progress">
+        {roadLine}
         <button className={`nm-progress-item ${flip ? "flip" : ""} ${showVia ? "via" : ""}`} onClick={flip} disabled={!flip}><Icon name="flag" /><span><b>{fmtKm(target.km)}</b><small>{showVia ? `Pkt ${viaNext!.n || 1}` : target.label}</small></span></button>
         <button className={`nm-progress-item ${!showVia && arrival.bad ? "bad" : ""} ${flip ? "flip" : ""} ${showVia ? "via" : ""}`} onClick={flip} disabled={!flip}><Icon name="clock" /><span><b>{target.clock}</b><small>{target.left !== undefined ? `${showVia ? "Pkt" : "Przyjazd"} za ${target.left}` : target.note}</small></span></button>
         <button className={`nm-progress-item ${stopItem.tone}`} onClick={openSheet}><Icon name="coffee" /><span><b>{stopItem.value}</b><small>{stopItem.label}</small></span></button>
@@ -518,7 +601,7 @@ export function NavView(p: NavViewProps) {
       {reporting && p.report && (
         <NavPage heading="Zgłoś" onBack={() => setReporting(false)} onRecenter={() => { setReporting(false); setBrowse(null); }}>
             {!reportAt && route && pos && p.report.onBadTurn && <BadTurn route={route} km={pos.km} onSend={p.report.onBadTurn} onDone={() => setReporting(false)} />}
-            <ReportSheet onSend={(kind, value) => p.report!.onSend(kind, value, reportAt ?? undefined)} onClose={() => setReporting(false)} located={reportAt !== null || p.live !== null} place={reportAt ? reportAt.name : undefined} />
+            <ReportSheet onWorksStart={p.report.onWorksEnd ? (id) => setWorksOpen(id) : undefined} onSend={(kind, value, note) => p.report!.onSend(kind, value, reportAt ?? undefined, note)} onClose={() => setReporting(false)} located={reportAt !== null || p.live !== null} place={reportAt ? reportAt.name : undefined} />
         </NavPage>
       )}
       {planning && p.planner && (
@@ -556,7 +639,7 @@ const AHEAD_FILTERS: { id: AheadFilter; label: string; kinds: RoutePoi["kind"][]
   { id: "fuel", label: "Stacje", kinds: ["fuel", "services"] },
 ];
 /** Pasek pod prędkością: rodzaje w kolejności wyświetlania (MOP ze stacją liczy się jako MOP i jako stacja). */
-type MenuKey = "main" | "route" | "settings" | SettingsSection;
+type MenuKey = "main" | "route" | "settings" | "support" | "license" | SettingsSection;
 const SETTINGS_PAGES: { id: SettingsSection; label: string; icon: MenuItem["icon"] }[] = [
   { id: "look", label: "Wygląd", icon: "look" },
   { id: "voice", label: "Głos", icon: "voice" },
@@ -565,10 +648,20 @@ const SETTINGS_PAGES: { id: SettingsSection; label: string; icon: MenuItem["icon
   { id: "ahead", label: "Po drodze", icon: "ahead" },
 ];
 /** Strona wyżej w menu (powrót); z głównej — mapa. */
-const MENU_PARENT: Record<MenuKey, MenuKey | null> = { main: null, route: "main", settings: "main", look: "settings", voice: "settings", planning: "settings", vehicle: "settings", ahead: "settings" };
+const MENU_PARENT: Record<MenuKey, MenuKey | null> = { main: null, route: "main", settings: "main", support: "main", license: "main", look: "settings", voice: "settings", planning: "settings", vehicle: "settings", ahead: "settings" };
 
 /** Rodzaj ostrzeżenia → piktogram ze zgłoszeń (ReportIcon). */
 const WARN_ICON: Record<string, string> = { axle: "weight", hgv: "truck_ban", red_light: "camera", width: "height", length: "height", incline: "other", curve: "other" };
+
+const WORKS_KEY = "roadpilot:worksOpen";
+/** Podpis punktu pośredniego dodanego z propozycji przerwy — po nim rozpoznajemy „nasz” postój do ponownego sprawdzenia. */
+const BREAK_VIA = "Przerwa";
+
+/** „jutro 02:52” → godzina na kafelek i dzień do drugiego wiersza (wąski kafelek na telefonie). */
+function clockOnly(clock: string): { time: string; day: string } {
+  const m = /^(.*?)\s*(\d{1,2}:\d{2})$/.exec(clock);
+  return m && m[1] ? { time: m[2], day: m[1] } : { time: clock, day: "" };
+}
 
 /** Zwinięty panel przycisków — wygoda jednego urządzenia (localStorage), nie stan synchronizowany. */
 const SIDE_KEY = "roadpilot:navSide";
@@ -576,7 +669,7 @@ function readSideOpen() {
   try { return localStorage.getItem(SIDE_KEY) !== "0"; } catch { return true; }
 }
 
-interface StripRow { key: string; icon: ReactNode; label: string; km: number; alert?: boolean }
+interface StripRow { key: string; icon: ReactNode; label: string; km: number; alert?: boolean; tone?: string }
 
 const ALERT_STRIP: { kind: "camera" | "section"; label: string }[] = [
   { kind: "camera", label: "Fotoradar" },
@@ -605,7 +698,19 @@ const AHEAD_STRIP: { id: keyof AheadStrip; short: string; kinds: RoutePoi["kind"
   { id: "mop", short: "MOP", kinds: ["services", "mop"] },
   { id: "parking", short: "Parking", kinds: ["parking"] },
   { id: "fuel", short: "Stacja", kinds: ["fuel", "services"] },
+  { id: "toll", short: "Bramki", kinds: ["toll"] },
 ];
+
+/** Nazwa na pasku: stacja — marka (Orlen, Shell…), parking i MOP — własna nazwa (bez „MOP ” na początku), inaczej rodzaj. */
+function stripLabel(id: keyof AheadStrip, p: Pick<RoutePoi, "kind" | "name"> & { brand?: string }): string {
+  const n = (p.name ?? "").trim();
+  const generic = !n || /^(zgłoszenie kierowcy|parking|mop|miejsce obsługi podróżnych)$/i.test(n);
+  if (id === "fuel") return stationLabel(p.brand ?? (p.kind === "fuel" ? n : ""));
+  if (id === "mop") return generic ? "MOP" : n.replace(/^(MOP|Miejsce Obsługi Podróżnych)\s+/i, "");
+  if (id === "parking") return generic ? "Parking TIR" : n;
+  if (id === "toll") return generic || /^(bramki|ppo)/i.test(n) ? "Bramki" : n.replace(/^PPO\s*/i, "Bramki ");
+  return n || id;
+}
 const AHEAD_KIND: Record<RoutePoi["kind"], string> = { services: "MOP ze stacją", mop: "MOP", parking: "Parking TIR", fuel: "Stacja paliw", toll: "Bramki" };
 
 /** Blisko z dokładnością do 0,1 km („1,4 km”), dalej pełne km. */
@@ -623,7 +728,7 @@ function AheadIcon({ kind }: { kind: RoutePoi["kind"] }) {
   return (
     <i className={`nm-ahead-ico k-${kind}`} aria-hidden>
       {kind === "fuel" ? <svg viewBox="-12 -12 24 24"><path d="M-7 8V-8h9v16zM-5 -6v5h5v-5zM2 -3h2.5l2 2v7a1.5 1.5 0 0 0 3 0V-5l-3-3" fill="#fff" stroke="#fff" strokeWidth="1.2" strokeLinejoin="round" /></svg>
-        : kind === "toll" ? <svg viewBox="-12 -12 24 24"><path d="M-8 8V-6" stroke="#fff" strokeWidth="3" strokeLinecap="round" /><rect x="-8" y="-8" width="17" height="5" rx="1.5" fill="#fff" /></svg> : "P"}
+        : kind === "toll" ? <svg viewBox="-12 -12 24 24"><path d="M-8 8V-6" stroke="#fff" strokeWidth="3" strokeLinecap="round" /><rect x="-8" y="-8" width="17" height="5" rx="1.5" fill="#fff" /></svg> : kind === "mop" || kind === "services" ? "M" : "P"}
     </i>
   );
 }

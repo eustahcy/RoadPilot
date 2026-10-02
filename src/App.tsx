@@ -9,19 +9,20 @@ import { HistoryCard } from "./components/HistoryCard";
 import { setWhere } from "./core/violations";
 import { InstallButton } from "./components/InstallButton";
 import { ConsentPrompt } from "./components/MapConsent";
-import { sendReport, snapRoad, useTraceCollector } from "./collect";
+import { endRoadworks, sendReport, snapRoad, useTraceCollector } from "./collect";
 import { polishVoiceMissing, speak, voiceSupported } from "./voice";
 import { GpsCard } from "./components/GpsCard";
 import { enterFullscreen, exitFullscreen, HudView } from "./components/HudView";
 import { NavView } from "./components/NavView";
+import { LicensePanel, licenseStatus } from "./components/License";
 import { PlanView } from "./components/PlanView";
 import { RouteView } from "./components/RouteView";
 import { SettingsCategory, SettingsView } from "./components/SettingsView";
-import { ALERTS_REFRESH, fetchRoute, refreshTraffic, TRAFFIC_ON, TRAFFIC_REFRESH, NavAccess, NavPlace, NavRoute, refreshWarnings, viaAhead, voteAlert, withWarnings } from "./nav";
+import { ALERTS_REFRESH, fetchRoute, LIVE_TRAFFIC, refreshLiveTraffic, refreshTraffic, TRAFFIC_ON, TRAFFIC_REFRESH, NavAccess, NavPlace, NavRoute, refreshWarnings, viaAhead, voteAlert, withWarnings } from "./nav";
 import { locate } from "./core/navmatch";
 import { planForDeadline } from "./core/deadline";
 import { GPS, recentSpeed } from "./core/gps";
-import { remainingSegments, Route, segmentsFromProfile, withLiveSpeed } from "./core/route";
+import { remainingSegments, Route, segmentsFromProfile, withLiveSpeed, withSlowStretches } from "./core/route";
 import { Better, betterOption, compareScenarios, driverStatus, ScenarioId, whatIfs } from "./core/scenarios";
 import { serviceStatus } from "./core/service";
 import { planAfterStop } from "./core/stop";
@@ -195,6 +196,21 @@ function App() {
     return () => clearInterval(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [navOn, auth?.token, navRouteAt, hasWarnings]);
+  // Korki z jazdy kierowców RoadPilot (bez TomTom) co LIVE_TRAFFIC.everyMs — także odcinek, na którym sami stoimy.
+  useEffect(() => {
+    if (!navOn || !auth || TRAFFIC_ON) return;
+    const tick = () => {
+      const r = routeRef.current;
+      if (!r || document.visibilityState !== "visible") return;
+      const pos = liveRef.current ? locate(r.points, liveRef.current) : undefined;
+      if (pos && pos.offM > 200) return;
+      refreshLiveTraffic(auth.token, r, pos?.km ?? 0).then((t) => t && setState((s) => (s.navRoute?.at === r.at ? { ...s, navRoute: { ...s.navRoute, ...t } } : s)));
+    };
+    tick();
+    const id = setInterval(tick, LIVE_TRAFFIC.everyMs);
+    return () => clearInterval(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [navOn, auth?.token, navRouteAt]);
   // Korki przed nami co TRAFFIC_REFRESH.everyMs (oba silniki); trasa z własnego silnika od razu — sama korków nie ma.
   useEffect(() => {
     if (!navOn || !auth || !TRAFFIC_ON) return;
@@ -228,9 +244,11 @@ function App() {
 
   const route = useMemo(() => {
     const full = trip.profile === "custom" ? trip.segments : segmentsFromProfile(trip.distance, trip.profile);
-    const segments = remainingSegments(full, trip.doneKm);
+    // Korki przed nami (z jazdy kierowców) — wolniej na ich odcinkach; km trasy nawigacji → km pozostałej trasy (od trip.doneKm).
+    const jams = (state.navRoute?.traffic ?? []).filter((t) => t.live && t.kmh !== undefined && t.toKm > trip.doneKm).map((t) => ({ fromKm: t.km - trip.doneKm, toKm: t.toKm - trip.doneKm, kmh: t.kmh! }));
+    const segments = withSlowStretches(remainingSegments(full, trip.doneKm), jams);
     return new Route(liveKmh ? withLiveSpeed(segments, liveKmh, GPS.liveEtaMin) : segments, settings.speeds, trip.trafficPct);
-  }, [trip, settings.speeds, liveKmh]);
+  }, [trip, settings.speeds, liveKmh, state.navRoute?.traffic]);
 
   const options = { allowExtension: settings.allowExtension, allowReducedRest: settings.allowReducedRest };
   const comparison = useMemo(() => compareScenarios(route, driver, planNow, options), [route, driver, planNow, options.allowExtension, options.allowReducedRest]);
@@ -333,6 +351,14 @@ function App() {
     setGuestMode(true);
   };
   // Wylogowanie: najpierw wysyłamy zaległe zmiany, potem czyścimy telefon — dane zostają na koncie.
+  /** Konto po zmianie na serwerze (np. licencja z klucza) — zapisane w telefonie. */
+  const setUser = (user: User) =>
+    setAuth((a) => {
+      if (!a) return a;
+      const next = { ...a, user };
+      saveAuth(next);
+      return next;
+    });
   const signOut = async () => {
     if (auth) {
       await sync.push();
@@ -360,6 +386,7 @@ function App() {
       <NavView
         gapReview={state.gapReview}
         onGapAnswer={answerGap}
+        license={{ status: licenseStatus(auth?.user), page: <LicensePanel token={auth?.token ?? null} user={auth?.user ?? null} onUser={setUser} /> }}
         settings={{ value: settings, onChange: (patch) => setState((s) => ({ ...s, settings: { ...s.settings, ...patch } })) }}
         mapMode={settings.navMap}
         onMapMode={(navMap) => setState((s) => ({ ...s, settings: { ...s.settings, navMap } }))}
@@ -391,11 +418,15 @@ function App() {
         mapToken={navOn ? auth?.token : undefined}
         mapVector={navOn && inVtilesNow ? mapStyle : undefined}
         report={consent && auth ? {
-          onSend: async (kind, value, at) => {
-            // Z mapy: punkt na osi drogi, bez kierunku (nie wiemy, którą stroną jedzie się przez ograniczenie).
-            if (at) return void (await sendReport(auth.token, { kind, lat: at.lat, lon: at.lon, heading: null, value, note: `mapa${at.name ? `: ${at.name}` : ""}` }));
+          onSend: async (kind, value, at, note) => {
+            // Z mapy: punkt na osi drogi, bez kierunku (nie wiemy, którą stroną jedzie się przez ograniczenie). Roboty: rodzaj w note.
+            if (at) return await sendReport(auth.token, { kind, lat: at.lat, lon: at.lon, heading: null, value, note: note ?? `mapa${at.name ? `: ${at.name}` : ""}` });
             if (!live) throw new Error("Brak pozycji GPS.");
-            await sendReport(auth.token, { kind, lat: live.lat, lon: live.lon, heading: live.heading, value, note: "" });
+            return await sendReport(auth.token, { kind, lat: live.lat, lon: live.lon, heading: live.heading, value, note: note ?? "" });
+          },
+          onWorksEnd: async (id) => {
+            if (!live) throw new Error("Brak pozycji GPS.");
+            return (await endRoadworks(auth.token, id, live)).km;
           },
           onVote: async (w, vote) => {
             await voteAlert(auth.token, w, vote);
@@ -572,6 +603,7 @@ function App() {
         {tab === "history" && <HistoryCard history={state.history} now={now} gpsOn={settings.gps} onClear={() => setState((s) => ({ ...s, history: [] }))} token={auth?.token ?? null} onWhere={(id, where) => setState((s) => ({ ...s, history: setWhere(s.history, id, where) }))} gapReview={state.gapReview} onGapAnswer={answerGap} />}
         {tab === "settings" && (
           <SettingsView
+            key={settingsCat ?? "none"}
             initialCategory={settingsCat}
             state={state}
             now={now}
@@ -592,13 +624,7 @@ function App() {
               onLogout: signOut,
               onSyncNow: sync.push,
               onDelete: deleteAccount,
-              onUser: (user) =>
-                setAuth((a) => {
-                  if (!a) return a;
-                  const next = { ...a, user };
-                  saveAuth(next);
-                  return next;
-                }),
+              onUser: setUser,
             }}
           />
         )}
@@ -607,6 +633,7 @@ function App() {
           <button className="primary full" onClick={() => go("plan")}>Pokaż plan</button>
         )}
 
+        <button className="support-link" onClick={() => { go("settings"); setSettingsCat("support"); }}>♥ Wesprzyj rozwój RoadPilot</button>
         <p className="disclaimer">
           RoadPilot jest asystentem planowania. Nie zastępuje homologowanego tachografu ani oficjalnej rejestracji czasu pracy — dane
           i zgodność z przepisami zawsze weryfikuj z tachografem. Limity wg rozporządzenia (WE) 561/2006.

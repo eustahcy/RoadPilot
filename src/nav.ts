@@ -7,7 +7,7 @@ export type NavAccess = "guest" | "noPremium" | "premium";
 import { useEffect, useRef, useState } from "react";
 import { api } from "./api";
 import { Segment } from "./core/route";
-import { HERE, locate, pointAtKm, pushTrail, RoadSection, TrailPoint, trailM } from "./core/navmatch";
+import { HERE, locate, Milestone, pointAtKm, pushTrail, RoadSection, TrailPoint, trailM } from "./core/navmatch";
 import { distanceM } from "./core/gps";
 
 export interface Vehicle {
@@ -25,8 +25,8 @@ export interface Vehicle {
   avoid?: RouteAvoid;
 }
 
-export interface RouteAvoid { tolls: boolean; motorways: boolean; ferries: boolean }
-export const NO_AVOID: RouteAvoid = { tolls: false, motorways: false, ferries: false };
+export interface RouteAvoid { tolls: boolean; motorways: boolean; ferries: boolean; /** Drogi gruntowe / nieutwardzone. */ unpaved?: boolean }
+export const NO_AVOID: RouteAvoid = { tolls: false, motorways: false, ferries: false, unpaved: false };
 
 /** Typowy ciągnik siodłowy z naczepą (UE). */
 export const DEFAULT_VEHICLE: Vehicle = { heightM: 4, widthM: 2.55, lengthM: 16.5, weightKg: 40000, axleWeightKg: 11500, axles: 5, adr: "none", maxKmh: 90 };
@@ -72,6 +72,8 @@ export interface NavRoute {
   speedLimits: { km: number; toKm: number; kmh: number }[];
   /** Rodzaj drogi wg przepisów (obszar zabudowany / poza / autostrada i ekspresowa) — limity ciężarówki; brak w starszych trasach. */
   roads?: RoadSection[];
+  /** Słupki kilometrowe przy trasie (server withMilestones) — pikietaż nad paskiem. */
+  milestones?: Milestone[];
   /** Korki, roboty i zamknięcia na trasie (TomTom, w chwili wyznaczenia); level 1 = małe … 3 = duże, 4 = zamknięte. */
   traffic?: TrafficSection[];
   /** Kiedy korki odświeżono w trakcie jazdy (TRAFFIC_REFRESH) — brak = tylko z chwili wyznaczenia (własny silnik: żadnych). */
@@ -97,6 +99,8 @@ export interface TrafficSection {
   level: number;
   cause: "jam" | "roadwork" | "closed";
   kmh?: number;
+  /** Z jazdy kierowców RoadPilot (nie TomTom). */
+  live?: boolean;
 }
 
 export type JamTone = "slow" | "jam" | "closed";
@@ -146,6 +150,8 @@ export interface RoutePoi {
   /** Po której stronie drogi względem kierunku jazdy. */
   side: "left" | "right";
   offM: number;
+  /** MOP ze stacją: marka stacji w MOP-ie (z najbliższej stacji w OSM) — nazwa to nazwa MOP-u. */
+  brand?: string;
 }
 
 /** Fotoradary, odcinkowe pomiary i kontrole — tylko ostrzegamy (nie są ograniczeniem dla pojazdu). */
@@ -179,7 +185,7 @@ function baseWarningText(w: RouteWarning): string {
     case "incline": return `Stromy odcinek${n}%`;
     case "curve": return `Ciasny zakręt${w.value !== null ? ` (promień ${w.value} m)` : ""}`;
     case "closed": return "Droga zamknięta (zgłoszenie)";
-    case "roadworks": return "Roboty drogowe (zgłoszenie)";
+    case "roadworks": return `${w.raw === "narrow" ? "Zwężenie pasa — roboty" : w.raw === "contraflow" ? "Ruch po drugiej jezdni — roboty" : "Roboty drogowe"}${w.toKm !== undefined ? ` · ${fmtLen(w.toKm - w.km)}` : ""}`;
     default: return w.kind;
   }
 }
@@ -252,6 +258,29 @@ export async function refreshTraffic(token: string, route: NavRoute, km: number)
     const [a, b] = [points[0][2], points[points.length - 1][2]];
     const traffic = [...(route.traffic ?? []).filter((t) => t.toKm < a || t.km > b), ...r.traffic].sort((x, y) => x.km - y.km);
     // „Korki teraz” — opóźnienie z utrudnień, których jeszcze nie minęliśmy.
+    const trafficMin = Math.round(traffic.filter((t) => t.toKm > km).reduce((sum, t) => sum + t.delayMin, 0) * 10) / 10;
+    return { traffic, trafficMin, trafficAt: Date.now() };
+  } catch {
+    return null;
+  }
+}
+
+/** Korki z jazdy kierowców RoadPilot (bez TomTom) — pokazywane zawsze; odświeżanie co LIVE_TRAFFIC.everyMs w nawigacji. */
+export const LIVE_TRAFFIC = { everyMs: 2 * 60_000, aheadKm: 150 } as const;
+/** Rysowanie korków na mapie i w karcie: korki TomTom (wyłączone) albo nasze z jazdy kierowców. */
+export const SHOW_TRAFFIC = true;
+
+/**
+ * Korki i spowolnienia przed nami (i odcinek, na którym stoimy) z jazdy kierowców RoadPilot — zastępują stare z tego kawałka trasy.
+ * null = nie udało się (zostają stare).
+ */
+export async function refreshLiveTraffic(token: string, route: NavRoute, km: number): Promise<Pick<NavRoute, "traffic" | "trafficMin" | "trafficAt"> | null> {
+  const points = route.points.filter((p) => p[2] >= km - 3 && p[2] <= km + LIVE_TRAFFIC.aheadKm);
+  if (points.length < 2) return null;
+  try {
+    const r = await api<{ traffic: TrafficSection[] }>("POST", "/nav/live", { points, segments: route.segments.map((x) => ({ type: x.type, km: x.km })) }, token);
+    const [a, b] = [points[0][2], points[points.length - 1][2]];
+    const traffic = [...(route.traffic ?? []).filter((t) => t.toKm < a || t.km > b), ...r.traffic].sort((x, y) => x.km - y.km);
     const trafficMin = Math.round(traffic.filter((t) => t.toKm > km).reduce((sum, t) => sum + t.delayMin, 0) * 10) / 10;
     return { traffic, trafficMin, trafficAt: Date.now() };
   } catch {

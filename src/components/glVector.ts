@@ -17,9 +17,25 @@ export interface VLabel {
   x: number;
   y: number;
   text: string;
-  kind: "city" | "town" | "village" | "hamlet" | "ref" | "street";
+  kind: "city" | "town" | "village" | "hamlet" | "ref" | "street" | "limit";
   /** Nazwa ulicy: kąt drogi w px kafelka (stopnie, 0 = w prawo) — etykieta leży wzdłuż drogi. */
   angle?: number;
+}
+
+/** Tekst znaku: najbardziej dotkliwe ograniczenie dla zestawu (masa, nacisk osi, wysokość, szerokość, długość); null = zakaz TIR. */
+function limitText(p: Record<string, unknown>, v: Vehicle): string | null {
+  const n = (k: string) => { const x = parseFloat(String(p[k] ?? "").replace(",", ".")); return Number.isFinite(x) ? x : null; };
+  const f = (x: number) => String(Math.round(x * 10) / 10).replace(".", ",");
+  const checks: [string, number, (x: number) => string][] = [
+    ["maxweight", v.weightKg / 1000, (x) => `${f(x)}t`],
+    ["maxweightrating", v.weightKg / 1000, (x) => `${f(x)}t`],
+    ["maxaxleload", v.axleWeightKg / 1000, (x) => `${f(x)}t/oś`],
+    ["maxheight", v.heightM, (x) => `${f(x)}m`],
+    ["maxwidth", v.widthM, (x) => `↔${f(x)}m`],
+    ["maxlength", v.lengthM, (x) => `${f(x)}m dł.`],
+  ];
+  for (const [k, mine, fmt] of checks) { const x = n(k); if (x !== null && x < mine) return fmt(x); }
+  return null;
 }
 
 export interface VTileGeometry {
@@ -129,6 +145,7 @@ export function buildVectorTile(layers: MvtLayer[], vehicle: Vehicle): VTileGeom
   }
   const road = byName.get("road");
   const streets: { len: number; label: VLabel }[] = [];
+  const limits: VLabel[] = [];
   if (road) {
     for (const f of road.features) {
       if (f.type !== 2) continue;
@@ -160,6 +177,8 @@ export function buildVectorTile(layers: MvtLayer[], vehicle: Vehicle): VTileGeom
         }
         acc += seg;
       }
+      // Ograniczenie, które dotyczy naszego zestawu — znak z wartością („10t”, „3,5m”) albo przekreślona ciężarówka przy drodze.
+      if (ban) limits.push({ x: mx, y: my, text: limitText(f.props, vehicle) ?? "TIR", kind: "limit" });
       const ref = f.props.ref;
       if (typeof ref === "string" && (cls === "motorway" || cls === "trunk" || cls === "primary" || cls === "secondary")) {
         labels.push({ x: mx, y: my, text: ref.split(";")[0], kind: "ref" });
@@ -167,6 +186,12 @@ export function buildVectorTile(layers: MvtLayer[], vehicle: Vehicle): VTileGeom
         streets.push({ len: total, label: { x: mx, y: my, text: f.props.name, kind: "street", angle } });
       }
     }
+  }
+  // Znaki ograniczeń: najwyżej 12 na kafelek, ten sam znak nie częściej niż co ~60 px kafelka.
+  for (const l of limits) {
+    if (labels.filter((x) => x.kind === "limit").length >= 12) break;
+    if (labels.some((x) => x.kind === "limit" && x.text === l.text && Math.hypot(x.x - l.x, x.y - l.y) < 60)) continue;
+    labels.push(l);
   }
   // Nazwy ulic: najdłuższe w kafelku, bez powtórzeń, najwyżej 14 na kafelek.
   const seen = new Set<string>();

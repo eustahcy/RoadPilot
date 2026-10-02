@@ -9,13 +9,15 @@ import { cleanPoints, cleanReport, inPoland } from "./collect.mjs";
 import { applySpeeds, SPEED_MIN } from "./speeds.mjs";
 import { badTurnClusters } from "./mapcheck.mjs";
 import { HERE_MAX_POINTS, limitHere, osrmLanes, parseValhalla, parseValhallaAlternates, roadInfo, traceChunks, tracePoints, traceRequest, valhallaRequest } from "./valhalla.mjs";
+import { LIVE, liveSections } from "./livetraffic.mjs";
+import { routeMilestones } from "./milestones.mjs";
 import { ALERT_KINDS, ALERT_TTL_H, applyConditions, applyVotes, blockingPoints, dropCopiedBridgeHeights, routeAlerts, routeBoxes, routeWarnings } from "./warnings.mjs";
 import { compareReports, REPORT_TO_OSM } from "./compare.mjs";
 import { parseRoutes, parseSearch, ROUTE_TYPES, routeError, routeUrl, searchUrl, validPoint } from "./nav.mjs";
 import { cleanPresence, friendView, keepReplayedPosAt } from "./friends.mjs";
 import { bboxParam, incidentSections, TRAFFIC_CATEGORIES, trafficBoxes } from "./traffic.mjs";
 import { routePois } from "./pois.mjs";
-import { extendPremium, keyView, makeKey, MAX_KEY_DAYS, normalizeKey } from "./premium.mjs";
+import { extendPremium, keyView, makeKey, MAX_KEY_DAYS, canonKey, redeemProblem } from "./premium.mjs";
 import { gapRequest, gapRoute, pickPlace, pickPoi, PLACE_MAX_KM, POI_AT_M, roadLabel } from "./geo.mjs";
 import { boxAround, cleanParking, distanceM, PARKING_DAILY_MAX, PARKING_RADIUS_M, parkingView } from "./parking.mjs";
 import { createReadStream } from "node:fs";
@@ -255,7 +257,7 @@ const routes = {
   },
 };
 
-const PUBLIC = new Set(["POST /api/register", "POST /api/login", "POST /api/password/forgot", "POST /api/password/reset"]);
+const PUBLIC = new Set(["POST /api/register", "POST /api/login", "POST /api/password/forgot", "POST /api/password/reset", "GET /api/config"]);
 
 // ── Nawigacja (TomTom) ──────────────────────────────────────────────────────
 // Tylko dla kont Premium (i adminów); limit zapytań na adres IP dodatkowo chroni limit klucza.
@@ -264,7 +266,7 @@ function requirePremium(user) {
   if (!hasPremium(user)) throw new HttpError(403, "Nawigacja jest dostępna w RoadPilot Premium.");
 }
 
-const NAV_LIMITS = { search: { max: 120, windowMs: 10 * 60_000 }, route: { max: 30, windowMs: 10 * 60_000 }, here: { max: 600, windowMs: 10 * 60_000 }, nearby: { max: 60, windowMs: 10 * 60_000 }, gap: { max: 20, windowMs: 10 * 60_000 }, traffic: { max: 30, windowMs: 10 * 60_000 }, where: { max: 60, windowMs: 10 * 60_000 }, redeem: { max: 10, windowMs: 60 * 60_000 } };
+const NAV_LIMITS = { search: { max: 120, windowMs: 10 * 60_000 }, route: { max: 30, windowMs: 10 * 60_000 }, here: { max: 600, windowMs: 10 * 60_000 }, nearby: { max: 60, windowMs: 10 * 60_000 }, gap: { max: 20, windowMs: 10 * 60_000 }, traffic: { max: 30, windowMs: 10 * 60_000 }, live: { max: 60, windowMs: 10 * 60_000 }, where: { max: 60, windowMs: 10 * 60_000 }, redeem: { max: 10, windowMs: 60 * 60_000 } };
 
 // Limity darmowego planu TomTom (z panelu my.tomtom.com) — nie przekraczamy BUDGET_SHARE z nich.
 // Okres: miesiąc (bezpieczniej) albo dzień — TOMTOM_PERIOD=day, jeśli limity w panelu są dzienne.
@@ -427,6 +429,22 @@ async function valhallaOnce(from, to, vehicle, exclude, routeType = "fastest", v
  * sprawdzamy trasę naszą bazą i przy twardym konflikcie (oś, masa, wysokość, szerokość, długość, zakaz) liczymy
  * od nowa z tym miejscem wykluczonym. Gdy objazdu nie ma — zostaje ostatnia wykonalna trasa z ostrzeżeniami.
  */
+/** Słupki kilometrowe przy trasie (pikietaż „S19 · km 432”) — błąd bazy nie psuje trasy. */
+async function withMilestones(route) {
+  try {
+    const rows = [];
+    for (const box of routeBoxes(route.points, 25, 0.002)) {
+      const [r] = await db.query("SELECT lat, lon, km, ref FROM osm_milestones WHERE lat BETWEEN ? AND ? AND lon BETWEEN ? AND ?", [box.minLat, box.maxLat, box.minLon, box.maxLon]);
+      rows.push(...r);
+    }
+    const seen = new Set();
+    return { ...route, milestones: routeMilestones(route.points, rows).filter((m) => !seen.has(m.km) && seen.add(m.km)) };
+  } catch (e) {
+    console.error("milestones", e);
+    return route;
+  }
+}
+
 /** Najwięcej punktów „omiń blokadę” w jednym zapytaniu (kilka kolejnych blokad na trasie). */
 const MAX_AVOID = 12;
 
@@ -560,7 +578,7 @@ routes["POST /api/nav/route"] = async (req, user) => {
   const to = gate ?? target;
   const tag = (res) => (gate ? { ...res, route: { ...res.route, gate } } : res);
   // Prędkości z jazdy kierowców dla trasy i alternatyw (własny silnik).
-  const finish = async (res) => tag({ ...res, route: await withSpeeds(res.route), ...(res.alternatives ? { alternatives: await Promise.all(res.alternatives.map(withSpeeds)) } : {}) });
+  const finish = async (res) => tag({ ...res, route: await withMilestones(await withSpeeds(res.route)), ...(res.alternatives ? { alternatives: await Promise.all(res.alternatives.map(withSpeeds)) } : {}) });
   // Punkty pośrednie (przytrzymanie na mapie → „dodaj do trasy”); z nimi bez tras alternatywnych.
   const via = Array.isArray(body.via) ? body.via.map(validPoint) : [];
   if (via.length > MAX_VIA || via.some((p) => !p)) throw new HttpError(400, `Najwyżej ${MAX_VIA} punktów pośrednich.`);
@@ -687,7 +705,7 @@ async function findWarnings(pts, vehicle, alerts = true, timing = {}) {
       [...area, vehicle.heightM, vehicle.weightKg / 1000, vehicle.axleWeightKg / 1000, vehicle.widthM, vehicle.lengthM],
     );
     const [rep] = await db.query(
-      `SELECT 'report' AS source, id, kind, value, note AS raw, lat, lon, NULL AS geom, '' AS name FROM road_reports
+      `SELECT 'report' AS source, id, kind, value, note AS raw, lat, lon, NULL AS geom, '' AS name, created_at FROM road_reports
        WHERE lat BETWEEN ? AND ? AND lon BETWEEN ? AND ? AND (
          (kind = 'height' AND value < ?) OR (kind = 'weight' AND value < ?) OR kind = 'truck_ban' OR
          (kind = 'closed' AND created_at > NOW() - INTERVAL 14 DAY) OR (kind = 'roadworks' AND created_at > NOW() - INTERVAL 60 DAY))`,
@@ -695,7 +713,10 @@ async function findWarnings(pts, vehicle, alerts = true, timing = {}) {
     );
     // Wysokość na moście przepisana z drogi pod nim (błąd w OSM) — nie ostrzega i nie zmienia trasy.
     const rows = dropCopiedBridgeHeights([...osm, ...rep].map((r) => ({ ...r, geom: typeof r.geom === "string" ? JSON.parse(r.geom) : r.geom })));
-    warnings.push(...routeWarnings(pts, rows, vehicle, box));
+    // Roboty z długością → odcinek (km … km + długość); kilka zgłoszeń tych samych robót — liczy się najnowsze (poprawka kierowcy).
+    const works = routeWarnings(pts, rows, vehicle, box).map((w) => (w.kind === "roadworks" && w.value ? { ...w, toKm: w.km + w.value } : w));
+    const born = new Map(rep.map((r) => [String(r.id), +new Date(r.created_at)]));
+    warnings.push(...works.filter((w) => w.kind !== "roadworks" || !works.some((o) => o !== w && o.kind === "roadworks" && Math.abs(o.km - w.km) < 1.5 && (born.get(String(o.id)) ?? 0) > (born.get(String(w.id)) ?? 0))));
     if (!alerts) continue;
     const [cams] = await db.query(
       `SELECT 'osm' AS source, osm_id AS id, kind, value, lat, lon, from_lat, from_lon, to_lat, to_lon, ref AS name FROM osm_enforcement
@@ -794,6 +815,28 @@ routes["POST /api/nav/traffic"] = async (req, user) => {
   const incidents = [];
   for (const box of trafficBoxes(pts).slice(0, TRAFFIC_MAX_BOXES)) incidents.push(...(await trafficIncidents(box)));
   return [200, { traffic: incidentSections(pts, incidents) }];
+};
+
+/**
+ * Korki i spowolnienia z jazdy kierowców RoadPilot (gps_points z ostatnich LIVE.windowMin minut, za zgodą) na kawałku trasy przed nami.
+ * Bez TomTom — działa też przy wyłączonych korkach. Body: points [lat, lon, km][], segments { type, km }[] (od startu trasy).
+ */
+routes["POST /api/nav/live"] = async (req, user) => {
+  requirePremium(user);
+  navThrottle("live", req);
+  const body = await readJson(req);
+  const pts = Array.isArray(body.points) ? body.points.filter((p) => Array.isArray(p) && p.length >= 3 && p.every(Number.isFinite)).slice(0, 20000) : [];
+  if (pts.length < 2) throw new HttpError(400, "Brak trasy.");
+  const segments = Array.isArray(body.segments) ? body.segments.filter((x) => x && typeof x.type === "string" && Number.isFinite(x.km)).slice(0, 5000) : [];
+  const rows = [];
+  for (const box of routeBoxes(pts)) {
+    const [r] = await db.query(
+      "SELECT lat, lon, kmh, heading FROM gps_points WHERE t > NOW() - INTERVAL ? MINUTE AND lat BETWEEN ? AND ? AND lon BETWEEN ? AND ?",
+      [LIVE.windowMin, box.minLat, box.maxLat, box.minLon, box.maxLon],
+    );
+    rows.push(...r);
+  }
+  return [200, { traffic: liveSections(pts, segments, rows) }];
 };
 
 /** Stacje paliw, MOP-y, parkingi TIR i bramki przy trasie (pinezki na mapie) — z osm_pois, bez kosztów TomTom. */
@@ -896,6 +939,10 @@ routes["POST /api/geo/snap"] = async (req, user) => {
 const REPORTED_POIS = "SELECT CONCAT('r', id) AS osm_id, kind, lat, lon, 'Zgłoszenie kierowcy' AS name, kind = 'parking' AS truck FROM road_reports WHERE kind IN ('parking', 'mop', 'fuel') AND lat BETWEEN ? AND ? AND lon BETWEEN ? AND ?";
 
 /** `tolls` — także bramki (kind toll); prosi o nie tylko aplikacja, która je rysuje (starsza pokazałaby je jako parking). */
+/** Stacja „w” MOP-ie: do tylu metrów od punktu MOP-u (MOP-y bywają długie, stacja na jednym końcu). */
+const SERVICES_FUEL_M = 450;
+const distM = (a, b) => Math.hypot((a.lat - b.lat) * 111_320, (a.lon - b.lon) * 111_320 * Math.cos((a.lat * Math.PI) / 180));
+
 async function findPois(pts, tolls = false) {
   const out = [];
   for (const box of routeBoxes(pts, 25, 0.004)) {
@@ -903,7 +950,13 @@ async function findPois(pts, tolls = false) {
     const [rows] = await db.query("SELECT osm_id, kind, lat, lon, name, truck FROM osm_pois WHERE lat BETWEEN ? AND ? AND lon BETWEEN ? AND ?", area);
     const [reported] = await db.query(REPORTED_POIS, area);
     // OSM przed zgłoszeniami: to samo miejsce z obu źródeł zostaje jako pinezka z OSM (routePois łączy bliskie miejsca tego rodzaju).
-    out.push(...routePois(pts, [...(tolls ? rows : rows.filter((r) => r.kind !== "toll")), ...reported.map((r) => ({ ...r, truck: Number(r.truck) }))], box));
+    // MOP ze stacją (services) ma w OSM nazwę MOP-u — markę bierzemy z najbliższej stacji z nazwą w promieniu SERVICES_FUEL_M.
+    const brands = new Map();
+    for (const sv of rows.filter((r) => r.kind === "services")) {
+      const near = rows.filter((r) => r.kind === "fuel" && r.name && distM(sv, r) <= SERVICES_FUEL_M).sort((a, b) => distM(sv, a) - distM(sv, b))[0];
+      if (near) brands.set(String(sv.osm_id), near.name);
+    }
+    out.push(...routePois(pts, [...(tolls ? rows : rows.filter((r) => r.kind !== "toll")), ...reported.map((r) => ({ ...r, truck: Number(r.truck) }))], box).map((p) => (brands.has(String(p.id)) ? { ...p, brand: brands.get(String(p.id)) } : p)));
   }
   // Sąsiednie prostokąty zachodzą na siebie — to samo miejsce tylko raz.
   const seen = new Set();
@@ -944,8 +997,22 @@ routes["POST /api/collect/report"] = async (req, user) => {
   } catch (e) {
     throw new HttpError(400, e.message);
   }
-  await db.query("INSERT INTO road_reports (user_id, kind, lat, lon, heading, value, note) VALUES (?, ?, ?, ?, ?, ?, ?)", [user.id, r.kind, r.lat, r.lon, r.heading, r.value, r.note]);
-  return [201, {}];
+  const [res] = await db.query("INSERT INTO road_reports (user_id, kind, lat, lon, heading, value, note) VALUES (?, ?, ?, ?, ?, ?, ?)", [user.id, r.kind, r.lat, r.lon, r.heading, r.value, r.note]);
+  return [201, { id: res.insertId }];
+};
+
+/** Koniec robót drogowych zgłoszonych „zaznaczę koniec”: długość = odległość od początku × 1,1 (droga nie jest prosta), 0,1–50 km. */
+routes["POST /api/collect/report/end"] = async (req, user) => {
+  requireConsent(user);
+  const b = await readJson(req);
+  const at = validPoint({ lat: Number(b.lat), lon: Number(b.lon) });
+  const id = Number(b.id);
+  if (!at || !Number.isInteger(id)) throw new HttpError(400, "Brak pozycji.");
+  const [[row]] = await db.query("SELECT lat, lon FROM road_reports WHERE id = ? AND user_id = ? AND kind = 'roadworks'", [id, user.id]);
+  if (!row) throw new HttpError(404, "Nie ma takiego zgłoszenia.");
+  const km = Math.round(Math.min(50, Math.max(0.1, (distM(row, at) / 1000) * 1.1)) * 10) / 10;
+  await db.query("UPDATE road_reports SET value = ? WHERE id = ?", [km, id]);
+  return [200, { km }];
 };
 
 /** Po minięciu fotoradaru / kontroli: „nadal jest” (+1) albo „nie ma” (-1) — jeden głos na miejsce (zmiana nadpisuje). */
@@ -1217,6 +1284,35 @@ routes["POST /api/admin/override"] = async (req, user) => {
   return [200, {}];
 };
 
+// ── Ustawienia aplikacji (admin) ─────────────────────────────────────────────
+
+/** Klucze app_config widoczne w aplikacji (także bez konta) i ich walidacja. */
+const CONFIG_KEYS = {
+  // Link do wpłat (Revolut) na stronie „Wsparcie” — tylko https.
+  supportUrl: (v) => (v === "" || /^https:\/\/[^\s<>"']{4,300}$/.test(v) ? v : null),
+};
+
+async function readConfig() {
+  const [rows] = await db.query("SELECT k, v FROM app_config");
+  const out = Object.fromEntries(Object.keys(CONFIG_KEYS).map((k) => [k, ""]));
+  for (const r of rows) if (r.k in CONFIG_KEYS) out[r.k] = r.v;
+  return out;
+}
+
+routes["GET /api/config"] = async () => [200, await readConfig()];
+
+routes["PUT /api/admin/config"] = async (req, user) => {
+  requireAdmin(user);
+  const b = await readJson(req);
+  for (const [k, check] of Object.entries(CONFIG_KEYS)) {
+    if (!(k in b)) continue;
+    const v = check(String(b[k] ?? "").trim());
+    if (v === null) throw new HttpError(400, "Link musi zaczynać się od https://");
+    await db.query("INSERT INTO app_config (k, v) VALUES (?, ?) ON DUPLICATE KEY UPDATE v = VALUES(v)", [k, v]);
+  }
+  return [200, await readConfig()];
+};
+
 function requireAdmin(user) {
   if (!isAdmin(user)) throw new HttpError(403, "Tylko dla administratora.");
 }
@@ -1250,22 +1346,42 @@ routes["POST /api/admin/premium"] = async (req, user) => {
 
 // ── Klucze Premium ──
 
-const KEYS_SQL = "SELECT k.code, k.days, k.note, k.created_at, k.used_at, u.email AS used_email FROM premium_keys k LEFT JOIN users u ON u.id = k.used_by";
+const KEYS_SQL = `SELECT k.code, k.label, k.days, k.note, k.max_uses, k.created_at, f.email AS for_email,
+  (SELECT COUNT(*) FROM premium_redemptions r WHERE r.code = k.code) AS uses,
+  (SELECT MAX(r.used_at) FROM premium_redemptions r WHERE r.code = k.code) AS last_used,
+  (SELECT GROUP_CONCAT(u.email ORDER BY r.used_at DESC) FROM premium_redemptions r JOIN users u ON u.id = r.user_id WHERE r.code = k.code) AS used_emails
+  FROM premium_keys k LEFT JOIN users f ON f.id = k.for_user`;
 
-/** Nowy klucz: days = liczba dni (1–3650), null = bez terminu; note = dla kogo (tylko w Administracji). */
+/**
+ * Nowa licencja: code — własny klucz (pusty = losowy RP-XXXX-XXXX), days — 1–3650 albo null (bez terminu),
+ * forEmail — tylko dla tego konta, maxUses — ile osób (null = bez limitu, „dla wszystkich”), note — dla kogo (tylko w Administracji).
+ */
 routes["POST /api/admin/keys"] = async (req, user) => {
   requireAdmin(user);
   const body = await readJson(req);
   const days = body.days === null ? null : Number(body.days);
   if (days !== null && !(Number.isInteger(days) && days >= 1 && days <= MAX_KEY_DAYS)) throw new HttpError(400, "Liczba dni: od 1 do 3650.");
   const note = String(body.note ?? "").trim().slice(0, 120);
-  for (let i = 0; i < 5; i++) {
-    const code = makeKey(randomInt);
-    const [r] = await db.query("INSERT IGNORE INTO premium_keys (code, days, note, created_by) VALUES (?, ?, ?, ?)", [code, days, note, user.id]);
+  const maxUses = body.maxUses === null ? null : Number(body.maxUses ?? 1);
+  if (maxUses !== null && !(Number.isInteger(maxUses) && maxUses >= 1 && maxUses <= 100000)) throw new HttpError(400, "Liczba osób: od 1 do 100 000 albo bez limitu.");
+  let forUser = null;
+  const forEmail = String(body.forEmail ?? "").trim().toLowerCase();
+  if (forEmail) {
+    const [[u]] = await db.query("SELECT id FROM users WHERE LOWER(email) = ?", [forEmail]);
+    if (!u) throw new HttpError(404, `Nie ma konta ${forEmail}.`);
+    forUser = u.id;
+  }
+  const own = String(body.code ?? "").trim();
+  const candidates = own ? [own] : Array.from({ length: 5 }, () => makeKey(randomInt));
+  for (const label of candidates) {
+    const code = canonKey(label);
+    if (!code) throw new HttpError(400, "Klucz: 4–40 liter lub cyfr (spacje i myślniki można).");
+    const [r] = await db.query("INSERT IGNORE INTO premium_keys (code, label, days, note, created_by, for_user, max_uses) VALUES (?, ?, ?, ?, ?, ?, ?)", [code, label.slice(0, 40), days, note, user.id, forUser, maxUses]);
     if (r.affectedRows) {
       const [rows] = await db.query(`${KEYS_SQL} WHERE k.code = ?`, [code]);
       return [201, { key: keyView(rows[0]) }];
     }
+    if (own) throw new HttpError(409, "Taki klucz już istnieje — wymyśl inny.");
   }
   throw new HttpError(500, "Nie udało się wygenerować klucza.");
 };
@@ -1276,28 +1392,33 @@ routes["GET /api/admin/keys"] = async (req, user) => {
   return [200, { keys: rows.map(keyView) }];
 };
 
-/** Usunięcie niewykorzystanego klucza (np. wysłanego nie temu, komu trzeba). */
+/** Wyłączenie klucza (nikt więcej go nie użyje); Premium nadane wcześniej zostaje. */
 routes["DELETE /api/admin/keys"] = async (req, user) => {
   requireAdmin(user);
-  const code = normalizeKey((await readJson(req)).key);
+  const code = canonKey((await readJson(req)).key);
   if (!code) throw new HttpError(400, "Nieprawidłowy klucz.");
-  const [r] = await db.query("DELETE FROM premium_keys WHERE code = ? AND used_by IS NULL", [code]);
-  if (!r.affectedRows) throw new HttpError(409, "Klucz został już użyty albo nie istnieje.");
+  const [r] = await db.query("DELETE FROM premium_keys WHERE code = ?", [code]);
+  if (!r.affectedRows) throw new HttpError(404, "Nie ma takiego klucza.");
   return [200, { ok: true }];
 };
 
 /** Kierowca wpisuje klucz: jednorazowy, dni dokładane do trwającego Premium. */
 routes["POST /api/premium/redeem"] = async (req, user) => {
   navThrottle("redeem", req);
-  const code = normalizeKey((await readJson(req)).key);
-  if (!code) throw new HttpError(400, "To nie wygląda na klucz RoadPilot (np. RP-7KQM-X2HD).");
-  // Warunkowy UPDATE jest atomowy — ten sam klucz wpisany naraz na dwóch kontach zadziała tylko raz.
-  const [r] = await db.query("UPDATE premium_keys SET used_by = ?, used_at = NOW() WHERE code = ? AND used_by IS NULL", [user.id, code]);
-  if (!r.affectedRows) {
-    const [k] = await db.query("SELECT used_by FROM premium_keys WHERE code = ?", [code]);
-    throw new HttpError(k.length ? 409 : 404, k.length ? "Ten klucz został już użyty." : "Nie ma takiego klucza — sprawdź, czy dobrze przepisany.");
-  }
-  const [[key]] = await db.query("SELECT days FROM premium_keys WHERE code = ?", [code]);
+  const typed = canonKey((await readJson(req)).key);
+  if (!typed) throw new HttpError(400, "Wpisz klucz licencyjny (litery i cyfry).");
+  // Stare klucze wpisywane bez „RP”.
+  const [[key]] = await db.query("SELECT code, days, for_user, max_uses FROM premium_keys WHERE code = ? OR code = ?", [typed, `RP${typed}`]);
+  const [[cnt]] = key ? await db.query("SELECT COUNT(*) AS n, SUM(user_id = ?) AS mine FROM premium_redemptions WHERE code = ?", [user.id, key.code]) : [[{ n: 0, mine: 0 }]];
+  const problem = redeemProblem(key, user.id, Number(cnt.n), Number(cnt.mine) > 0, user.premium_until, Date.now());
+  if (problem) throw new HttpError(key ? 409 : 404, problem);
+  // Limit użyć pilnuje warunkowy INSERT … SELECT — dwa konta naraz nie przekroczą max_uses.
+  const [r] = await db.query(
+    `INSERT IGNORE INTO premium_redemptions (code, user_id) SELECT ?, ? FROM DUAL
+     WHERE ? IS NULL OR (SELECT COUNT(*) FROM premium_redemptions WHERE code = ?) < ?`,
+    [key.code, user.id, key.max_uses, key.code, key.max_uses],
+  );
+  if (!r.affectedRows) throw new HttpError(409, "Limit użyć tego klucza się wyczerpał.");
   const until = extendPremium(user.premium_until, key.days, Date.now());
   await db.query("UPDATE users SET premium_until = ? WHERE id = ?", [until, user.id]);
   const [rows] = await db.query("SELECT id, email, name, role, premium_until, data_consent_at FROM users WHERE id = ?", [user.id]);

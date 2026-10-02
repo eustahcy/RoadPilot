@@ -94,6 +94,30 @@ export function withLiveSpeed(segments: Segment[], kmh: number, minutes: number)
   return out;
 }
 
+/**
+ * Wolne odcinki przed nami (korki z jazdy kierowców RoadPilot) — km liczone od początku `segments`; na nich prędkość nie wyższa niż `kmh`.
+ * Dzięki temu przyjazd i plan przerw uwzględniają korek, a nie tylko pokazują go na mapie.
+ */
+export function withSlowStretches(segments: Segment[], stretches: { fromKm: number; toKm: number; kmh: number }[]): Segment[] {
+  let out = segments;
+  for (const st of stretches) {
+    if (st.toKm <= 0) continue;
+    const next: Segment[] = [];
+    let at = 0;
+    for (const s of out) {
+      const a = at, b = at + s.km;
+      at = b;
+      const lo = Math.max(a, st.fromKm), hi = Math.min(b, st.toKm);
+      if (hi - lo < 0.05) { next.push(s); continue; }
+      if (lo - a >= 0.05) next.push({ ...s, km: round1(lo - a) });
+      next.push({ ...s, km: round1(hi - lo), kmh: Math.min(s.kmh ?? Infinity, Math.max(3, st.kmh)) });
+      if (b - hi >= 0.05) next.push({ ...s, km: round1(b - hi) });
+    }
+    out = next;
+  }
+  return out;
+}
+
 function round1(n: number) {
   return Math.round(n * 10) / 10;
 }

@@ -15,8 +15,12 @@ export const TRACE = {
   everyM: 60,
   /** Poniżej tej prędkości nie zbieramy (postój — nic nie mówi o drodze). */
   minKmh: 8,
-  /** Wysyłka: co tyle ms albo po tylu punktach; bufor w telefonie maks. tyle punktów. */
-  uploadMs: 5 * 60_000,
+  /** Korek: wolniej niż minKmh zbieramy co slowEveryMs (bez wymogu przesunięcia), ale tylko do slowForMs od ostatniej jazdy —
+   *  stanie w korku to sygnał dla innych kierowców (server/livetraffic), a postój na parkingu nie. */
+  slowEveryMs: 30_000,
+  slowForMs: 90 * 60_000,
+  /** Wysyłka: co tyle ms albo po tylu punktach; bufor w telefonie maks. tyle punktów (krócej — korki widzą inni na bieżąco). */
+  uploadMs: 2 * 60_000,
   uploadPoints: 400,
   maxBuffer: 20_000,
 } as const;
@@ -57,6 +61,8 @@ function metres(a: { lat: number; lon: number }, b: { lat: number; lon: number }
 /** Zbiera punkty śladu z odczytów GPS i wysyła je paczkami — tylko gdy `token` i zgoda. */
 export function useTraceCollector(token: string | null, enabled: boolean, live: Live | null) {
   const last = useRef<Point | null>(null);
+  /** Ostatni odczyt w jeździe (≥ minKmh) — wolne odczyty zbieramy tylko niedługo po nim. */
+  const lastMoving = useRef(0);
   const sending = useRef(false);
 
   const upload = async (keepalive = false) => {
@@ -76,9 +82,15 @@ export function useTraceCollector(token: string | null, enabled: boolean, live: 
   };
 
   useEffect(() => {
-    if (!enabled || !live || live.kmh === null || live.kmh < TRACE.minKmh || !inPoland(live.lat, live.lon)) return;
+    if (!enabled || !live || live.kmh === null || !inPoland(live.lat, live.lon)) return;
     const prev = last.current;
-    if (prev && (live.t - prev[0] < TRACE.everyMs || metres({ lat: prev[1], lon: prev[2] }, live) < TRACE.everyM)) return;
+    if (live.kmh < TRACE.minKmh) {
+      // Wolno / stoimy: punkt co slowEveryMs, o ile niedawno jechaliśmy (korek, nie parking).
+      if (live.t - lastMoving.current > TRACE.slowForMs || (prev && live.t - prev[0] < TRACE.slowEveryMs)) return;
+    } else {
+      lastMoving.current = live.t;
+      if (prev && (live.t - prev[0] < TRACE.everyMs || metres({ lat: prev[1], lon: prev[2] }, live) < TRACE.everyM)) return;
+    }
     const p: Point = [live.t, Math.round(live.lat * 1e6) / 1e6, Math.round(live.lon * 1e6) / 1e6, Math.round(live.kmh), live.heading === null ? null : Math.round(live.heading)];
     last.current = p;
     const points = [...read(), p];
@@ -105,7 +117,7 @@ export type ReportKind = "camera" | "section" | "police" | "itd" | "height" | "w
 
 /** `quick` — jedno dotknięcie wysyła od razu (w czasie jazdy), bez wyboru i przycisku „Wyślij”. */
 /** `quick` — wysyłane jednym dotknięciem (alerty w jeździe); `place` — miejsce, którego nie ma na mapie (też jednym dotknięciem). */
-export const REPORT_KINDS: { id: ReportKind; label: string; unit?: string; min?: number; max?: number; step?: number; def?: number; quick?: boolean; place?: boolean }[] = [
+export const REPORT_KINDS: { id: ReportKind; label: string; unit?: string; min?: number; max?: number; step?: number; def?: number; quick?: boolean; place?: boolean; /** Roboty: rodzaj i długość zamiast wartości. */ works?: boolean }[] = [
   { id: "camera", label: "Fotoradar", quick: true },
   { id: "section", label: "Odcinkowy pomiar", quick: true },
   { id: "police", label: "Kontrola policji", quick: true },
@@ -115,7 +127,7 @@ export const REPORT_KINDS: { id: ReportKind; label: string; unit?: string; min?:
   { id: "speed", label: "Ograniczenie prędkości", unit: "km/h", min: 5, max: 140, step: 10, def: 50 },
   { id: "truck_ban", label: "Zakaz dla ciężarówek" },
   { id: "closed", label: "Droga zamknięta" },
-  { id: "roadworks", label: "Roboty drogowe" },
+  { id: "roadworks", label: "Roboty drogowe", works: true },
   { id: "parking", label: "Parking dla ciężarówek", place: true },
   { id: "mop", label: "MOP", place: true },
   { id: "fuel", label: "Stacja paliw", place: true },
@@ -124,7 +136,30 @@ export const REPORT_KINDS: { id: ReportKind; label: string; unit?: string; min?:
 ];
 
 export function sendReport(token: string, r: { kind: ReportKind; lat: number; lon: number; heading: number | null; value: number | null; note: string }) {
-  return api("POST", "/collect/report", r, token);
+  return api<{ id?: number }>("POST", "/collect/report", r, token);
+}
+
+/** Rodzaje robót drogowych (note zgłoszenia) — jak server/collect.mjs ROADWORKS_TYPES. */
+export const WORKS_TYPES = [
+  { id: "works", label: "Roboty" },
+  { id: "narrow", label: "Zwężenie pasa" },
+  { id: "contraflow", label: "Ruch po drugiej jezdni" },
+] as const;
+export type WorksType = (typeof WORKS_TYPES)[number]["id"];
+
+/** Długość robót do wyboru jednym dotknięciem: null = tylko tutaj, "end" = zaznaczę koniec przy wyjeździe. */
+export const WORKS_LENGTHS: { id: number | null | "end"; label: string }[] = [
+  { id: null, label: "Tylko tutaj" },
+  { id: 1, label: "1 km" },
+  { id: 3, label: "3 km" },
+  { id: 5, label: "5 km" },
+  { id: 10, label: "10 km" },
+  { id: "end", label: "Zaznaczę koniec" },
+];
+
+/** „Koniec robót” — zgłoszenie robót dostaje długość od swojego początku do tego miejsca. */
+export function endRoadworks(token: string, id: number, at: { lat: number; lon: number }) {
+  return api<{ km: number }>("POST", "/collect/report/end", { id, lat: at.lat, lon: at.lon }, token);
 }
 
 /** Najbliższa droga przy przytrzymanym miejscu (punkt na osi drogi i nazwa) — null = brak drogi w pobliżu. */

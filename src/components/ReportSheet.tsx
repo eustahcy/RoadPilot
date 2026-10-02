@@ -1,9 +1,12 @@
 import { useState } from "react";
-import { REPORT_KINDS, ReportKind } from "../collect";
+import { REPORT_KINDS, ReportKind, WORKS_LENGTHS, WORKS_TYPES, WorksType } from "../collect";
 import { ReportIcon } from "./ReportIcon";
 
 /** HUD: zgłoszenie z drogi w miejscu, w którym jesteśmy (albo przytrzymanym na mapie — `place`) — rodzaj, wartość (np. 3,8 m), wysłanie. */
-export function ReportSheet({ onSend, onClose, located, place }: { onSend: (kind: ReportKind, value: number | null) => Promise<void>; onClose: () => void; located: boolean; place?: string }) {
+/** `onWorksStart` — roboty „zaznaczę koniec”: id zgłoszenia, Nawigacja pokazuje potem przycisk „Koniec robót”. */
+export function ReportSheet({ onSend, onClose, located, place, onWorksStart }: { onSend: (kind: ReportKind, value: number | null, note?: string) => Promise<{ id?: number } | void>; onClose: () => void; located: boolean; place?: string; onWorksStart?: (id: number) => void }) {
+  const [works, setWorks] = useState<WorksType>("works");
+  const [worksLen, setWorksLen] = useState<number | null | "end">(null);
   const [kind, setKind] = useState<ReportKind | null>(null);
   const [value, setValue] = useState(0);
   const [state, setState] = useState<"idle" | "sending" | "sent" | "error">("idle");
@@ -20,7 +23,10 @@ export function ReportSheet({ onSend, onClose, located, place }: { onSend: (kind
     if (quick) setKind(quick);
     setState("sending");
     try {
-      await onSend(k, quick || !def?.unit ? null : value);
+      if (def?.works && !quick) {
+        const r = await onSend(k, typeof worksLen === "number" ? worksLen : null, works);
+        if (worksLen === "end" && r && r.id) onWorksStart?.(r.id);
+      } else await onSend(k, quick || !def?.unit ? null : value);
       setState("sent");
       setTimeout(onClose, 1200);
     } catch (e) {
@@ -57,7 +63,22 @@ export function ReportSheet({ onSend, onClose, located, place }: { onSend: (kind
       <div className="report-grid">
         {REPORT_KINDS.filter((k) => !k.quick && !k.place).map((k) => tile(k, () => pick(k.id), kind === k.id))}
       </div>
-      {def?.unit && (
+      {def?.works && (
+        <div className="works-pick">
+          <span className="field-label">Co się dzieje?</span>
+          <div className="nset-seg">
+            {WORKS_TYPES.map((w) => <button key={w.id} className={works === w.id ? "on" : ""} aria-pressed={works === w.id} onClick={() => setWorks(w.id)}>{w.label}</button>)}
+          </div>
+          <span className="field-label">Jak długo ciągną się przed Tobą?</span>
+          <div className="works-len">
+            {WORKS_LENGTHS.filter((l) => l.id !== "end" || (onWorksStart && place === undefined)).map((l) => (
+              <button key={String(l.id)} className={worksLen === l.id ? "on" : ""} aria-pressed={worksLen === l.id} onClick={() => setWorksLen(l.id)}>{l.label}</button>
+            ))}
+          </div>
+          {worksLen === "end" && <p className="muted small">Zgłoszenie wyślemy teraz, a gdy roboty się skończą, dotknij „Koniec robót” na ekranie nawigacji — długość policzy się sama.</p>}
+        </div>
+      )}
+      {def?.unit && !def.works && (
         <div className="report-value">
           <button className="ghost" onClick={() => step(-1)} aria-label="Mniej">−</button>
           <b>{String(value).replace(".", ",")} {def.unit}</b>

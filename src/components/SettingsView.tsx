@@ -1,3 +1,4 @@
+import { BREAK_STOP } from "../core/breakstop";
 import { autoTheme } from "../mapStyle";
 import { useEffect, useState } from "react";
 import { AdminUser, api, ApiError, User } from "../api";
@@ -12,6 +13,8 @@ import { EXTENDED_WORK_MIN, WorkSettings } from "../core/workday";
 import { MUSIC_APPS, MusicApp } from "../core/apps";
 import { DEFAULT_HUD_ITEMS, HUD_ITEMS, HUD_STYLES, HudItems } from "../hudConfig";
 import { floatingSupported } from "../floating";
+import { SupportContent } from "./Support";
+import { LicenseAdmin, LicensePanel, licenseStatus, premiumText } from "./License";
 import { DEFAULT_VEHICLE, NavAccess, NO_AVOID, ROUTE_TYPES, Vehicle } from "../nav";
 import { MapDataSection } from "./MapConsent";
 import { AdminMap } from "./AdminMap";
@@ -46,7 +49,7 @@ interface AccountProps {
   onUser: (u: User) => void;
 }
 
-export type SettingsCategory = "account" | "friends" | "planning" | "work" | "service" | "vehicle" | "gps" | "hud" | "apps" | "data" | "admin";
+export type SettingsCategory = "account" | "license" | "friends" | "planning" | "work" | "service" | "vehicle" | "gps" | "hud" | "apps" | "data" | "support" | "admin";
 type Category = SettingsCategory;
 
 /** Zasięg listy „Po drodze” do wyboru (km). */
@@ -65,6 +68,7 @@ export function SettingsView({ initialCategory, navAccess, state, now, onSetting
 
   const categories: { id: Category; label: string; sub: string; icon: string }[] = [
     { id: "account", label: "Konto", sub: account.user ? `${account.user.email}${account.user.premium ? " · Premium" : ""}` : "Bez konta — dane tylko w tym telefonie", icon: "M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8ZM4 21a8 8 0 0 1 16 0" },
+    { id: "license", label: "Licencja", sub: licenseStatus(account.user), icon: "M8 15a4 4 0 1 0 0-8 4 4 0 0 0 0 8ZM12 11h9M18 11v3M21 11v2" },
     { id: "friends", label: "Znajomi", sub: friends.api ? (() => { const n = friends.api.friends.filter((f) => f.relation === "accepted").length; const p = friends.api.friends.filter((f) => f.relation === "pending").length; return `${n ? `${n} ${n === 1 ? "znajomy" : n < 5 ? "znajomych" : "znajomych"}` : "Nikogo jeszcze nie ma"}${p ? ` · ${p} do akceptacji` : ""}${settings.friendsShare ? "" : " · pozycja ukryta"}`; })() : "Kto gdzie jedzie — wymaga konta", icon: "M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8ZM2 21a7 7 0 0 1 14 0M16 3.5a4 4 0 0 1 0 7.5M22 21a7 7 0 0 0-5-6.7" },
     { id: "planning", label: "Planowanie", sub: "Wydłużenia, godzina planowania, prędkości", icon: "M4 12h4l3-8 4 16 3-8h2" },
     { id: "work", label: "Czas pracy", sub: `Limit ${fmtHm(settings.work.limitMin)} · przypomnienia ${settings.work.remind ? "włączone" : "wyłączone"}`, icon: "M12 7v5l3 2M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18Z" },
@@ -73,6 +77,7 @@ export function SettingsView({ initialCategory, navAccess, state, now, onSetting
     { id: "gps", label: "GPS", sub: settings.autoStop ? "Postój włącza się sam" : "Postój ręcznie", icon: "M12 21s-7-6.2-7-11a7 7 0 0 1 14 0c0 4.8-7 11-7 11ZM12 12.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Z" },
     { id: "hud", label: "HUD", sub: `Styl: ${HUD_STYLES.find((h) => h.id === settings.hudStyle)!.label.toLowerCase()} · elementy, okienko`, icon: "M3 5h18v14H3zM7 15h4M7 11h10" },
     { id: "apps", label: "Muzyka", sub: MUSIC_APPS.find((a) => a.id === settings.musicApp)!.label, icon: "M9 18V5l11-2v13M9 18a3 3 0 1 1-6 0 3 3 0 0 1 6 0ZM20 16a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z" },
+    { id: "support", label: "Wsparcie", sub: "Kto tworzy RoadPilot i jak pomóc", icon: "M12 20s-8-5-8-11a4.5 4.5 0 0 1 8-2.8A4.5 4.5 0 0 1 20 9c0 6-8 11-8 11Z" },
     { id: "data", label: "Dane i prywatność", sub: "Co wysyłamy, czyszczenie danych", icon: "M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6l8-3Z" },
     ...(account.user?.admin ? [{ id: "admin" as const, label: "Administracja", sub: "Premium, limity TomTom, dane do mapy", icon: "M12 2l3 6 6 .9-4.5 4.3 1 6.3L12 16.5 6.5 19.5l1-6.3L3 8.9 9 8l3-6Z" }] : []),
   ];
@@ -181,15 +186,7 @@ export function SettingsView({ initialCategory, navAccess, state, now, onSetting
 
       {cat === "vehicle" && <VehicleSection settings={settings} navAccess={navAccess} onChange={set} />}
 
-      {cat === "admin" && account.user?.admin && account.token && (
-        <>
-          <AdminStatsCard token={account.token} />
-          <AdminMap token={account.token} />
-          <PremiumKeysCard token={account.token} />
-          <MapCheckCard token={account.token} />
-          <AdminSection token={account.token} me={account.user.id} />
-        </>
-      )}
+      {cat === "admin" && account.user?.admin && account.token && <AdminPanel token={account.token} me={account.user.id} />}
 
       {cat === "apps" && (
         <section className="card">
@@ -208,6 +205,9 @@ export function SettingsView({ initialCategory, navAccess, state, now, onSetting
         </p>
         </section>
       )}
+
+      {cat === "support" && <section className="card"><SupportContent /></section>}
+      {cat === "license" && <section className="card"><LicensePanel token={account.token ?? null} user={account.user ?? null} onUser={account.onUser} /></section>}
 
       {cat === "data" && <MapDataSection token={account.token} consent={!!account.user?.dataConsent} onChange={account.onConsent} />}
 
@@ -283,6 +283,7 @@ function VehicleSection({ settings, navAccess, onChange }: { settings: Settings;
           <Toggle checked={!!v.avoid?.tolls} onChange={(tolls) => setV({ avoid: { ...(v.avoid ?? NO_AVOID), tolls } })} label="Unikaj dróg płatnych" />
           <Toggle checked={!!v.avoid?.motorways} onChange={(motorways) => setV({ avoid: { ...(v.avoid ?? NO_AVOID), motorways } })} label="Unikaj autostrad" />
           <Toggle checked={!!v.avoid?.ferries} onChange={(ferries) => setV({ avoid: { ...(v.avoid ?? NO_AVOID), ferries } })} label="Unikaj promów" />
+          <Toggle checked={!!v.avoid?.unpaved} onChange={(unpaved) => setV({ avoid: { ...(v.avoid ?? NO_AVOID), unpaved } })} label="Unikaj dróg gruntowych" />
         </section>
       )}
       {navAccess === "premium" && (
@@ -299,6 +300,16 @@ function VehicleSection({ settings, navAccess, onChange }: { settings: Settings;
           <Toggle checked={settings.aheadStrip.parking} onChange={(parking) => onChange({ aheadStrip: { ...settings.aheadStrip, parking } })} label="Najbliższy parking TIR pod prędkością" />
           <Toggle checked={settings.aheadStrip.fuel} onChange={(fuel) => onChange({ aheadStrip: { ...settings.aheadStrip, fuel } })} label="Najbliższa stacja pod prędkością" />
           <Toggle checked={settings.aheadStrip.camera !== false} onChange={(camera) => onChange({ aheadStrip: { ...settings.aheadStrip, camera } })} label="Najbliższy fotoradar i odcinkowy pomiar pod prędkością" hint="W czerwonej ramce — tylko z trasą." />
+          <Toggle checked={settings.aheadStrip.toll !== false} onChange={(toll) => onChange({ aheadStrip: { ...settings.aheadStrip, toll } })} label="Najbliższe bramki pod prędkością" hint="W fioletowej ramce — tylko z trasą." />
+          <Toggle checked={settings.breakStop.on} onChange={(on) => onChange({ breakStop: { ...settings.breakStop, on } })} label="Proponuj MOP na przerwę" hint="Nawigacja zaproponuje dodanie do trasy MOP-u lub parkingu TIR, do którego dojedziesz przed końcem 4,5 h jazdy." />
+          {settings.breakStop.on && (
+            <label className="field">
+              <span className="field-label">Zapas przed limitem jazdy</span>
+              <select value={settings.breakStop.marginMin} onChange={(e) => onChange({ breakStop: { ...settings.breakStop, marginMin: Number(e.target.value) } })}>
+                {BREAK_STOP.margins.map((m) => <option key={m} value={m}>{m} min</option>)}
+              </select>
+            </label>
+          )}
         </section>
       )}
       <section className="card">
@@ -488,7 +499,7 @@ function AccountSection({ user, token, sync, onLogin, onLogout, onSyncNow, onDel
       <p className={`premium-line ${user.premium ? "on" : ""}`}>
         {user.admin ? "Administrator · Premium" : user.premium ? `Premium ${premiumText(user.premiumUntil ?? null)}` : "Bez Premium — wkrótce do kupienia"}
       </p>
-      {!user.admin && token && <RedeemKey token={token} onUser={onUser} />}
+      {!user.admin && token && <LicensePanel token={token} user={user} onUser={onUser} />}
       <p className={`sync-line ${sync.kind}`}>
         <span className="sync-dot" aria-hidden />
         {syncText(sync)}
@@ -524,59 +535,6 @@ function AccountSection({ user, token, sync, onLogin, onLogout, onSyncNow, onDel
 }
 
 /** Klucz Premium od administratora: wpisanie (wielkość liter, spacje i myślniki bez znaczenia) → Premium od razu. */
-function RedeemKey({ token, onUser }: { token: string; onUser: (u: User) => void }) {
-  const [open, setOpen] = useState(false);
-  const [key, setKey] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
-  const redeem = async () => {
-    setBusy(true);
-    setMsg(null);
-    try {
-      const r = await api<{ user: User; days: number | null }>("POST", "/premium/redeem", { key }, token);
-      onUser(r.user);
-      setKey("");
-      setMsg({ ok: true, text: `Gotowe — Premium ${premiumText(r.user.premiumUntil ?? null)}${r.days !== null ? ` (+${r.days} dni)` : ""}.` });
-    } catch (e) {
-      setMsg({ ok: false, text: e instanceof ApiError ? e.message : "Nie udało się — sprawdź połączenie." });
-    } finally {
-      setBusy(false);
-    }
-  };
-  if (!open) return <button className="text-btn" onClick={() => setOpen(true)}>Mam klucz Premium</button>;
-  return (
-    <div className="redeem">
-      <label className="field">
-        <span className="field-label">Klucz Premium</span>
-        <input value={key} onChange={(e) => setKey(e.target.value)} placeholder="RP-XXXX-XXXX" autoCapitalize="characters" autoCorrect="off" spellCheck={false} onKeyDown={(e) => e.key === "Enter" && key.trim() && !busy && redeem()} />
-      </label>
-      <div className="row-buttons">
-        <button className="primary" disabled={!key.trim() || busy} onClick={redeem}>{busy ? "Sprawdzam…" : "Aktywuj"}</button>
-        <button className="ghost" onClick={() => { setOpen(false); setMsg(null); }}>Zamknij</button>
-      </div>
-      {msg && <p className={msg.ok ? "redeem-ok" : "auth-error"}>{msg.text}</p>}
-    </div>
-  );
-}
-
-interface PremiumKey {
-  key: string;
-  days: number | null;
-  note: string;
-  createdAt: number;
-  usedAt: number | null;
-  usedBy: string | null;
-}
-
-const KEY_DAYS: { days: number | null; label: string }[] = [
-  { days: 7, label: "7 dni" },
-  { days: 30, label: "30 dni" },
-  { days: 90, label: "3 mies." },
-  { days: 365, label: "Rok" },
-  { days: null, label: "Bez terminu" },
-];
-
-const keyDaysText = (days: number | null) => (days === null ? "bez terminu" : days === 1 ? "1 dzień" : `${days} dni`);
 
 interface MapSuspect { osm_id: string; kind: string; value: number | null; users: number; lat: number; lon: number; name: string; hidden: boolean }
 interface BadTurnGroup { lat: number; lon: number; users: number; note: string; confirmed: boolean }
@@ -650,116 +608,7 @@ function MapCheckCard({ token }: { token: string }) {
 }
 
 /** Administracja: klucze Premium do przekazania (SMS, komunikator) — jednorazowe, na wybraną liczbę dni. */
-function PremiumKeysCard({ token }: { token: string }) {
-  const [keys, setKeys] = useState<PremiumKey[] | null>(null);
-  const [days, setDays] = useState<number | null>(30);
-  const [custom, setCustom] = useState("");
-  const [note, setNote] = useState("");
-  const [fresh, setFresh] = useState<PremiumKey | null>(null);
-  const [copied, setCopied] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const load = () => api<{ keys: PremiumKey[] }>("GET", "/admin/keys", undefined, token).then((r) => setKeys(r.keys)).catch(() => {});
-  useEffect(() => {
-    load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [token]);
-  const chosen = custom.trim() ? Number(custom) : days;
-  const generate = async () => {
-    setBusy(true);
-    setError(null);
-    try {
-      const r = await api<{ key: PremiumKey }>("POST", "/admin/keys", { days: chosen, note }, token);
-      setFresh(r.key);
-      setCopied(false);
-      setNote("");
-      load();
-    } catch (e) {
-      setError(e instanceof ApiError ? e.message : "Nie udało się wygenerować klucza.");
-    } finally {
-      setBusy(false);
-    }
-  };
-  const message = (k: PremiumKey) => `Klucz RoadPilot Premium (${keyDaysText(k.days)}): ${k.key}\nWpisz go w aplikacji: Ustawienia → Konto → „Mam klucz Premium”.`;
-  const share = async (k: PremiumKey) => {
-    const text = message(k);
-    try {
-      if (navigator.share) await navigator.share({ text });
-      else {
-        await navigator.clipboard.writeText(text);
-        setCopied(true);
-      }
-    } catch {
-      /* anulowane udostępnianie / brak schowka — klucz jest widoczny */
-    }
-  };
-  const remove = async (k: PremiumKey) => {
-    if (!confirm(`Usunąć klucz ${k.key}? Nie będzie można go użyć.`)) return;
-    try {
-      await api("DELETE", "/admin/keys", { key: k.key }, token);
-      if (fresh?.key === k.key) setFresh(null);
-      load();
-    } catch (e) {
-      setError(e instanceof ApiError ? e.message : "Nie udało się usunąć klucza.");
-    }
-  };
-  const valid = chosen === null || (Number.isInteger(chosen) && chosen >= 1 && chosen <= 3650);
-  return (
-    <section className="card">
-      <div className="eyebrow">Klucze Premium</div>
-      <h2>Wygeneruj klucz</h2>
-      <p className="muted small">Jednorazowy klucz do przekazania kierowcy — wpisuje go w Ustawienia → Konto. Dni dokładają się do trwającego Premium.</p>
-      <div className="key-days" role="radiogroup" aria-label="Na ile">
-        {KEY_DAYS.map((d) => (
-          <button key={d.label} role="radio" aria-checked={!custom.trim() && days === d.days} className={!custom.trim() && days === d.days ? "active" : ""} onClick={() => { setDays(d.days); setCustom(""); }}>{d.label}</button>
-        ))}
-      </div>
-      <div className="form">
-        <label className="field">
-          <span className="field-label">Albo liczba dni</span>
-          <input inputMode="numeric" value={custom} onChange={(e) => setCustom(e.target.value.replace(/\D/g, "").slice(0, 4))} placeholder="np. 14" />
-        </label>
-        <label className="field">
-          <span className="field-label">Dla kogo (notatka)</span>
-          <input value={note} onChange={(e) => setNote(e.target.value)} maxLength={120} placeholder="np. Marek, firma X" />
-        </label>
-      </div>
-      {error && <p className="auth-error">{error}</p>}
-      <button className="primary key-generate" disabled={busy || !valid} onClick={generate}>{busy ? "Generuję…" : `Wygeneruj klucz — ${keyDaysText(chosen)}`}</button>
-      {fresh && (
-        <div className="key-fresh">
-          <strong>{fresh.key}</strong>
-          <span>{keyDaysText(fresh.days)}{fresh.note ? ` · ${fresh.note}` : ""}</span>
-          <button className="ghost" onClick={() => share(fresh)}>{copied ? "Skopiowano ✓" : "Wyślij / kopiuj"}</button>
-        </div>
-      )}
-      {keys && keys.length > 0 && (
-        <ul className="key-list">
-          {keys.map((k) => (
-            <li key={k.key} className={k.usedAt ? "used" : ""}>
-              <span>
-                <b>{k.key}</b>
-                <small>{keyDaysText(k.days)}{k.note ? ` · ${k.note}` : ""} · {k.usedAt ? `użyty ${new Date(k.usedAt).toLocaleDateString("pl-PL")} przez ${k.usedBy ?? "usunięte konto"}` : `wolny, od ${new Date(k.createdAt).toLocaleDateString("pl-PL")}`}</small>
-              </span>
-              {!k.usedAt && (
-                <span className="key-actions">
-                  <button className="ghost" onClick={() => share(k)}>Wyślij</button>
-                  <button className="ghost danger-text" onClick={() => remove(k)}>Usuń</button>
-                </span>
-              )}
-            </li>
-          ))}
-        </ul>
-      )}
-    </section>
-  );
-}
 
-/** „bez terminu” (rok 9999) albo „do 30.10.2026”. */
-function premiumText(until: number | null) {
-  if (until === null || new Date(until).getFullYear() >= 9999) return "bez terminu";
-  return `do ${new Date(until).toLocaleDateString("pl-PL")}`;
-}
 
 /** Administracja: wyszukanie konta i nadanie / odebranie Premium. Zakup Premium jeszcze nie działa. */
 interface AdminStats {
@@ -778,6 +627,74 @@ interface AdminStats {
 const API_LABELS: Record<string, string> = { search: "TomTom — wyszukiwanie", route: "TomTom — trasy", tiles: "TomTom — mapa (kafelki)", traffic: "TomTom — korki" };
 
 /** Zużycie limitów TomTom (próg 80%) i dane zebrane do mapy. */
+type AdminTab = "overview" | "users" | "licenses" | "map" | "app";
+const ADMIN_TABS: { id: AdminTab; label: string; icon: string }[] = [
+  { id: "overview", label: "Przegląd", icon: "M4 20V10M10 20V4M16 20v-7M22 20H2" },
+  { id: "users", label: "Użytkownicy", icon: "M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8ZM2 21a7 7 0 0 1 14 0M16 3.5a4 4 0 0 1 0 7.5M22 21a7 7 0 0 0-5-6.7" },
+  { id: "licenses", label: "Licencje", icon: "M8 15a4 4 0 1 0 0-8 4 4 0 0 0 0 8ZM12 11h9M18 11v3M21 11v2" },
+  { id: "map", label: "Mapa i dane", icon: "M9 4 3 6v14l6-2 6 2 6-2V4l-6 2-6-2ZM9 4v14M15 6v14" },
+  { id: "app", label: "Ustawienia", icon: "M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6ZM19 12l2-1-1-3-2 .3-1.5-1.5L17 5l-3-1-1 2h-2l-1-2-3 1 .5 1.8L6 8.3 4 8l-1 3 2 1v1l-2 1 1 3 2-.3 1.5 1.5L7 19l3 1 1-2h2l1 2 3-1-.5-1.8 1.5-1.5 2 .3 1-3-2-1z" },
+];
+
+/** Administracja: zakładki zamiast jednej długiej strony — przegląd, konta, licencje, mapa i dane, ustawienia aplikacji. */
+function AdminPanel({ token, me }: { token: string; me: number }) {
+  const [tab, setTab] = useState<AdminTab>("overview");
+  return (
+    <div className="admin-panel">
+      <div className="admin-tabs" role="tablist">
+        {ADMIN_TABS.map((t) => (
+          <button key={t.id} role="tab" aria-selected={tab === t.id} className={tab === t.id ? "on" : ""} onClick={() => setTab(t.id)}>
+            <svg viewBox="0 0 24 24" aria-hidden><path d={t.icon} /></svg>
+            <span>{t.label}</span>
+          </button>
+        ))}
+      </div>
+      {tab === "overview" && <AdminStatsCard token={token} />}
+      {tab === "users" && <AdminSection token={token} me={me} />}
+      {tab === "licenses" && <LicenseAdmin token={token} />}
+      {tab === "map" && <><AdminMap token={token} /><MapCheckCard token={token} /></>}
+      {tab === "app" && <AdminConfigCard token={token} />}
+    </div>
+  );
+}
+
+/** Ustawienia aplikacji widoczne dla wszystkich: link do wpłat (Revolut) na stronie „Wsparcie”. */
+function AdminConfigCard({ token }: { token: string }) {
+  const [url, setUrl] = useState("");
+  const [saved, setSaved] = useState<string | null>(null);
+  const [msg, setMsg] = useState<string | null>(null);
+  useEffect(() => {
+    api<{ supportUrl: string }>("GET", "/config").then((c) => { setUrl(c.supportUrl ?? ""); setSaved(c.supportUrl ?? ""); }).catch(() => setMsg("Nie udało się wczytać ustawień."));
+  }, []);
+  const save = async () => {
+    setMsg(null);
+    try {
+      const c = await api<{ supportUrl: string }>("PUT", "/admin/config", { supportUrl: url.trim() }, token);
+      setSaved(c.supportUrl);
+      setUrl(c.supportUrl);
+      setMsg("Zapisano — przycisk „Wesprzyj” prowadzi teraz pod ten adres.");
+    } catch (e) {
+      setMsg(e instanceof ApiError ? e.message : "Nie udało się zapisać.");
+    }
+  };
+  return (
+    <section className="card">
+      <div className="eyebrow">Wsparcie</div>
+      <h2>Link do wpłat</h2>
+      <p className="muted small">Np. link do Revolut (revolut.me/…). Pokazuje się jako przycisk „♥ Wesprzyj RoadPilot” na stronie Wsparcie — w menu Nawigacji, w Ustawieniach i w stopce. Puste pole = bez przycisku.</p>
+      <label className="field wide">
+        <span className="field-label">Adres (https://…)</span>
+        <input type="url" value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://revolut.me/twoja-nazwa" autoCapitalize="off" />
+      </label>
+      <div className="row-buttons">
+        <button className="primary" disabled={saved === null || url.trim() === saved} onClick={save}>Zapisz</button>
+        {saved && <a className="ghost" href={saved} target="_blank" rel="noopener noreferrer">Sprawdź link</a>}
+      </div>
+      {msg && <p className="muted small">{msg}</p>}
+    </section>
+  );
+}
+
 function AdminStatsCard({ token }: { token: string }) {
   const [stats, setStats] = useState<AdminStats | null>(null);
   useEffect(() => {

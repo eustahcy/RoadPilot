@@ -15,6 +15,60 @@ export interface NavInstruction {
   exit?: string;
   roundaboutExit?: string;
   angle?: number;
+  /** Wszystkie nazwy drogi za manewrem (numer, E, patron) — opis drogi nad paskiem. */
+  names?: string[];
+}
+
+/** Słupek kilometrowy przy trasie: km trasy, km drogi (pikietaż) i numer drogi z OSM. */
+export interface Milestone {
+  km: number;
+  v: number;
+  ref: string;
+}
+
+const REF_RE = /^(?:[AS]\s?\d{1,2}[a-z]?|DK\s?\d{1,3}|DW\s?\d{3}|\d{1,3})$/i;
+/** „DK 14” → „14”, „S8e” (jezdnia) → „S8”. */
+const normRef = (r: string) => r.toUpperCase().replace(/\s/g, "").replace(/^D[KW]/, "").replace(/^([AS]\d{1,2})[A-Z]$/, "$1");
+
+/**
+ * Droga, którą jedziemy (z ostatniego manewru przed nami): numer (A1, S19, 91) i nazwa (patron / ulica), np.
+ * { ref: "A1", name: "Autostrada Bursztynowa" }. E-numery pomijamy, gdy jest krajowy.
+ */
+export function roadAt(instructions: NavInstruction[], km: number): { ref?: string; name?: string } | undefined {
+  let ins: NavInstruction | undefined;
+  for (const i of instructions) {
+    if (i.km > km + 0.01) break;
+    if (i.street || i.names) ins = i;
+  }
+  if (!ins) return undefined;
+  const names = ins.names ?? (ins.street ? [ins.street] : []);
+  const ref = names.find((n) => REF_RE.test(n.trim()));
+  const name = names.find((n) => !REF_RE.test(n.trim()) && !/^E\s?\d{2,3}$/i.test(n.trim()));
+  const e = names.find((n) => /^E\s?\d{2,3}$/i.test(n.trim()));
+  return { ref: ref?.replace(/\s/g, "") ?? e?.replace(/\s/g, ""), name };
+}
+
+/**
+ * Pikietaż (km drogi) w km trasy `km`: między dwoma słupkami tej samej drogi — interpolacja; za ostatnim — z kierunku
+ * ostatniej pary (do MILESTONE_MAX_KM). `ref` — numer drogi, którą jedziemy (słupki innej drogi pomijamy). undefined = brak danych.
+ */
+export function milestoneAt(list: Milestone[] | undefined, km: number, ref?: string): number | undefined {
+  if (!list?.length) return undefined;
+  const want = ref ? normRef(ref) : undefined;
+  const ms = want ? list.filter((m) => normRef(m.ref) === want || !m.ref) : list;
+  const before = ms.filter((m) => m.km <= km && km - m.km <= NAV.milestoneMaxKm);
+  const after = ms.find((m) => m.km > km && m.km - km <= NAV.milestoneMaxKm);
+  const a = before.at(-1);
+  if (a && after) {
+    const v = a.v + ((after.v - a.v) * (km - a.km)) / Math.max(1e-6, after.km - a.km);
+    return Math.abs(after.v - a.v) <= (after.km - a.km) * 1.5 + 0.5 ? v : a.v;
+  }
+  const prev = before.at(-2);
+  if (a && prev && a.km > prev.km) {
+    const dir = Math.sign(a.v - prev.v) || 1;
+    return a.v + dir * (km - a.km);
+  }
+  return a ? a.v : undefined;
 }
 
 export interface LaneSection {
@@ -30,6 +84,8 @@ export interface SpeedLimit {
 }
 
 export const NAV = {
+  /** Pikietaż: słupek dalej niż tyle km (po trasie) już się nie liczy. */
+  milestoneMaxKm: 3,
   /** Dalej od trasy niż tyle metrów (plus dokładność GPS) = zjechaliśmy z trasy. */
   offRouteM: 50,
   /** Kierunek z odbiornika GPS wiarygodny dopiero od tej prędkości (km/h) — wolniej z przesunięcia albo z drogi. */

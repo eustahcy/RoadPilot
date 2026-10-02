@@ -62,6 +62,7 @@ export function routeUrl(from, to, vehicle, key, alternatives = 0, routeType = "
   if (vehicle?.avoid?.tolls) q.append("avoid", "tollRoads");
   if (vehicle?.avoid?.motorways) q.append("avoid", "motorways");
   if (vehicle?.avoid?.ferries) q.append("avoid", "ferries");
+  if (vehicle?.avoid?.unpaved) q.append("avoid", "unpavedRoads");
   q.set("instructionsType", "tagged");
   q.set("language", "pl-PL");
   for (const s of ["motorway", "urban", "lanes", "speedLimit", "traffic"]) q.append("sectionType", s);

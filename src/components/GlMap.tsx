@@ -204,7 +204,9 @@ interface TileRect { k: string; lz: number; x: number; y: number; size: number; 
 
 interface VTileGpu { buf: WebGLBuffer; batches: VTileGeometry["batches"]; labels: VLabel[] }
 
-const LABEL_RANK: Record<VLabel["kind"], number> = { city: 0, town: 1, ref: 2, village: 3, hamlet: 4, street: 5 };
+const LABEL_RANK: Record<VLabel["kind"], number> = { city: 0, town: 1, ref: 2, limit: 2.5, village: 3, hamlet: 4, street: 5 };
+/** Znaki ograniczeń przy drogach pokazujemy od tego zoomu (dalej są nieczytelne i zasłaniają mapę). */
+const LIMITS_FROM_ZOOM = 12;
 /** Kąt etykiety wzdłuż drogi na ekranie: zawsze czytelny (nigdy do góry nogami). */
 const readable = (deg: number) => { let a = ((deg % 360) + 540) % 360 - 180; if (a > 90) a -= 180; if (a < -90) a += 180; return a; };
 
@@ -285,7 +287,8 @@ export function GlMapView({ token, center, zoom, bearing = 0, pitch = 0, anchorY
       for (const l of vt.labels) {
         if (l.kind === "street" && zoom < STREETS_FROM_ZOOM) continue;
         if (vector?.quiet && l.kind !== "city") continue;
-        const id = l.kind === "street" ? `${l.kind}:${l.text}:${t.k}` : `${l.kind}:${l.text}`;
+        if (l.kind === "limit" && zoom < LIMITS_FROM_ZOOM) continue;
+        const id = l.kind === "street" || l.kind === "limit" ? `${l.kind}:${l.text}:${t.k}:${Math.round(l.x)}:${Math.round(l.y)}` : `${l.kind}:${l.text}`;
         if (seen.has(id)) continue;
         seen.add(id);
         const x = t.x + l.x * f, y = t.y + l.y * f;
@@ -296,14 +299,18 @@ export function GlMapView({ token, center, zoom, bearing = 0, pitch = 0, anchorY
         const lon = ((x + cx) / n) * 360 - 180;
         const lat = (Math.atan(Math.sinh(Math.PI * (1 - (2 * (y + cy)) / n))) * 180) / Math.PI;
         const w = l.text.length * (l.kind === "ref" ? 8 : l.kind === "street" ? 6.6 : 7.5) + 12;
-        const node = l.kind === "ref"
+        const node = l.kind === "limit"
+          ? <g className="vl-limit">{l.text === "TIR"
+              ? <><circle r={12} /><path d="M-6 -3h7v6h-7zM1 -1h3l2 2v2H1z" className="ink" /><path d="M-8 8 8 -8" className="bar" /></>
+              : <><circle r={l.text.length > 4 ? 15 : 12.5} /><text y={3.5} fontSize={l.text.length > 5 ? 7.4 : l.text.length > 4 ? 8.5 : 10}>{l.text}</text></>}</g>
+          : l.kind === "ref"
           ? <g className="vl-ref"><rect x={-w / 2} y={-10} width={w} height={20} rx={4} /><text y={5}>{l.text}</text></g>
           : l.kind === "street"
             ? <text className="vl-street" y={-4}>{l.text}</text>
             : <text className={`vl-place vl-${l.kind}`}>{l.text}</text>;
         const angle = l.angle;
         const rotate = l.kind === "street" && angle !== undefined ? (b: number) => readable(angle - b) : undefined;
-        cand.push({ m: { key: `vl:${id}`, lat, lon, node, rotate, box: [w, l.kind === "ref" ? 22 : 18] }, rank: LABEL_RANK[l.kind], d });
+        cand.push({ m: { key: `vl:${id}`, lat, lon, node, rotate, box: l.kind === "limit" ? [30, 30] : [w, l.kind === "ref" ? 22 : 18] }, rank: LABEL_RANK[l.kind], d });
       }
     }
     return cand.sort((a, b) => a.rank - b.rank || a.d - b.d).slice(0, LABELS_MAX).map((c) => c.m);

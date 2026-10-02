@@ -52,6 +52,7 @@ export function valhallaRequest(from, to, v, exclude = [], alternates = 0, route
         ...(v.avoid?.tolls ? { use_tolls: 0 } : {}),
         ...(v.avoid?.motorways ? { use_highways: 0 } : {}),
         ...(v.avoid?.ferries ? { use_ferry: 0 } : {}),
+        ...(v.avoid?.unpaved ? { exclude_unpaved: true } : {}),
       },
     },
     directions_options: { units: "kilometers", language: "pl-PL" },
@@ -115,6 +116,8 @@ export function parseValhalla(json) {
       maneuver: MANEUVER[m.type] ?? "STRAIGHT",
       text: m.instruction ?? "",
       ...(m.street_names?.length ? { street: m.street_names[0] } : {}),
+      // Wszystkie nazwy drogi (numer i patron, np. „S19”, „Droga ekspresowa im. Lecha Kaczyńskiego”) — opis drogi nad paskiem.
+      ...(m.street_names?.length > 1 ? { names: m.street_names.slice(0, 3) } : {}),
       ...(toward ? { signpost: toward } : {}),
       ...(exit ? { exit } : {}),
       ...(m.roundabout_exit_count ? { roundaboutExit: String(m.roundabout_exit_count) } : {}),

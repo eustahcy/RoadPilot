@@ -1,3 +1,4 @@
+import { BreakStopSettings, DEFAULT_BREAK_STOP } from "./core/breakstop";
 // Stan aplikacji zapisywany lokalnie w urządzeniu (bez backendu).
 
 import { useEffect, useState } from "react";
@@ -77,6 +78,8 @@ export interface Settings {
   aheadStrip: AheadStrip;
   /** Nawigacja: mapa pochylona (3D) albo płaska z góry, bardziej oddalona (2D). */
   navMap: "3d" | "2d";
+  /** Propozycja MOP-u / parkingu na przerwę z zapasem (Nawigacja). */
+  breakStop: BreakStopSettings;
   /** Nawigacja: dom, ulubione i ostatnie cele (z kontem synchronizowane razem z ustawieniami). */
   places: SavedPlaces;
 }
@@ -88,6 +91,8 @@ export interface AheadStrip {
   fuel: boolean;
   /** Najbliższy fotoradar i początek odcinkowego pomiaru (z ostrzeżeń trasy) — w czerwonej ramce. */
   camera: boolean;
+  /** Najbliższe bramki (fioletowe). */
+  toll: boolean;
 }
 
 export interface AppState {
@@ -140,7 +145,7 @@ export function defaultState(now = Date.now()): AppState {
       weekDrivenMin: 0,
       prevWeekDrivenMin: 0,
     },
-    settings: { speeds: { ...DEFAULT_SPEEDS }, parkingBufferMin: 45, allowExtension: false, allowReducedRest: false, gps: false, liveEta: false, service: { date: null, km: null, odoAtSet: 0 }, hudMirror: false, ongoing: false, autoStop: true, hudAnimation: true, hudStyle: "full", hudItems: { full: { ...DEFAULT_HUD_ITEMS.full }, minimal: { ...DEFAULT_HUD_ITEMS.minimal } }, work: { ...DEFAULT_WORK }, musicApp: "none", navEnabled: false, vehicle: { ...DEFAULT_VEHICLE }, routeType: "fastest", navVoice: true, friendsShare: true, mapTheme: "auto", aheadKm: 50, aheadStrip: { mop: true, parking: true, fuel: true, camera: true }, places: EMPTY_PLACES, navMap: "3d" },
+    settings: { speeds: { ...DEFAULT_SPEEDS }, parkingBufferMin: 45, allowExtension: false, allowReducedRest: false, gps: false, liveEta: false, service: { date: null, km: null, odoAtSet: 0 }, hudMirror: false, ongoing: false, autoStop: true, hudAnimation: true, hudStyle: "full", hudItems: { full: { ...DEFAULT_HUD_ITEMS.full }, minimal: { ...DEFAULT_HUD_ITEMS.minimal } }, work: { ...DEFAULT_WORK }, musicApp: "none", navEnabled: false, vehicle: { ...DEFAULT_VEHICLE }, routeType: "fastest", navVoice: true, friendsShare: true, mapTheme: "auto", aheadKm: 50, aheadStrip: { mop: true, parking: true, fuel: true, camera: true, toll: true }, places: EMPTY_PLACES, navMap: "3d", breakStop: { ...DEFAULT_BREAK_STOP } },
     planTime: null,
     track: null,
     odoKm: 0,
@@ -170,7 +175,7 @@ export function normalize(s: Partial<AppState>): AppState {
     trip: { ...base.trip, ...s.trip },
     driver: { ...base.driver, ...s.driver },
     settings: { ...base.settings, ...s.settings, speeds: { ...base.settings.speeds, ...s.settings?.speeds }, service: { ...base.settings.service, ...s.settings?.service }, work: { ...base.settings.work, ...s.settings?.work }, // Dawny styl HUD „nav” to dziś osobny ekran nawigacji.
-      hudStyle: (s.settings?.hudStyle as string) === "nav" ? "full" : s.settings?.hudStyle ?? base.settings.hudStyle, hudItems: hudItems(base.settings.hudItems, s.settings), vehicle: { ...base.settings.vehicle, ...s.settings?.vehicle }, aheadStrip: { ...base.settings.aheadStrip, ...s.settings?.aheadStrip }, places: normalizePlaces(s.settings?.places) },
+      hudStyle: (s.settings?.hudStyle as string) === "nav" ? "full" : s.settings?.hudStyle ?? base.settings.hudStyle, hudItems: hudItems(base.settings.hudItems, s.settings), vehicle: { ...base.settings.vehicle, ...s.settings?.vehicle }, aheadStrip: { ...base.settings.aheadStrip, ...s.settings?.aheadStrip }, breakStop: { ...base.settings.breakStop, ...s.settings?.breakStop }, places: normalizePlaces(s.settings?.places) },
   };
 }
 

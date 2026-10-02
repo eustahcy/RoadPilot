@@ -690,7 +690,7 @@ async function findWarnings(pts, vehicle, alerts = true, timing = {}) {
       `SELECT 'report' AS source, id, kind, value, note AS raw, lat, lon, NULL AS geom, '' AS name FROM road_reports
        WHERE lat BETWEEN ? AND ? AND lon BETWEEN ? AND ? AND (
          (kind = 'height' AND value < ?) OR (kind = 'weight' AND value < ?) OR kind = 'truck_ban' OR
-         (kind = 'closed' AND created_at > NOW() - INTERVAL 14 DAY))`,
+         (kind = 'closed' AND created_at > NOW() - INTERVAL 14 DAY) OR (kind = 'roadworks' AND created_at > NOW() - INTERVAL 60 DAY))`,
       [...area, vehicle.heightM, vehicle.weightKg / 1000],
     );
     // Wysokość na moście przepisana z drogi pod nim (błąd w OSM) — nie ostrzega i nie zmienia trasy.

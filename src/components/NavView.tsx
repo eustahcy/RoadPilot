@@ -3,7 +3,7 @@ import { DeadlinePlan } from "../core/deadline";
 import { Friend } from "../core/friends";
 import { Live } from "../core/gps";
 import { bearingAtKm, legalLimitAt, locate, NAV, nextInstruction, pointAtKm, speedTone } from "../core/navmatch";
-import { Plan } from "../core/plan";
+import { Plan, timeAtKm } from "../core/plan";
 import { Route } from "../core/route";
 import { fmtDuration } from "../core/scenarios";
 import { fmtClock, fmtKm } from "../format";
@@ -100,6 +100,8 @@ export function NavView(p: NavViewProps) {
     if (gapKey !== null) setGapOpen(true);
   }, [gapKey]);
   const [sheet, setSheet] = useState(false);
+  /** Kafelki „do celu / przyjazd” pokazują najbliższy punkt pośredni zamiast celu. */
+  const [toVia, setToVia] = useState(false);
   const [reporting, setReporting] = useState(false);
   /** Zgłoszenie z mapy: droga przy przytrzymanym miejscu — null = zgłoszenie z naszej pozycji. */
   const [reportAt, setReportAt] = useState<SnappedRoad | null>(null);
@@ -174,6 +176,19 @@ export function NavView(p: NavViewProps) {
   const arrival = arrivalInfo(p.plan, p.deadline, now);
   const endDay = () => confirm("Zakończyć dzień pracy? Zacznie się odpoczynek dzienny.") && sc.onEndDay();
   const openSheet = () => { setSheet(true); setMenu(false); };
+  // Dotknięcie dystansu / przyjazdu przy punkcie pośrednim przed nami: przełącza „do celu” ↔ „do punktu” (km i godzina z planu z przerwami).
+  const viaNext = route && pos && !track.off
+    ? viaAhead(route, fresh).map((v) => ({ v, km: locate(route.points, v)?.km, n: (route.via ?? []).indexOf(v) + 1 })).find((x): x is { v: NavPlace; km: number; n: number } => x.km !== undefined && x.km > pos.km)
+    : undefined;
+  const showVia = toVia && !!viaNext;
+  const target = (() => {
+    if (!showVia || !viaNext || !pos) return { label: "Do celu", arrLabel: "Przyjazd", km: p.route.totalKm, clock: arrival.clock, left: arrival.left, note: arrival.note };
+    const km = Math.min(p.route.totalKm, viaNext.km - pos.km);
+    const t = p.plan ? timeAtKm(p.plan, p.route, km) : undefined;
+    const name = `punktu ${viaNext.n || 1}`;
+    return { label: `Do ${name}`, arrLabel: `Przyjazd · pkt ${viaNext.n || 1}`, km, clock: t ? fmtClock(t, now) : "—", left: t ? fmtDuration(Math.max(0, t - now) / 60_000) : undefined, note: viaNext.v.label };
+  })();
+  const flip = viaNext ? () => setToVia((x) => !x) : undefined;
   // Kafelek przerwy: w jeździe — ile z 4,5 h jazdy bez przerwy już za nami; na postoju — ile z zaplanowanego postoju minęło.
   const breakUsed = sc.stop
     ? sc.stop.targetMin ? Math.min(1, (now - sc.stop.start) / 60_000 / sc.stop.targetMin) : 1
@@ -298,15 +313,24 @@ export function NavView(p: NavViewProps) {
 
       {/* Kafelki: do celu, przyjazd, przerwa, trasa. Telefon pionowo: dwa pierwsze, reszta po dotknięciu uchwytu; poziomo: pasek na dole; tablet: 2×2 u góry. */}
       <div className={`nm-tiles ${tilesOpen ? "open" : ""}`}>
-        <button className="nm-tiles-handle" onClick={() => setTilesOpen(!tilesOpen)} aria-expanded={tilesOpen} aria-label={tilesOpen ? "Zwiń" : "Przerwa i trasa"} />
-        <div className="nm-tile">
+        {/* Uchwyt = dyskretna przerwa (telefon pionowo): filiżanka, za ile i cienki pasek 4,5 h jazdy; dotknięcie rozwija kafelki. */}
+        <button className={`nm-tiles-handle ${stopItem.tone}`} onClick={() => setTilesOpen(!tilesOpen)} aria-expanded={tilesOpen} aria-label={tilesOpen ? "Zwiń" : `${stopItem.label} ${stopItem.value} — przerwa i trasa`}>
+          {!tilesOpen && (
+            <span className="nm-break-mini">
+              <Icon name={sc.stop ? "bed" : "coffee"} />
+              <b>{stopItem.value === "—" ? "bez przerwy" : sc.stop ? stopItem.value : `za ${stopItem.value}`}</b>
+              <em aria-hidden><i style={{ width: `${Math.round(breakUsed * 100)}%` }} /></em>
+            </span>
+          )}
+        </button>
+        <button className={`nm-tile ${flip ? "flip" : ""} ${showVia ? "via" : ""}`} onClick={flip} disabled={!flip} aria-label={flip ? "Przełącz: do celu / do punktu pośredniego" : undefined}>
           <Icon name="flag" />
-          <span><small>Do celu</small><b>{fmtKm(p.route.totalKm)}</b></span>
-        </div>
-        <div className={`nm-tile ${arrival.bad ? "bad" : ""}`}>
+          <span><small>{target.label}</small><b>{fmtKm(target.km)}</b></span>
+        </button>
+        <button className={`nm-tile ${!showVia && arrival.bad ? "bad" : ""} ${flip ? "flip" : ""} ${showVia ? "via" : ""}`} onClick={flip} disabled={!flip}>
           <Icon name="clock" />
-          <span><small>Przyjazd</small><b>{arrival.clock}</b><i>{arrival.left !== undefined ? `za ${arrival.left}` : arrival.note}</i></span>
-        </div>
+          <span><small>{target.arrLabel}</small><b>{target.clock}</b><i>{target.left !== undefined ? `za ${target.left}` : target.note}</i></span>
+        </button>
         <button className={`nm-tile extra ${stopItem.tone}`} onClick={openSheet}>
           <Icon name="coffee" />
           <span><small>{stopItem.label}</small><b>{stopItem.value}</b><i>{stopItem.sub}</i></span>
@@ -394,8 +418,8 @@ export function NavView(p: NavViewProps) {
 
       {/* Tablet: pasek na dole — do celu, przyjazd i postęp trasy (zielone = przejechane, kropki = punkty pośrednie i postoje). */}
       <div className="nm-progress">
-        <span className="nm-progress-item"><Icon name="flag" /><span><b>{fmtKm(p.route.totalKm)}</b><small>Do celu</small></span></span>
-        <span className={`nm-progress-item ${arrival.bad ? "bad" : ""}`}><Icon name="clock" /><span><b>{arrival.clock}</b><small>{arrival.left !== undefined ? `Przyjazd za ${arrival.left}` : arrival.note}</small></span></span>
+        <button className={`nm-progress-item ${flip ? "flip" : ""} ${showVia ? "via" : ""}`} onClick={flip} disabled={!flip}><Icon name="flag" /><span><b>{fmtKm(target.km)}</b><small>{showVia ? `Pkt ${viaNext!.n || 1}` : target.label}</small></span></button>
+        <button className={`nm-progress-item ${!showVia && arrival.bad ? "bad" : ""} ${flip ? "flip" : ""} ${showVia ? "via" : ""}`} onClick={flip} disabled={!flip}><Icon name="clock" /><span><b>{target.clock}</b><small>{target.left !== undefined ? `${showVia ? "Pkt" : "Przyjazd"} za ${target.left}` : target.note}</small></span></button>
         <button className={`nm-progress-item ${stopItem.tone}`} onClick={openSheet}><Icon name="coffee" /><span><b>{stopItem.value}</b><small>{stopItem.label}</small></span></button>
         <span className="nm-progress-item"><Icon name="road" /><span><b>{refs || (route ? "Drogi lokalne" : "Brak trasy")}</b><small>{route ? `Trasa · ${fmtKm(route.lengthKm)}` : "Trasa"}</small></span></span>
         {/* Oś trasy jak w HUD: Start → Cel, przejechane na zielono, ciężarówka z %, kubek przy planowanej przerwie („za 269 km 12:01”). */}

@@ -517,6 +517,7 @@ function restrictionPin(w: RouteWarning, key: string): React.ReactNode | null {
     case "weight": case "axle": return sign(signText(`${v}t`, v.length > 3 ? 9.5 : 11));
     case "hgv": case "truck_ban": return sign(<>{PIN_TRUCK}<path d="M-10 10 10 -10" stroke="#e8322c" strokeWidth="2.6" /></>);
     case "closed": return <Pin id={key} fill="#e8322c"><rect x="-9" y="-2.6" width="18" height="5.2" rx="1" fill="#fff" /></Pin>;
+    case "roadworks": return <Pin id={key} fill="#f2a230" stroke="#fff"><path d="M-3 -9a2.2 2.2 0 1 1 0 .1M-3 -5l-2 6 3 1 1 6M-5 1l-3 7M-3 -4l5 2M2 -2l3 8M3 6h6" fill="none" stroke="#1b2229" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" /></Pin>;
     case "incline": return <Pin id={key} fill="#f2c230" stroke="#1b2229">{signText(`${v}%`, 10.5)}</Pin>;
     case "curve": return <Pin id={key} fill="#f2c230" stroke="#1b2229"><path d="M-5 9V2c0-6 10-6 10-12M1-9l4-1.5 1 4" fill="none" stroke="#1b2229" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" /></Pin>;
     case "police": case "itd": return <Pin id={key} fill={w.kind === "police" ? "#2f6fd6" : "#1f8a5b"}><text x="0" y="4" textAnchor="middle" fontSize="10.5" fontWeight="900" fill="#fff" fontFamily="Inter, system-ui, sans-serif">{w.kind === "police" ? "POL" : "ITD"}</text></Pin>;

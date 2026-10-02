@@ -156,6 +156,9 @@ src/components/NavView.tsx  nawigacja jako osobny system (nie HUD): HudRouteMap 
                    masa, oś, szerokość, długość, zakaz TIR, droga zamknięta, stromo, zakręt, POL/ITD; soft przygaszone), zgłoszenia kierowców i dodane
                    przez nich miejsca (poi id „r…”) z pomarańczową chorągiewką REPORT_BADGE. Okienka Nawigacji (zgłoś, ostrzeżenia, po drodze, postój,
                    wskazówki, luka) to strony NavPage (NavMenu.tsx) w stylu menu; ReportSheet = sekcje kafelków z podpisami.
+                   Kafelki / pasek „do celu” i „przyjazd”: przy punkcie pośrednim przed nami dotknięcie przełącza na punkt (km po trasie, godzina z planu
+                   z przerwami — core/plan timeAtKm; fiolet + „⇄”). Telefon pionowo: przerwa jako cienki wiersz w pasku kafelków (.nm-break-mini,
+                   za ile + pasek 4,5 h; dotknięcie rozwija kafelki). Zgłoszenie „roadworks” (roboty drogowe): ostrzeżenie 60 dni, bez objazdu.
                    Panel przycisków: języczek .nm-fold z prawej obok kolumny, po zwinięciu na środku między „⋯” a prędkością.
                    Pasek „po drodze”: też najbliższy fotoradar i początek odcinkowego pomiaru z route.warnings (AheadStrip.camera, czerwona ramka .alert).
                    Porównanie tras (RouteCompare): GlVector.quiet (tylko duże miasta, bez zakazów — QUIET_VEHICLE), dymki „A · 7 h 32” przy trasach

@@ -179,6 +179,7 @@ function baseWarningText(w: RouteWarning): string {
     case "incline": return `Stromy odcinek${n}%`;
     case "curve": return `Ciasny zakręt${w.value !== null ? ` (promień ${w.value} m)` : ""}`;
     case "closed": return "Droga zamknięta (zgłoszenie)";
+    case "roadworks": return "Roboty drogowe (zgłoszenie)";
     default: return w.kind;
   }
 }

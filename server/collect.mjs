@@ -15,6 +15,7 @@ export const REPORT_KINDS = {
   speed: { label: "Ograniczenie prędkości", unit: "km/h", min: 5, max: 140 },
   truck_ban: { label: "Zakaz dla ciężarówek" },
   closed: { label: "Droga zamknięta" },
+  roadworks: { label: "Roboty drogowe / przebudowa" },
   parking: { label: "Parking dla ciężarówek" },
   mop: { label: "MOP — miejsce obsługi podróżnych" },
   fuel: { label: "Stacja paliw" },

@@ -88,6 +88,16 @@ const ICONS: Record<string, React.ReactNode> = {
       <Truck x={11} y={17} s={1} />
     </Sign>
   ),
+  // Roboty drogowe: pomarańczowy trójkąt ostrzegawczy z robotnikiem przy łopacie (znak A-14).
+  roadworks: (
+    <>
+      <path d="M24 4 45 42H3z" fill="#fff" stroke={RED} strokeWidth="4" strokeLinejoin="round" />
+      <path d="M24 9 40.5 39h-33z" fill="#f2a230" />
+      <circle cx="21" cy="19" r="2.6" fill="#111" />
+      <path d="M21 22.5l-2.5 7 3 1 1 6M18.5 29.5l-3 7M21 24l5 2M26 26l3.5 8.5M27 34h6" stroke="#111" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" fill="none" />
+      <path d="M30 32l5-1 1 4.5h-7z" fill="#111" />
+    </>
+  ),
   closed: (
     <>
       <rect x="4" y="16" width="40" height="11" rx="2" fill="#fff" stroke="#111" strokeWidth="1.5" />

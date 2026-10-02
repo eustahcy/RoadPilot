@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { DriverState, parkingHint, simulate } from "./plan";
+import { DriverState, parkingHint, simulate, timeAtKm } from "./plan";
 import { reconstruct, reconstructTimed } from "./reconstruct";
 import { DEFAULT_SPEEDS, Route, Segment, segmentsFromProfile, Speeds } from "./route";
 import { betterOption, compareScenarios, explain, whatIfs } from "./scenarios";
@@ -51,6 +51,15 @@ describe("simulate", () => {
     const p = simulate(flat(300), fresh(), NOW, OFF, { kind: "now" });
     expect(kinds(p)).toEqual(["drive:270", "break:45", "drive:30", "arrive:0"]);
     expect(p.arrival).toBe(at(345));
+  });
+
+  it("timeAtKm: przyjazd do km po drodze z przerwą (punkt pośredni)", () => {
+    const r = flat(300);
+    const p = simulate(r, fresh(), NOW, OFF, { kind: "now" });
+    expect(timeAtKm(p, r, 100)).toBe(at(100));
+    // Za przerwą: 270 jazdy + 45 przerwy + 10 jazdy.
+    expect(timeAtKm(p, r, 280)).toBe(at(325));
+    expect(timeAtKm(p, r, 300)).toBe(p.arrival);
   });
 
   it("po przerwie dzielonej 15 min wystarczy 30 min", () => {

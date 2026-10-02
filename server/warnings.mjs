@@ -15,6 +15,8 @@ export const CONFLICT = {
   hgv: () => true,
   truck_ban: () => true,
   closed: () => true,
+  // Roboty drogowe (zgłoszenie): ostrzegamy — zwężenie, objazd, wolniej — ale trasy nie zmieniamy (nie ma w HARD).
+  roadworks: () => true,
   // Stromy odcinek dotyczy każdej ciężarówki (import bierze tylko ≥ 8%) — ostrzegamy, nie omijamy.
   incline: () => true,
 };

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { applyVotes, routeAlerts, routeBoxes, routeWarnings } from "./warnings.mjs";
+import { applyConditions, applyVotes, blockingPoints, dropCopiedBridgeHeights, routeAlerts, routeBoxes, routeWarnings } from "./warnings.mjs";
 
 const KM_PER_DEG = 111.32;
 /** Trasa na północ po 19° E od 52° N, punkt co 100 m, 5 km. */
@@ -111,5 +111,39 @@ describe("głosy na fotoradary i kontrole", () => {
       ["osm:n4", { up: 2, down: 3, lastUp: 1, lastDown: 1 }],
     ]);
     expect(applyVotes(a, votes).map((w) => w.id)).toEqual(["2", "n4"]);
+  });
+});
+
+describe("wysokość na moście przepisana z drogi pod nim (błąd w OSM)", () => {
+  // Estakada Kwiatkowskiego (most, 3,5 m) i ulica Leszczynki pod nią (3,5 m) — dane z OSM.
+  const estakada = { kind: "height", value: 3.5, bridge: 1, lat: 54.52732, lon: 18.48189, geom: [[54.52714, 18.48173], [54.52732, 18.48189], [54.52748, 18.48201]] };
+  const leszczynki = { kind: "height", value: 3.5, bridge: 0, lat: 54.52721, lon: 18.48193, geom: [[54.52757, 18.48101], [54.52736, 18.48159], [54.52721, 18.48193], [54.5272, 18.48201]] };
+  it("most z tą samą wartością co droga pod nim — pomijany; droga pod spodem zostaje", () => {
+    expect(dropCopiedBridgeHeights([estakada, leszczynki])).toEqual([leszczynki]);
+  });
+  it("prawdziwe ograniczenie na moście (inna wartość albo nic pod spodem) — zostaje", () => {
+    expect(dropCopiedBridgeHeights([estakada, { ...leszczynki, value: 3.2 }])).toHaveLength(2);
+    expect(dropCopiedBridgeHeights([estakada])).toEqual([estakada]);
+  });
+});
+
+describe("ograniczenia warunkowe w chwili przejazdu", () => {
+  const night = [{ value: "no", time: [{ days: null, ph: false, ranges: [[1320, 360]] }] }];
+  const dest = [{ value: "none", users: ["destination"] }];
+  const w = (km, extra) => ({ km, source: "osm", id: "w1", kind: "hgv", value: null, raw: "", lat: 52, lon: 19, ...extra });
+  const ctx = (iso, destKm = 100) => ({ timeAt: () => Date.parse(iso), destKm, weightT: 40 });
+  it("zakaz nocny: w nocy obowiązuje (blokuje), w dzień miękka informacja z godzinami", () => {
+    expect(applyConditions([w(50, { cond: night })], ctx("2026-10-01T21:30:00Z"))[0]).toMatchObject({ kind: "hgv", note: "22:00–06:00" });
+    expect(applyConditions([w(50, { cond: night })], ctx("2026-10-01T10:00:00Z"))[0]).toMatchObject({ soft: true, note: "22:00–06:00 — w chwili przejazdu nie obowiązuje" });
+  });
+  it("tonaż z „nie dotyczy dojazdu”: tranzyt — obowiązuje, przy celu — miękko „tylko dojazd”; hgv=destination przy celu też", () => {
+    const wt = (km) => w(km, { kind: "weight", value: 12, cond: dest });
+    expect(applyConditions([wt(50)], ctx("2026-10-01T10:00:00Z"))[0].soft).toBeUndefined();
+    expect(applyConditions([wt(98)], ctx("2026-10-01T10:00:00Z"))[0]).toMatchObject({ soft: true, note: "tylko dojazd — cel w strefie" });
+    expect(applyConditions([w(99, { raw: "destination" })], ctx("2026-10-01T10:00:00Z"))[0].soft).toBe(true);
+    expect(blockingPoints(applyConditions([wt(98), wt(50)], ctx("2026-10-01T10:00:00Z")), 100)).toHaveLength(1);
+    // Strefa dłuższa niż 3 km: ciąg odcinków co ≤ 1,5 km do celu — cały jest dojazdem; odcinek daleko przed nią — tranzyt.
+    const chain = applyConditions([wt(80), wt(95.8), wt(96.6), wt(97.5), wt(98.5)], ctx("2026-10-01T10:00:00Z"));
+    expect(chain.map((x) => !!x.soft)).toEqual([false, true, true, true, true]);
   });
 });

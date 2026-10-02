@@ -1,6 +1,8 @@
 // Ostrzeżenia na trasie z naszych danych (OSM + zgłoszenia kierowców): ograniczenia, których pojazd nie spełnia.
 // Czyste funkcje — zapytania do bazy są w index.mjs (po prostokątach wzdłuż trasy).
 
+import { conditionNote, effectiveRestriction } from "./conditional.mjs";
+
 const M_PER_DEG = 111_320;
 
 /** Kiedy ograniczenie dotyczy pojazdu: wartość poniżej parametru pojazdu (albo zakaz / zamknięcie). */
@@ -13,6 +15,10 @@ export const CONFLICT = {
   hgv: () => true,
   truck_ban: () => true,
   closed: () => true,
+  // Roboty drogowe (zgłoszenie): ostrzegamy — zwężenie, objazd, wolniej — ale trasy nie zmieniamy (nie ma w HARD).
+  roadworks: () => true,
+  // Stromy odcinek dotyczy każdej ciężarówki (import bierze tylko ≥ 8%) — ostrzegamy, nie omijamy.
+  incline: () => true,
 };
 
 /** Punkt „na trasie”: bliżej niż tyle metrów (punkty, np. znak lub bramka). */
@@ -27,6 +33,39 @@ const ALONG_DEG = 30;
 function axis(aLat, aLon, bLat, bLon) {
   const kx = Math.cos((aLat * Math.PI) / 180);
   return ((Math.atan2((bLon - aLon) * kx, bLat - aLat) * 180) / Math.PI + 360) % 180;
+}
+
+/** Ograniczenie wysokości na moście „przepisane” z drogi pod nim: droga bez mostu z tą samą wartością bliżej niż tyle metrów. */
+const BRIDGE_COPY_M = 40;
+
+/** Punkty obiektu: łamana z geom ([[lat, lon], …]) albo sam punkt. */
+const rowPoints = (r) => (Array.isArray(r.geom) && r.geom.length ? r.geom : [[r.lat, r.lon]]);
+
+/** Najmniejsza odległość (m) między punktami jednej łamanej a odcinkami drugiej. */
+function polyDistM(a, b) {
+  let best = Infinity;
+  for (const [lat, lon] of a) {
+    const kx = M_PER_DEG * Math.cos((lat * Math.PI) / 180);
+    for (let i = 0; i < Math.max(1, b.length - 1); i++) {
+      const [p, q] = [b[i], b[Math.min(i + 1, b.length - 1)]];
+      const bx = (q[1] - p[1]) * kx, by = (q[0] - p[0]) * M_PER_DEG;
+      const px = (lon - p[1]) * kx, py = (lat - p[0]) * M_PER_DEG;
+      const l2 = bx * bx + by * by;
+      const t = l2 > 0 ? Math.max(0, Math.min(1, (px * bx + py * by) / l2)) : 0;
+      best = Math.min(best, Math.hypot(px - t * bx, py - t * by));
+    }
+  }
+  return best;
+}
+
+/**
+ * Częsty błąd w OSM: maxheight wiaduktu pod spodem wpisany na sam most (np. Estakada Kwiatkowskiego w Gdyni ma 3,5 m
+ * jak ulica Leszczynki pod nią). Ograniczenie wysokości na moście pomijamy, gdy tuż obok jest droga bez mostu z tą samą
+ * wartością — prawdziwe ograniczenia na mostach (konstrukcja nad jezdnią) zostają.
+ */
+export function dropCopiedBridgeHeights(rows) {
+  const below = rows.filter((r) => r.kind === "height" && !r.bridge);
+  return rows.filter((r) => !(r.kind === "height" && r.bridge && below.some((u) => Number(u.value) === Number(r.value) && polyDistM(rowPoints(r), rowPoints(u)) <= BRIDGE_COPY_M)));
 }
 
 /** Odległość punktu od łamanej trasy (m) i km trasy w najbliższym miejscu. Trasa: [lat, lon, km][]. */
@@ -71,7 +110,9 @@ export function routeWarnings(route, rows, vehicle, box) {
   const out = [];
   for (const r of rows) {
     const conflict = CONFLICT[r.kind];
-    if (!conflict || !conflict(r.value === null ? null : Number(r.value), vehicle)) continue;
+    // Ograniczenie z warunkiem (godziny, „nie dotyczy dojazdu”) dopasowujemy zawsze — czy obowiązuje, ocenia applyConditions.
+    const cond = typeof r.cond === "string" ? JSON.parse(r.cond) : r.cond;
+    if (!conflict || (!cond?.length && !conflict(r.value === null ? null : Number(r.value), vehicle))) continue;
     const from = box ? box.from - 2 : 0;
     const to = box ? box.to + 2 : route.length - 1;
     let hit;
@@ -95,7 +136,7 @@ export function routeWarnings(route, rows, vehicle, box) {
     const [pa, pb] = [route[hit.i], route[Math.min(route.length - 1, hit.i + 1)]];
     const t = pb[2] > pa[2] ? (hit.km - pa[2]) / (pb[2] - pa[2]) : 0;
     const at = { lat: pa[0] + t * (pb[0] - pa[0]), lon: pa[1] + t * (pb[1] - pa[1]) };
-    out.push({ km: Math.round(hit.km * 1000) / 1000, source: r.source, id: String(r.id), kind: r.kind, value: r.value === null ? null : Number(r.value), raw: r.raw ?? "", name: r.name ?? "", lat: r.lat, lon: r.lon, at });
+    out.push({ km: Math.round(hit.km * 1000) / 1000, source: r.source, id: String(r.id), kind: r.kind, value: r.value === null ? null : Number(r.value), raw: r.raw ?? "", name: r.name ?? "", lat: r.lat, lon: r.lon, at, ...(cond?.length ? { cond } : {}) });
   }
   // Ten sam rodzaj ograniczenia w odstępie < 150 m to jedno miejsce (np. obie jezdnie, znak i droga).
   out.sort((a, b) => a.km - b.km);
@@ -106,15 +147,46 @@ export function routeWarnings(route, rows, vehicle, box) {
 const HARD = new Set(["height", "weight", "axle", "width", "length", "hgv", "truck_ban", "closed"]);
 /** Zakaz tranzytu (dojazd dozwolony) nie blokuje ostatnich tylu km — cel może leżeć w strefie. */
 const DESTINATION_KM = 3;
+/** Kolejne odcinki strefy „tylko dojazd” mogą być od siebie tyle km — dalej to już inna strefa (tranzyt). */
+const ZONE_GAP_KM = 1.5;
 
 /**
- * Ostrzeżenia → punkty do wykluczenia z trasy (Valhalla exclude_locations). Pomija zakaz tranzytu przy celu.
+ * Ograniczenia warunkowe i „tylko dojazd” w chwili przejazdu: `timeAt(km)` — kiedy będziemy w tym miejscu (ms),
+ * `destKm` — km celu; przy celu albo starcie (DESTINATION_KM) jesteśmy „dojazdem”. Obowiązujące zostają, nieobowiązujące
+ * stają się miękką informacją (`soft`, nie zmieniają trasy) z opisem warunku (`note`), bez znaczenia dla nas — znikają.
+ */
+export function applyConditions(warnings, { timeAt, destKm, startKm = 0, weightT }) {
+  const out = [];
+  // Strefa „tylko dojazd” = ciąg takich ograniczeń (przerwy ≤ ZONE_GAP_KM) dochodzący do celu albo startu — cały jest dojazdem.
+  const exempt = (w) => (w.kind === "hgv" && (w.raw === "destination" || w.raw === "delivery")) || w.cond?.some((c) => c.users?.some((u) => u === "destination" || u === "delivery"));
+  const zone = new Set();
+  let edge = destKm - DESTINATION_KM;
+  for (const w of [...warnings].filter(exempt).sort((a, b) => b.km - a.km)) if (w.km >= edge - ZONE_GAP_KM) { zone.add(w); edge = Math.min(edge, w.km); }
+  edge = startKm + DESTINATION_KM;
+  for (const w of [...warnings].filter(exempt).sort((a, b) => a.km - b.km)) if (w.km <= edge + ZONE_GAP_KM) { zone.add(w); edge = Math.max(edge, w.km); }
+  for (const w of warnings) {
+    const transit = w.kind === "hgv" && (w.raw === "destination" || w.raw === "delivery");
+    if (!w.cond && !transit) { out.push(w); continue; }
+    const nearDest = zone.has(w) || destKm - w.km <= DESTINATION_KM || w.km - startKm <= DESTINATION_KM;
+    const base = w.kind === "weight" ? w.value : w.raw || null;
+    const e = effectiveRestriction(w.kind, base, w.cond, { t: timeAt(w.km), nearDest, weightT });
+    const note = conditionNote(w.cond);
+    const { cond, ...rest } = w;
+    if (e.active) { out.push({ ...rest, ...(note ? { note } : {}) }); continue; }
+    if (nearDest && (transit || cond?.some((c) => c.users?.some((u) => u === "destination" || u === "delivery")))) out.push({ ...rest, soft: true, note: "tylko dojazd — cel w strefie" });
+    else if (note && cond?.some((c) => c.time)) out.push({ ...rest, soft: true, note: `${note} — w chwili przejazdu nie obowiązuje` });
+  }
+  return out;
+}
+
+/**
+ * Ostrzeżenia → punkty do wykluczenia z trasy (Valhalla exclude_locations). Pomija zakaz tranzytu przy celu i miękkie (soft).
  * `lengthKm` — długość trasy.
  */
 export function blockingPoints(warnings, lengthKm) {
   return warnings
-    .filter((w) => HARD.has(w.kind))
-    .filter((w) => !(w.kind === "hgv" && (w.raw === "destination" || w.raw === "delivery") && lengthKm - w.km <= DESTINATION_KM))
+    .filter((w) => HARD.has(w.kind) && !w.soft)
+    .filter((w) => !(w.kind === "hgv" && (w.raw === "destination" || w.raw === "delivery") && lengthKm - w.km <= DESTINATION_KM && !w.note))
     .map((w) => ({ lat: w.at?.lat ?? w.lat, lon: w.at?.lon ?? w.lon, key: `${w.source}:${w.id}:${w.kind}` }));
 }
 

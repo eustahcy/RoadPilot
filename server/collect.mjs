@@ -15,7 +15,13 @@ export const REPORT_KINDS = {
   speed: { label: "Ograniczenie prędkości", unit: "km/h", min: 5, max: 140 },
   truck_ban: { label: "Zakaz dla ciężarówek" },
   closed: { label: "Droga zamknięta" },
+  // Roboty: długość odcinka (km) opcjonalna — „tylko tu” = null; rodzaj w note (ROADWORKS_TYPES).
+  roadworks: { label: "Roboty drogowe / przebudowa", unit: "km", min: 0.1, max: 50, optional: true },
   parking: { label: "Parking dla ciężarówek" },
+  mop: { label: "MOP — miejsce obsługi podróżnych" },
+  fuel: { label: "Stacja paliw" },
+  gate: { label: "Wjazd dla ciężarówek (brama przy celu)" },
+  bad_turn: { label: "Zły manewr — tu nie da się skręcić" },
   other: { label: "Inne" },
 };
 
@@ -40,6 +46,9 @@ export function cleanPoints(points, now) {
   return out;
 }
 
+/** Rodzaje robót (note zgłoszenia „roadworks”): roboty, zwężenie pasa, ruch po drugiej jezdni (pas wydzielony pod prąd). */
+export const ROADWORKS_TYPES = ["works", "narrow", "contraflow"];
+
 /** Zgłoszenie z aplikacji → wiersz; błąd z opisem dla nieprawidłowych danych. */
 export function cleanReport(r) {
   const kind = String(r?.kind ?? "");
@@ -50,10 +59,12 @@ export function cleanReport(r) {
   if (!Number.isFinite(lat) || !Number.isFinite(lon)) throw new Error("Brak pozycji.");
   if (!inPoland(lat, lon)) throw new Error("Zgłoszenia zbieramy na razie tylko w Polsce.");
   let value = null;
-  if (def.unit) {
+  if (def.unit && !(def.optional && (r.value === null || r.value === undefined))) {
     value = Number(r.value);
     if (!(value >= def.min && value <= def.max)) throw new Error(`Podaj wartość ${def.min}–${def.max} ${def.unit}.`);
   }
   const heading = Number.isFinite(Number(r.heading)) && r.heading !== null ? Math.round(Number(r.heading)) % 360 : null;
-  return { kind, lat, lon, heading, value, note: String(r.note ?? "").trim().slice(0, 200) };
+  const note = String(r.note ?? "").trim().slice(0, 200);
+  if (kind === "roadworks" && note && !ROADWORKS_TYPES.includes(note)) throw new Error("Nieznany rodzaj robót.");
+  return { kind, lat, lon, heading, value, note };
 }

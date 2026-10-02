@@ -5,6 +5,8 @@ export type RoadType = "motorway" | "expressway" | "rural" | "urban" | "mixed";
 export interface Segment {
   type: RoadType;
   km: number;
+  /** Prędkość ciężarówek zmierzona na tym odcinku (jazda kierowców RoadPilot) — nie wyższa niż ustawiona dla rodzaju drogi. */
+  kmh?: number;
 }
 
 export type Speeds = Record<RoadType, number>;
@@ -68,7 +70,50 @@ export function remainingSegments(segments: Segment[], doneKm: number): Segment[
   for (const s of segments) {
     const km = Math.max(0, s.km - skip);
     skip = Math.max(0, skip - s.km);
-    if (km > 0) out.push({ type: s.type, km: round1(km) });
+    if (km > 0) out.push({ type: s.type, km: round1(km), ...(s.kmh !== undefined ? { kmh: s.kmh } : {}) });
+  }
+  return out;
+}
+
+/**
+ * Przyjazd z aktualnego tempa: średnia z GPS dotyczy tylko najbliższych `minutes` jazdy (korek, roboty), dalej zwykłe prędkości
+ * dróg. Dawniej obejmowała całą trasę — 10 min po 88 km/h na A4 albo 40 km/h w mieście przesuwało przyjazd na 600 km o godziny.
+ * Route bierze min(kmh, prędkość rodzaju drogi), więc szybsza jazda niż ustawiona nie skraca przyjazdu.
+ */
+export function withLiveSpeed(segments: Segment[], kmh: number, minutes: number): Segment[] {
+  let left = (kmh * minutes) / 60;
+  const out: Segment[] = [];
+  for (const s of segments) {
+    if (left <= 0) { out.push(s); continue; }
+    const km = Math.min(s.km, left);
+    const live = s.kmh !== undefined ? Math.min(s.kmh, kmh) : kmh;
+    out.push({ ...s, km: round1(km), kmh: live });
+    if (s.km - km > 0.05) out.push({ ...s, km: round1(s.km - km) });
+    left -= km;
+  }
+  return out;
+}
+
+/**
+ * Wolne odcinki przed nami (korki z jazdy kierowców RoadPilot) — km liczone od początku `segments`; na nich prędkość nie wyższa niż `kmh`.
+ * Dzięki temu przyjazd i plan przerw uwzględniają korek, a nie tylko pokazują go na mapie.
+ */
+export function withSlowStretches(segments: Segment[], stretches: { fromKm: number; toKm: number; kmh: number }[]): Segment[] {
+  let out = segments;
+  for (const st of stretches) {
+    if (st.toKm <= 0) continue;
+    const next: Segment[] = [];
+    let at = 0;
+    for (const s of out) {
+      const a = at, b = at + s.km;
+      at = b;
+      const lo = Math.max(a, st.fromKm), hi = Math.min(b, st.toKm);
+      if (hi - lo < 0.05) { next.push(s); continue; }
+      if (lo - a >= 0.05) next.push({ ...s, km: round1(lo - a) });
+      next.push({ ...s, km: round1(hi - lo), kmh: Math.min(s.kmh ?? Infinity, Math.max(3, st.kmh)) });
+      if (b - hi >= 0.05) next.push({ ...s, km: round1(b - hi) });
+    }
+    out = next;
   }
   return out;
 }
@@ -97,7 +142,7 @@ export class Route {
       return start;
     });
     this.totalKm = acc;
-    this.speeds = this.segments.map((s) => Math.max(1, speeds[s.type]) / factor / 60);
+    this.speeds = this.segments.map((s) => Math.max(1, s.kmh !== undefined ? Math.min(s.kmh, speeds[s.type]) : speeds[s.type]) / factor / 60);
   }
 
   /** Czas jazdy (min) z pozycji fromKm do toKm. */

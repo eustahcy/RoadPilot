@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { describeFriend, Friend, nearestFriend, presenceOf } from "./friends";
+import { describeFriend, fmtAgo, Friend, nearestFriend, presenceOf, presenceSendable } from "./friends";
 import { Live } from "./gps";
 import { DriverStatus } from "./scenarios";
 
@@ -45,6 +45,32 @@ describe("describeFriend", () => {
   });
 });
 
+describe("presenceSendable", () => {
+  it("pozycja w ruchu starsza niż minuta nie idzie do znajomych; na postoju tak", () => {
+    const p = presenceOf(live, null, now - 60 * MIN, status, undefined, "", 0)!;
+    expect(p.posAt).toBe(now);
+    expect(presenceSendable(p, now + 30_000)).toBe(true);
+    expect(presenceSendable(p, now + 90 * MIN)).toBe(false);
+    expect(presenceSendable({ ...p, status: "standing" }, now + 90 * MIN)).toBe(true);
+  });
+});
+
+describe("znajomy bez sygnału", () => {
+  it("ostatnia pozycja: odległość zostaje, zamiast czasu postoju — kiedy był sygnał", () => {
+    const d = describeFriend({ ...base, status: "break", since: now - 300 * MIN, targetMin: 45, at: now - 35 * MIN, offline: true }, { lat: 52.1, lon: 21 }, now);
+    expect(d).toMatchObject({ offline: true, status: "Brak sygnału", duration: "ostatnio 35 min temu" });
+    expect(d.km).toBeGreaterThan(0);
+    expect(d.tone).toBeUndefined();
+  });
+  it("fmtAgo", () => {
+    expect(fmtAgo(30_000)).toBe("przed chwilą");
+    expect(fmtAgo(35 * MIN)).toBe("35 min temu");
+    expect(fmtAgo(185 * MIN)).toBe("3 h temu");
+    expect(fmtAgo(30 * 60 * MIN)).toBe("wczoraj");
+    expect(fmtAgo(4 * 24 * 60 * MIN)).toBe("4 dni temu");
+  });
+});
+
 describe("describeFriend po trasie", () => {
   // Trasa na północ po południku 21°, punkt co 100 m, 10 km; my na 3. km.
   const KM = 1 / 110.574;
@@ -67,6 +93,11 @@ describe("nearestFriend", () => {
   const f = (id: number, lat: number, relation: Friend["relation"] = "accepted", presence = true): Friend => ({ id, name: `K${id}`, email: "", relation, presence: presence ? { ...base, lat, status: "driving", since: null } : null });
   it("najbliższy spośród zaakceptowanych z sygnałem", () => {
     expect(nearestFriend([f(1, 53), f(2, 52.2), f(3, 52.1, "pending"), f(4, 52.01, "accepted", false)], { lat: 52, lon: 21 })?.friend.id).toBe(2);
+  });
+  it("bez sygnału tylko, gdy nikt nie nadaje", () => {
+    const off = (id: number, lat: number): Friend => ({ ...f(id, lat), presence: { ...f(id, lat).presence!, offline: true } });
+    expect(nearestFriend([off(1, 52.01), f(2, 53)], { lat: 52, lon: 21 })?.friend.id).toBe(2);
+    expect(nearestFriend([off(1, 52.01)], { lat: 52, lon: 21 })?.friend.id).toBe(1);
   });
   it("bez własnej pozycji bierze pierwszego z sygnałem", () => {
     expect(nearestFriend([f(1, 53), f(2, 52.2)], null)?.friend.id).toBe(1);

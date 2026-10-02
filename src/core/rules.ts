@@ -31,3 +31,16 @@ export const RULES = {
 export function dutyWindow(restMinutes: number): number {
   return RULES.restCycle - restMinutes;
 }
+
+/**
+ * Dopuszczalna prędkość ciężarówki o dmc > 3,5 t (Prawo o ruchu drogowym, art. 20), km/h: obszar zabudowany 50,
+ * poza nim 70, autostrada i droga ekspresowa 80. Znak może ją obniżyć, ale nie podwyższyć — wyższy znak
+ * (np. 70 w mieście, 90 na krajówce) dotyczy innych pojazdów.
+ */
+export const TRUCK_SPEED = {
+  urban: 50,
+  rural: 70,
+  motorway: 80,
+  /** Od tej masy (kg) pojazd jest „ciężarówką” w rozumieniu limitów. */
+  minWeightKg: 3500,
+} as const;

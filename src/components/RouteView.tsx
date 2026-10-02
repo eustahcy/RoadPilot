@@ -3,6 +3,7 @@ import { fmtDuration, fmtKm, fromLocalInput, toLocalInput } from "../format";
 import { floorMinute, Trip } from "../state";
 import { NumberField, Toggle } from "./fields";
 import { NavCard, NavProps } from "./NavCard";
+import { TRAFFIC_ON } from "../nav";
 
 interface Props {
   trip: Trip;
@@ -62,6 +63,7 @@ export function RouteView({ trip, route, onChange, nav }: Props) {
       <section className="card">
         <div className="eyebrow">Charakter trasy</div>
         <h2>Jakimi drogami jedziesz?</h2>
+        <p className="muted small">Tylko do obliczeń przerw i przyjazdu — nie zmienia trasy nawigacji.</p>
         <div className="profiles">
           {(Object.keys(PROFILES) as Exclude<ProfileId, "custom">[]).map((id) => (
             <button key={id} className={`profile ${trip.profile === id ? "active" : ""}`} onClick={() => chooseProfile(id)}>
@@ -110,7 +112,7 @@ export function RouteView({ trip, route, onChange, nav }: Props) {
           <div className="nav-trip">
             <span><small>Do celu</small><b>{fmtKm(route.totalKm)}</b></span>
             <span><small>Cała trasa</small><b>{fmtKm(navRoute.lengthKm)}</b></span>
-            <span><small>Korki teraz</small><b className={navRoute.trafficMin >= 1 ? "warn-text" : ""}>{navRoute.trafficMin >= 1 ? `+${fmtDuration(navRoute.trafficMin)}` : navRoute.engine === "roadpilot" ? "—" : "brak"}</b></span>
+            {TRAFFIC_ON && <span><small>Korki teraz</small><b className={navRoute.trafficMin >= 1 ? "warn-text" : ""}>{navRoute.trafficMin >= 1 ? `+${fmtDuration(navRoute.trafficMin)}` : navRoute.engine === "roadpilot" && !navRoute.trafficAt ? "—" : "brak"}</b></span>}
           </div>
           {trip.doneKm > 0 && (
             <p className="field-hint">

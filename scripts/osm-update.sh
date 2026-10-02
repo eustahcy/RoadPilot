@@ -9,11 +9,29 @@ mv poland-latest.osm.pbf.part poland-latest.osm.pbf
 osmium tags-filter poland-latest.osm.pbf \
   nw/maxheight nw/maxheight:physical nw/maxweight nw/maxweightrating nw/maxaxleload nw/maxwidth nw/maxlength \
   w/hgv=no,destination,delivery w/maxspeed:hgv n/barrier=height_restrictor \
+  w/incline w/maxweight:hgv w/maxweight:conditional w/maxweightrating:conditional w/maxweight:hgv:conditional w/hgv:conditional \
   -o truck.osm.pbf --overwrite
 osmium export truck.osm.pbf -f geojsonseq --add-unique-id=type_id --geometry-types=point,linestring -o truck.geojsonseq --overwrite
 # Fotoradary, odcinkowe pomiary prędkości, kamery na czerwonym (relacje enforcement z węzłami from/to/device).
 osmium tags-filter poland-latest.osm.pbf n/highway=speed_camera r/type=enforcement -o enforcement.osm.pbf --overwrite
 osmium cat enforcement.osm.pbf -f opl -o enforcement.opl --overwrite
+# Pinezki przy trasie: stacje paliw, MOP-y, parkingi (parkingi bez hgv odrzuca poi-import.mjs) i bramki (punkty poboru opłat).
+osmium tags-filter poland-latest.osm.pbf nwr/amenity=fuel,parking nwr/highway=rest_area,services n/barrier=toll_booth -o pois.osm.pbf --overwrite
+osmium export pois.osm.pbf -f geojsonseq --add-unique-id=type_id --geometry-types=point,polygon -o pois.geojsonseq --overwrite
+# Miejscowości do opisu miejsca przekroczenia w historii („Stryków, A2, MOP Niesułków”).
+osmium tags-filter poland-latest.osm.pbf n/place=city,town,village,suburb -o places.osm.pbf --overwrite
+osmium export places.osm.pbf -f geojsonseq --add-unique-id=type_id --geometry-types=point -o places.geojsonseq --overwrite
+# Słupki kilometrowe (pikietaż „S19 · km 432” nad paskiem w Nawigacji).
+osmium tags-filter poland-latest.osm.pbf n/highway=milestone -o milestones.osm.pbf --overwrite
+osmium export milestones.osm.pbf -f geojsonseq --geometry-types=point -o milestones.geojsonseq --overwrite
+# Obszar zabudowany / poza nim (limity dla ciężarówek w nawigacji): id drogi → u | r, plik czyta API (ZONES_FILE).
+osmium tags-filter poland-latest.osm.pbf w/source:maxspeed=PL:urban,PL:rural w/zone:traffic=PL:urban,PL:rural \
+  w/maxspeed:type=PL:urban,PL:rural w/maxspeed=PL:urban,PL:rural -R -o zones.osm.pbf --overwrite
+osmium cat zones.osm.pbf -f opl | awk '{ print substr($1, 2) "\t" ($0 ~ /=PL:urban/ ? "u" : "r") }' > zones.tsv.part
+mv zones.tsv.part zones.tsv
 cd "$(dirname "$0")/.."
 node --env-file=/etc/roadpilot-api.env server/osm-import.mjs "$DIR/truck.geojsonseq"
 node --env-file=/etc/roadpilot-api.env server/enforcement-import.mjs "$DIR/enforcement.opl"
+node --env-file=/etc/roadpilot-api.env server/poi-import.mjs "$DIR/pois.geojsonseq"
+node --env-file=/etc/roadpilot-api.env server/place-import.mjs "$DIR/places.geojsonseq"
+node --env-file=/etc/roadpilot-api.env server/milestone-import.mjs "$DIR/milestones.geojsonseq"

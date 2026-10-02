@@ -75,3 +75,12 @@ describe("nawigacja TomTom", () => {
     expect(both.map((x) => x.lengthKm)).toEqual([5.56, 6]);
   });
 });
+
+describe("routeUrl z punktami pośrednimi", () => {
+  it("dokłada punkty do ścieżki i wyłącza alternatywy", () => {
+    const v = { heightM: 4, widthM: 2.55, lengthM: 16.5, weightKg: 40000, axleWeightKg: 11500, axles: 5, maxKmh: 90, adr: "none" };
+    const u = new URL(routeUrl({ lat: 52, lon: 21 }, { lat: 53, lon: 21 }, v, "k", 2, "fastest", [{ lat: 52.5, lon: 20.5 }]));
+    expect(u.pathname).toContain("/calculateRoute/52,21:52.5,20.5:53,21/json");
+    expect(u.searchParams.get("maxAlternatives")).toBeNull();
+  });
+});

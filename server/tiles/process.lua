@@ -18,12 +18,12 @@ function node_function()
   end
 end
 
--- Klasa drogi → nazwa w stylu i minimalny zoom.
+-- Klasa drogi → nazwa w stylu i minimalny zoom (2026-10-01: ekspresowe od 6, krajowe od 7, wojewódzkie od 9 — oddalona mapa nie jest „dziurawa”).
 local ROAD = {
   motorway = { "motorway", 6 }, motorway_link = { "motorway", 10 },
-  trunk = { "trunk", 7 }, trunk_link = { "trunk", 10 },
-  primary = { "primary", 8 }, primary_link = { "primary", 11 },
-  secondary = { "secondary", 10 }, secondary_link = { "secondary", 12 },
+  trunk = { "trunk", 6 }, trunk_link = { "trunk", 10 },
+  primary = { "primary", 7 }, primary_link = { "primary", 11 },
+  secondary = { "secondary", 9 }, secondary_link = { "secondary", 12 },
   tertiary = { "tertiary", 11 }, tertiary_link = { "tertiary", 12 },
   residential = { "minor", 13 }, unclassified = { "minor", 13 }, living_street = { "minor", 14 },
   service = { "service", 14 },

@@ -52,16 +52,22 @@ export function vehicleParams(v) {
 export const ROUTE_TYPES = new Set(["fastest", "shortest", "eco"]);
 
 /** `routeType` — fastest / shortest / eco (TomTom); nieznany → fastest. */
-export function routeUrl(from, to, vehicle, key, alternatives = 0, routeType = "fastest") {
+/** `via` — punkty pośrednie (TomTom nie liczy wtedy alternatyw). */
+export function routeUrl(from, to, vehicle, key, alternatives = 0, routeType = "fastest", via = []) {
   const q = vehicleParams(vehicle);
-  if (alternatives > 0) q.set("maxAlternatives", String(alternatives));
+  if (alternatives > 0 && !via.length) q.set("maxAlternatives", String(alternatives));
   q.set("key", key);
   q.set("traffic", "true");
   q.set("routeType", ROUTE_TYPES.has(routeType) ? routeType : "fastest");
+  if (vehicle?.avoid?.tolls) q.append("avoid", "tollRoads");
+  if (vehicle?.avoid?.motorways) q.append("avoid", "motorways");
+  if (vehicle?.avoid?.ferries) q.append("avoid", "ferries");
+  if (vehicle?.avoid?.unpaved) q.append("avoid", "unpavedRoads");
   q.set("instructionsType", "tagged");
   q.set("language", "pl-PL");
   for (const s of ["motorway", "urban", "lanes", "speedLimit", "traffic"]) q.append("sectionType", s);
-  return `${TOMTOM}/routing/1/calculateRoute/${from.lat},${from.lon}:${to.lat},${to.lon}/json?${q}`;
+  const path = [from, ...via, to].map((p) => `${p.lat},${p.lon}`).join(":");
+  return `${TOMTOM}/routing/1/calculateRoute/${path}/json?${q}`;
 }
 
 export function searchUrl(query, near, key) {
@@ -126,6 +132,13 @@ export function parseRoute(json, idx = 0) {
     if (!type) continue;
     for (let i = s.startPointIndex; i < s.endPointIndex && i < kind.length; i++) kind[i] = type;
   }
+  // Rodzaj drogi wg przepisów (limit dla ciężarówki: zabudowany / poza / autostrada) — te same sekcje co odcinki.
+  const roads = [];
+  kind.forEach((type, i) => {
+    const last = roads[roads.length - 1];
+    if (last && last.kind === type) last.toKm = km[i + 1];
+    else roads.push({ km: km[i], toKm: km[i + 1], kind: type });
+  });
   const segments = [];
   kind.forEach((type, i) => {
     const d = km[i + 1] - km[i];
@@ -195,6 +208,7 @@ export function parseRoute(json, idx = 0) {
     instructions,
     lanes,
     speedLimits,
+    roads: roads.filter((r) => r.toKm - r.km > 0.001).map((r) => ({ km: round(r.km, 3), toKm: round(r.toKm, 3), kind: r.kind })),
     traffic,
   };
 }

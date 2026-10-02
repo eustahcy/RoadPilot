@@ -1,25 +1,38 @@
 // Synchronizacja stanu z kontem. Telefon jest źródłem prawdy na bieżąco (działa offline), serwer — kopią między
-// urządzeniami. Zasada: ostatni zapis wygrywa. Zmiany wysyłamy co najwyżej co 30 s, od razu przy schowaniu aplikacji;
-// przy starcie i powrocie do aplikacji pobieramy nowszą wersję z konta, o ile tu nie ma niewysłanych zmian.
+// urządzeniami. Zmiany wysyłamy co najwyżej co 30 s, od razu przy schowaniu aplikacji; nowszą wersję z konta pobieramy
+// przy starcie, powrocie do aplikacji i co 30 s, o ile tu nie ma niewysłanych zmian. Zapis podaje wersję, od której
+// wyszedł (baseRev) — gdy w międzyczasie zapisało inne urządzenie, serwer odpowiada 409, a my scalamy oba stany.
+// Scalanie (syncMerge.ts) idzie grupami (tachograf, trasa, ustawienia, historia): w każdej wygrywa nowsza zmiana — znacznik
+// czasu z urządzenia, na którym powstała (Meta.stamps, wysyłane jako state.syncStamps). Jazdę z GPS dolicza tylko jedno
+// urządzenie (AppState.tracker); GPS czeka na pierwsze pobranie z konta (ready), żeby wczorajszy stan nie liczył jazdy.
 
 import { Dispatch, SetStateAction, useCallback, useEffect, useRef, useState } from "react";
 import { api, ApiError, Auth } from "./api";
 import { AppState, normalize } from "./state";
+import { GROUP_IDS, groupJson, mergeStates, Stamps, SyncGroup } from "./syncMerge";
+import { DEVICE_ID } from "./tracking";
 
 const META_KEY = "roadpilot:sync";
 const PUSH_EVERY_MS = 30_000;
+/** Co tyle pobieramy zmiany z konta, gdy aplikacja jest widoczna (drugie urządzenie na tym samym koncie). */
+const PULL_EVERY_MS = 30_000;
 
 export type SyncStatus = { kind: "off" } | { kind: "syncing" } | { kind: "ok"; at: number } | { kind: "offline" } | { kind: "error"; message: string };
 
-/** Wersja z serwera, którą ostatnio mieliśmy, i czy są zmiany do wysłania. */
+/** Najdłużej tyle GPS czeka na pierwsze pobranie z konta (wolna sieć) — potem liczy na tym, co jest w telefonie. */
+const READY_MAX_MS = 10_000;
+
+/** Wersja z serwera, którą ostatnio mieliśmy, czy są zmiany do wysłania i kiedy tu zmieniła się każda grupa. */
 interface Meta {
   rev: number;
   dirty: boolean;
+  stamps?: Stamps;
 }
 
 /** Pola tylko dla tego urządzenia — nie trafiają na konto. */
 export function syncable(s: AppState) {
-  const { track: _track, hud: _hud, planTime: _planTime, navRoute: _navRoute, ...rest } = s;
+  const { track: _track, hud: _hud, navOpen: _navOpen, planTime: _planTime, navRoute: _navRoute, pendingGap: _pendingGap, gapReview: _gapReview, ...rest } = s;
+  delete (rest as { syncStamps?: unknown }).syncStamps;
   return rest;
 }
 
@@ -45,20 +58,46 @@ export function resetSync() {
   writeMeta({ rev: 0, dirty: false });
 }
 
-export function useSync(auth: Auth | null, state: AppState, setState: Dispatch<SetStateAction<AppState>>, onExpired: () => void): { status: SyncStatus; push: () => Promise<void> } {
+/**
+ * `ready` — pierwsze pobranie z konta skończone (albo się nie udało / brak konta): dopiero wtedy GPS może doliczać jazdę.
+ */
+export function useSync(auth: Auth | null, state: AppState, setState: Dispatch<SetStateAction<AppState>>, onExpired: () => void): { status: SyncStatus; push: () => Promise<void>; ready: boolean } {
   const [status, setStatus] = useState<SyncStatus>({ kind: "off" });
+  const [ready, setReady] = useState(!auth);
   const meta = useRef(readMeta());
+  const stamps = useRef<Stamps>(meta.current.stamps ?? {});
+  /** Ostatnio widziana zawartość każdej grupy — zmiana bez pobrania z konta to zmiana na tym urządzeniu (znacznik). */
+  const known = useRef<Partial<Record<SyncGroup, string>>>({});
+  const stateRef = useRef(state);
+  stateRef.current = state;
   const sent = useRef<string | null>(null);
   const latest = useRef("");
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const busy = useRef(false);
+  const conflict = useRef(false);
+  const pullRef = useRef<(force?: boolean) => Promise<void>>(async () => {});
   const token = auth?.token;
   latest.current = JSON.stringify(syncable(state));
 
   const setMeta = (m: Meta) => {
-    meta.current = m;
-    writeMeta(m);
+    meta.current = { ...m, stamps: stamps.current };
+    writeMeta(meta.current);
   };
+
+  // Znaczniki: grupa zmieniona od ostatniego renderu (a nie przez pobranie z konta — wtedy `known` jest już ustawione).
+  let stamped = false;
+  const t = Date.now();
+  for (const g of GROUP_IDS) {
+    const j = groupJson(state, g);
+    if (known.current[g] !== undefined && known.current[g] !== j) {
+      stamps.current = { ...stamps.current, [g]: t };
+      stamped = true;
+    }
+    known.current[g] = j;
+  }
+  useEffect(() => {
+    if (stamped) setMeta(meta.current);
+  });
 
   const fail = useCallback((e: unknown) => {
     if (e instanceof ApiError && e.status === 401) return onExpired();
@@ -71,14 +110,20 @@ export function useSync(auth: Auth | null, state: AppState, setState: Dispatch<S
     busy.current = true;
     setStatus({ kind: "syncing" });
     try {
-      const r = await api<{ rev: number }>("PUT", "/state", { state: JSON.parse(body) }, token, keepalive);
+      const r = await api<{ rev: number }>("PUT", "/state", { state: { ...JSON.parse(body), syncStamps: stamps.current }, baseRev: meta.current.rev }, token, keepalive);
       sent.current = body;
       setMeta({ rev: r.rev, dirty: latest.current !== body });
       setStatus({ kind: "ok", at: Date.now() });
     } catch (e) {
-      fail(e);
+      if (e instanceof ApiError && e.status === 409) conflict.current = true;
+      else fail(e);
     } finally {
       busy.current = false;
+    }
+    // Inne urządzenie zapisało w międzyczasie — scalamy (nowsza zmiana w każdej grupie) i wysyłamy, co zostało nasze.
+    if (conflict.current) {
+      conflict.current = false;
+      await pullRef.current();
     }
   }, [token, fail]);
 
@@ -88,14 +133,25 @@ export function useSync(auth: Auth | null, state: AppState, setState: Dispatch<S
     setStatus({ kind: "syncing" });
     let needPush = false;
     try {
-      const r = await api<{ state: AppState | null; rev: number }>("GET", "/state", undefined, token);
-      if (r.state && r.rev > meta.current.rev && !meta.current.dirty) {
+      const r = await api<{ state: (AppState & { syncStamps?: Stamps }) | null; rev: number }>("GET", "/state", undefined, token);
+      if (r.state && r.rev !== meta.current.rev) {
+        const rs = r.state.syncStamps ?? {};
+        delete r.state.syncStamps;
         const incoming = normalize(r.state);
+        // Pola tylko tego urządzenia (GPS, HUD, nawigacja, godzina planowania, trasa) zostają; grupy — nowsza zmiana.
+        const merge = (s: AppState) => {
+          const m = mergeStates(s, stamps.current, incoming, rs, DEVICE_ID);
+          stamps.current = m.stamps;
+          for (const g of GROUP_IDS) known.current[g] = groupJson(m.state, g);
+          return m;
+        };
+        const base = stateRef.current;
+        const m = merge(base);
+        setState((s) => (s === base ? m.state : merge(s).state));
         sent.current = JSON.stringify(syncable(incoming));
-        setMeta({ rev: r.rev, dirty: false });
-        // Pozycja GPS, HUD, godzina planowania i trasa nawigacji zostają z tego urządzenia.
-        setState((s) => ({ ...incoming, track: s.track, hud: s.hud, planTime: s.planTime, navRoute: s.navRoute }));
-        setStatus({ kind: "ok", at: Date.now() });
+        needPush = m.localWon.length > 0;
+        setMeta({ rev: r.rev, dirty: needPush });
+        if (!needPush) setStatus({ kind: "ok", at: Date.now() });
       } else {
         needPush = !r.state || meta.current.dirty;
         if (!needPush) setStatus({ kind: "ok", at: Date.now() });
@@ -107,16 +163,20 @@ export function useSync(auth: Auth | null, state: AppState, setState: Dispatch<S
     }
     if (needPush) await push();
   }, [token, setState, fail, push]);
+  pullRef.current = pull;
 
   // Start / zalogowanie i każdy powrót do aplikacji: pobierz. Schowanie aplikacji: wyślij zaległe zmiany.
   useEffect(() => {
     if (!token) {
       setStatus({ kind: "off" });
+      setReady(true);
       return;
     }
     // To, co jest teraz w telefonie, uznajemy za zgodne z ostatnią pobraną wersją (chyba że są niewysłane zmiany).
     if (!meta.current.dirty) sent.current = latest.current;
-    pull();
+    setReady(false);
+    const fallback = setTimeout(() => setReady(true), READY_MAX_MS);
+    pull().finally(() => setReady(true));
     const onVisibility = () => {
       if (document.visibilityState === "visible") pull();
       else if (meta.current.dirty) push(true);
@@ -124,7 +184,10 @@ export function useSync(auth: Auth | null, state: AppState, setState: Dispatch<S
     const onOnline = () => (meta.current.dirty ? push() : pull());
     document.addEventListener("visibilitychange", onVisibility);
     window.addEventListener("online", onOnline);
+    const poll = setInterval(() => document.visibilityState === "visible" && !meta.current.dirty && pull(), PULL_EVERY_MS);
     return () => {
+      clearTimeout(fallback);
+      clearInterval(poll);
       document.removeEventListener("visibilitychange", onVisibility);
       window.removeEventListener("online", onOnline);
     };
@@ -146,5 +209,5 @@ export function useSync(auth: Auth | null, state: AppState, setState: Dispatch<S
     timer.current = null;
   }, [token]);
 
-  return { status, push: () => push() };
+  return { status, push: () => push(), ready };
 }

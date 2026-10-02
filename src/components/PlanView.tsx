@@ -8,6 +8,7 @@ import { AppState } from "../state";
 import { WorkStatus } from "../core/workday";
 import { ServiceStatus } from "../core/service";
 import { OngoingCard, Reminders } from "./Reminders";
+import { PrintoutTips } from "./PrintoutTips";
 import { StopCard, StopControlsProps } from "./StopControls";
 import { eventLabel, Timeline } from "./Timeline";
 
@@ -158,6 +159,8 @@ export function PlanView({ state, route, comparison, hints, status, planNow, dea
       {active && <Reminders plan={active} parking={parking} />}
 
       <OngoingCard on={ongoing} onChange={onOngoing} />
+
+      <PrintoutTips />
       </div>
     </div>
   );

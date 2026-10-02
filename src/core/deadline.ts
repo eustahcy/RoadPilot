@@ -37,6 +37,8 @@ export interface DeadlinePlan {
  *  1. odpoczynek od razu — jak najdłuższy (≥ 11 h, a jeśli się nie da — skrócony ≥ 9 h), potem jazda,
  *  2. jazda od razu — z najpóźniejszą godziną wyjazdu, przy której wciąż się zdąży.
  * Kierowca dostaje maksimum odpoczynku, a nie jak najwcześniejszy przyjazd pod bramę.
+ * `moving` — kierowca już jedzie (GPS): nie każemy mu stawać ani „wyjeżdżać później”; plan = jazda dalej od teraz,
+ * a awizacja służy tylko do oceny, czy zdąży i z jakim zapasem.
  */
 export function planForDeadline(
   route: Route,
@@ -45,12 +47,13 @@ export function planForDeadline(
   options: PlanOptions,
   deadline: number,
   bufferMin: number,
+  moving = false,
 ): DeadlinePlan {
   const target = deadline - Math.max(0, bufferMin) * MIN;
   const base: DeadlinePlan = { deadline, target, onTime: false, fixes: [] };
   if (route.totalKm <= 0) return base;
 
-  const found = choose(route, driver, now, options, target);
+  const found = moving ? keepDriving(route, driver, now, options, target) : choose(route, driver, now, options, target);
   if (found) {
     return { ...base, onTime: true, ...found, slackMin: (deadline - found.plan.arrival) / MIN, earliest: earliestArrival(route, driver, now, options) };
   }
@@ -105,6 +108,11 @@ function choose(route: Route, driver: DriverState, now: number, options: PlanOpt
     return { plan: driveAt(d)!, kind: "now" as const };
   }
   return undefined;
+}
+
+function keepDriving(route: Route, driver: DriverState, now: number, options: PlanOptions, target: number) {
+  const p = simulate(route, driver, now, options, { kind: "now" });
+  return p.feasible && p.arrival <= target ? { plan: p, kind: "now" as const } : undefined;
 }
 
 /** Największe x z [lo, hi], dla którego ok(x) — przy założeniu, że ok jest monotoniczne i ok(lo). */

@@ -16,19 +16,16 @@ import { GpsStatus, useWakeLock } from "../tracking";
 import { MUSIC_APPS, musicLink, MusicApp } from "../core/apps";
 import { launch, platform } from "../launch";
 import { HudItems, HudStyle } from "../hudConfig";
-import { HudNav, HudNavData, HudRouteMap, NavTrack, useNavTrack } from "./HudNav";
-import { nearestOnRoute, nextInstruction, NavInstruction, speedLimitAt, speedTone } from "../core/navmatch";
-import { isAhead, RouteWarning, warningText } from "../nav";
-import { AlertVote } from "./AlertVote";
-import { HudPlanner, HudRoutePicker } from "./HudRoutePicker";
-import { useNavVoice } from "../voice";
+import { locate } from "../core/navmatch";
+import { NavRoute, useLimitHere } from "../nav";
+import { legalLimitAt, nearestOnRoute, NavInstruction, ON_ROUTE_M, speedTone } from "../core/navmatch";
+import { RouteWarning } from "../nav";
 import { HUD_STYLES } from "../hudConfig";
 import { ReportKind } from "../collect";
 import { ReportSheet } from "./ReportSheet";
 import { ActiveStopPanel, confirmStartDay, fmtTimer, StopControlsProps, StopPicker } from "./StopControls";
 import { describeFriend, Friend, MyRoute, nearestFriend } from "../core/friends";
 import { fmtFriendDist, FriendTile } from "./Friends";
-import { GlVector } from "./GlMap";
 
 interface Props {
   origin: string;
@@ -69,16 +66,14 @@ interface Props {
   items: HudItems;
   onStyle: (s: HudStyle) => void;
   floating: Floating;
-  /** Nawigacja — tylko z Premium i włączoną nawigacją (trasa albo sam cel z konta). */
-  nav?: HudNavData;
-  /** Wyszukiwanie celu i porównanie tras w HUD (Premium). */
-  planner?: HudPlanner;
-  /** Token sesji do kafelków mapy (Premium). */
-  mapToken?: string;
-  /** Własny styl mapy (kafelki wektorowe RoadPilot, dzień / noc) — undefined = kafelki TomTom. */
-  mapVector?: GlVector;
-  /** Komunikaty głosowe nawigacji. */
-  voice: { supported: boolean; on: boolean; toggle: () => void };
+  /** Trasa z nawigacji — tylko jako dane: km po trasie do MOP-u i znajomych, limit prędkości do koloru. Nawigacja to osobny ekran (NavView). */
+  navRoute?: NavRoute | null;
+  /** Token konta Premium — znak ograniczenia bez trasy (ślad GPS dopasowany na serwerze); undefined = tylko z trasy. */
+  limitToken?: string;
+  /** Ogranicznik pojazdu (km/h) — do koloru prędkości, gdy niższy niż znak. */
+  vehicleMaxKmh?: number;
+  /** Pojazd > 3,5 t — limity ciężarówki (wyższy znak go nie dotyczy). */
+  truck: boolean;
   /** Zgłoszenia z drogi do mapy RoadPilot — tylko ze zgodą kierowcy. */
   report?: { onSend: (kind: ReportKind, value: number | null) => Promise<void>; onVote: (w: RouteWarning, vote: 1 | -1) => Promise<void> };
   /** Znajomi z konta (kafelek „Najbliższy znajomy”, znaczniki na mapie) — undefined bez konta. */
@@ -91,30 +86,24 @@ interface Floating {
   toggle: () => void;
 }
 
-const NO_NAV: HudNavData = { route: null, dest: null, rerouting: false, onReroute: () => {} };
-
 /** Poniżej tej prędkości pasy stoją. */
 const LANES_MIN_KMH = 3;
 
 /** Po takim czasie bez odczytu prędkość jest nieaktualna. */
-const STALE_MS = 10_000;
+export const STALE_MS = 10_000;
 
-const isStop = (e: PlanEvent) => e.kind === "break" || e.kind === "rest" || e.kind === "weeklyRest";
+export const isStop = (e: PlanEvent) => e.kind === "break" || e.kind === "rest" || e.kind === "weeklyRest";
 
 export function HudView(p: Props) {
   const now = useTick(1000);
   const [menu, setMenu] = useState(false);
   const [sheet, setSheet] = useState(false);
   const [reporting, setReporting] = useState(false);
-  const [warnList, setWarnList] = useState(false);
-  const [planning, setPlanning] = useState(false);
-  const [zoomOffset, setZoomOffset] = useState(0);
   const fullscreen = useFullscreen();
   useWakeLock(true);
   const sc = p.stopControls;
   const show = p.items;
   const minimal = p.hudStyle === "minimal";
-  const navMode = p.hudStyle === "nav";
 
   const fresh = p.live && now - p.live.t <= STALE_MS ? p.live : null;
   const speed = fresh?.kmh != null ? Math.round(fresh.kmh) : null;
@@ -123,10 +112,9 @@ export function HudView(p: Props) {
   const moving = speed !== null && speed >= LANES_MIN_KMH;
   // Okres przerywanej linii przesuwa się tym szybciej, im szybciej jedziemy (90 km/h ≈ 0,28 s).
   const laneStyle = { "--lane-dur": `${moving ? Math.min(3, Math.max(0.12, 25 / speed!)) : 1}s` } as CSSProperties;
-  // Animacja drogi zostaje też z panelem nawigacji (poza stylem „Nawigacja” z mapą); pozycję na trasie liczymy raz — dla panelu i widoku trasy.
-  const track = useNavTrack(p.nav ?? NO_NAV, fresh);
-  // Z trasą z nawigacji odległości do MOP-ów i znajomych liczymy po trasie, nie w linii prostej.
-  const myRoute: MyRoute | undefined = p.nav?.route && track.pos && !track.off ? { points: p.nav.route.points, km: track.pos.km } : undefined;
+  // Z trasą z nawigacji odległości do MOP-ów i znajomych liczymy po trasie, nie w linii prostej (tylko dane, bez prowadzenia).
+  const routePos = p.navRoute && fresh ? locate(p.navRoute.points, fresh) : undefined;
+  const myRoute: MyRoute | undefined = p.navRoute && routePos && routePos.offM <= ON_ROUTE_M ? { points: p.navRoute.points, km: routePos.km } : undefined;
   // Parking tylko przed nami — to, co za plecami, nie trafia ani na oś, ani do kafelka. Z trasą: najbliższy przy trasie po km trasy.
   const onRouteParking = myRoute && show.parking && p.parkings.data ? nearestOnRoute(p.parkings.data, myRoute.points, myRoute.km) : undefined;
   const parking: NearestStation<Parking> | undefined = onRouteParking
@@ -136,28 +124,20 @@ export function HudView(p: Props) {
   const openSheet = () => { setSheet(true); setMenu(false); };
   const hasApps = show.apps && !!musicLink(p.musicApp, platform());
   const floatBtn = show.floating && p.floating.supported;
-  const nav = p.nav && p.planner ? { ...p.nav, onPlan: () => { setPlanning(true); setMenu(false); } } : p.nav;
-  // W stylu standardowym i minimalnym panel nawigacji tylko wtedy, gdy jest cel — bez niego zbędny.
-  const navEl = nav && (navMode || (show.nav && (nav.route || nav.dest))) ? <HudNav nav={nav} track={track} compact={minimal} /> : null;
-  const planEl = planning && p.planner && (
-    <div className="hud-sheet" onClick={(e) => e.target === e.currentTarget && setPlanning(false)}>
-      <div className="hud-sheet-body wide">
-        <button className="hud-sheet-close" aria-label="Zamknij" onClick={() => setPlanning(false)}>×</button>
-        <HudRoutePicker planner={p.planner} dest={p.nav?.dest ?? null} onClose={() => setPlanning(false)} />
-      </div>
-    </div>
-  );
 
   // Kolor prędkości: limit z trasy (i ogranicznik pojazdu, gdy niższy) — zielony / żółty / czerwony.
-  const routeLimit = p.nav?.route && track.pos && !track.off ? speedLimitAt(p.nav.route.speedLimits, track.pos.km) : undefined;
-  const vehicleMax = p.planner?.vehicle.maxKmh;
-  const legal = routeLimit !== undefined && vehicleMax !== undefined ? Math.min(routeLimit, vehicleMax) : routeLimit ?? vehicleMax;
+  // Znak: z trasy, a bez niej (albo poza nią) — z drogi, którą jedziemy.
+  const here = useLimitHere(p.limitToken, fresh, !myRoute);
+  const signLimit = myRoute && p.navRoute ? legalLimitAt(p.navRoute, myRoute.km, p.truck)?.kmh : here ? legalLimitAt(here, Math.max(0, here.km - 0.005), p.truck)?.kmh : undefined;
+  const vehicleMax = p.vehicleMaxKmh;
+  const legal = signLimit !== undefined && vehicleMax !== undefined ? Math.min(signLimit, vehicleMax) : signLimit ?? vehicleMax;
   const tone = speedTone(speed, legal);
   const speedEl = (
     <div className="hud-speed" aria-label="Prędkość">
       <div className={`hud-speed-num ${speed === null ? "none" : ""}`}>
         <strong className={speed === null ? "none" : tone ?? ""}>{speed ?? "—"}</strong>
         <span>km/h</span>
+        {signLimit !== undefined && <span className="hud-limit hud-speed-limit" aria-label={`Ograniczenie ${signLimit} km/h`}>{signLimit}</span>}
       </div>
       {(road || place) && (
         <div className="hud-where">
@@ -226,9 +206,6 @@ export function HudView(p: Props) {
     </div>
   );
 
-  const voteEl = p.report && p.nav?.route && !track.off && (
-    <AlertVote warnings={p.nav.route.warnings} km={track.pos?.km} onVote={p.report.onVote} />
-  );
 
   const sheetEl = sheet && (
     <div className="hud-sheet" onClick={(e) => e.target === e.currentTarget && setSheet(false)}>
@@ -246,7 +223,7 @@ export function HudView(p: Props) {
     </div>
   );
 
-  const lanes = p.animation && !navMode && (
+  const lanes = p.animation && (
     <>
       <div className={`hud-lanes ${moving ? "" : "still"}`} style={laneStyle} aria-hidden>
         <div className="hud-lanes-road">
@@ -257,120 +234,6 @@ export function HudView(p: Props) {
   );
 
   const apps = hasApps || floatBtn || p.report ? <AppsTile {...p} show={hasApps} floatBtn={floatBtn} onReport={p.report ? () => { setReporting(true); setMenu(false); } : undefined} /> : null;
-
-  if (navMode) {
-    const route = p.nav?.route ?? null;
-    const pos = track.pos;
-    const next = route && pos && !track.off ? nextInstruction(route.instructions, pos.km) : undefined;
-    const limit = route && pos ? speedLimitAt(route.speedLimits, pos.km) : undefined;
-    const upcoming = route?.warnings?.filter((w) => !pos || isAhead(w, pos.km)) ?? [];
-    const arrival = arrivalInfo(p.plan, p.deadline, now);
-    const stopItem = sc.stop
-      ? { label: sc.stop.dayEnd ? "Odpoczynek" : "Postój", value: fmtTimer(Math.max(0, (now - sc.stop.start) / 60_000)), sub: sc.stop.targetMin !== null ? `z ${fmtDuration(sc.stop.targetMin)}` : "do ruszenia", tone: "active" }
-      : (() => {
-          const st = p.plan?.events.find(isStop);
-          const inMin = st ? (st.start - now) / 60_000 : undefined;
-          return st
-            ? { label: st.kind === "break" ? "Przerwa za" : "Odpoczynek za", value: inMin! <= 1 ? "teraz" : fmtDuration(inMin!), sub: `${fmtDuration((st.end - st.start) / 60_000)} o ${fmtClock(st.start, now)}`, tone: inMin! <= 30 ? "warn" : "" }
-            : { label: "Przerwa", value: "—", sub: "dojedziesz bez postoju", tone: "" };
-        })();
-    return (
-      <div className={`hud navmode ${p.mirror ? "mirror" : ""} ${p.mapVector?.theme === "day" ? "day" : ""}`}>
-        <NavVoice nav={p.nav} track={track} kmh={fresh?.kmh ?? null} enabled={p.voice.on} />
-        <div className="nm-map">
-          {p.nav && p.mapToken ? <HudRouteMap nav={p.nav} track={track} live={fresh} token={p.mapToken} anchorY={0.7} zoomOffset={zoomOffset} friends={show.friends ? p.friends : undefined} vector={p.mapVector} /> : <div className="hud-map empty" />}
-        </div>
-
-        <header className="nm-top">
-          {navEl ? <HudNav nav={nav!} track={track} card /> : (
-            <div className="hud-nav card off">
-              <span className="hud-nav-msg">Nawigacja jest dostępna w RoadPilot Premium.</span>
-            </div>
-          )}
-          {menuEl}
-        </header>
-
-        <div className="nm-side">
-          {p.voice.supported && (
-            <button className={`nm-btn ${p.voice.on ? "" : "off"}`} onClick={p.voice.toggle} aria-label={p.voice.on ? "Wycisz komunikaty" : "Włącz komunikaty głosowe"} aria-pressed={p.voice.on}>
-              <Icon name={p.voice.on ? "sound" : "mute"} />
-            </button>
-          )}
-          {p.planner && (
-            <button className="nm-btn" onClick={() => { setPlanning(true); setMenu(false); }} aria-label="Cel i trasy alternatywne">
-              <Icon name="search" />
-            </button>
-          )}
-          <button className={`nm-btn ${upcoming.length ? "warn" : ""}`} onClick={() => setWarnList(true)} aria-label="Ostrzeżenia na trasie">
-            <Icon name="warning" />
-            {upcoming.length > 0 && <em>{upcoming.length}</em>}
-          </button>
-          {p.report && (
-            <button className="nm-btn report" onClick={() => { setReporting(true); setMenu(false); }} aria-label="Zgłoś na drodze">
-              <Icon name="flag" />
-            </button>
-          )}
-          <div className="nm-zoom">
-            <button onClick={() => setZoomOffset((z) => Math.min(2, z + 0.5))} aria-label="Przybliż">+</button>
-            <button onClick={() => setZoomOffset((z) => Math.max(-2, z - 0.5))} aria-label="Oddal">−</button>
-          </div>
-        </div>
-        {limit !== undefined && <span className="hud-limit nm-limit" aria-label={`Ograniczenie ${limit} km/h`}>{limit}</span>}
-
-        <div className="nm-speed">
-          <strong className={speed === null ? "none" : tone ?? ""}>{speed ?? "—"}</strong>
-          <span>km/h</span>
-        </div>
-        {notice && <div className="nm-notice">{notice}</div>}
-
-        <footer className="nm-bottom">
-          <div className="nm-info">
-            <div>
-              <Icon name="flag" />
-              <span><small>Do celu</small><b>{fmtKm(p.route.totalKm)}</b></span>
-            </div>
-            <div className={arrival.bad ? "bad" : ""}>
-              <Icon name="clock" />
-              <span><small>Przyjazd</small><b>{arrival.clock}</b><i>{arrival.left !== undefined ? `za ${arrival.left}` : arrival.note}</i></span>
-            </div>
-            <button className={stopItem.tone} onClick={openSheet}>
-              <Icon name="coffee" />
-              <span><small>{stopItem.label}</small><b>{stopItem.value}</b><i>{stopItem.sub}</i></span>
-            </button>
-            <div>
-              <Icon name="road" />
-              <span><small>Trasa</small><b>{route ? routeRefs(route.instructions) : "—"}</b><i>{route ? fmtKm(route.lengthKm) : ""}{route?.engine === "roadpilot" ? " · RoadPilot" : ""}</i></span>
-            </div>
-          </div>
-        </footer>
-
-        {warnList && (
-          <div className="hud-sheet" onClick={(e) => e.target === e.currentTarget && setWarnList(false)}>
-            <div className="hud-sheet-body">
-              <button className="hud-sheet-close" aria-label="Zamknij" onClick={() => setWarnList(false)}>×</button>
-              <div className="stop-label">Ostrzeżenia na trasie: ograniczenia dla pojazdu, fotoradary, kontrole</div>
-              {upcoming.length ? (
-                <ul className="nm-warn-list">
-                  {upcoming.map((w) => (
-                    <li key={w.source + w.id + w.kind}>
-                      <b>{warningText(w)}</b>
-                      <span>{pos ? (w.toKm !== undefined && pos.km >= w.km ? `trwa — do końca ${fmtKm(w.toKm - pos.km)}` : `za ${fmtKm(Math.max(0, w.km - pos.km))}`) : `km ${Math.round(w.km)}`}{w.name ? ` · ${w.name}` : ""}</span>
-                    </li>
-                  ))}
-                </ul>
-              ) : (
-                <p className="muted">Brak znanych ograniczeń, fotoradarów i kontroli (dane OpenStreetMap i zgłoszenia kierowców, Polska).</p>
-              )}
-            </div>
-          </div>
-        )}
-        {voteEl}
-        {sheetEl}
-        {reportEl}
-        {planEl}
-      </div>
-    );
-  }
 
   if (minimal) {
     return (
@@ -386,7 +249,6 @@ export function HudView(p: Props) {
         <section className="hud-min-main">
           {speedEl}
           {notice}
-          {navEl}
           {show.route && <MinProgress done={p.doneKm} left={p.route.totalKm} />}
         </section>
         <footer className="hud-min-foot">
@@ -398,10 +260,8 @@ export function HudView(p: Props) {
             </div>
           ) : null}
         </footer>
-        {voteEl}
         {sheetEl}
         {reportEl}
-        {planEl}
       </div>
     );
   }
@@ -419,7 +279,7 @@ export function HudView(p: Props) {
   const appsOnly = !!apps && info.length === 1;
 
   return (
-    <div className={`hud ${p.mirror ? "mirror" : ""} ${navEl ? "with-nav" : ""}`}>
+    <div className={`hud ${p.mirror ? "mirror" : ""}`}>
       {lanes}
       <header className="hud-top">
         <div className="hud-group">
@@ -448,15 +308,12 @@ export function HudView(p: Props) {
         {/* My — na środkowym pasie animacji drogi, zawsze przodem (bez obracania wg kierunku), tuż nad kafelkami. */}
         {lanes && <svg className="hud-me" viewBox="-30 -34 60 64" aria-hidden><path d="M0 -30 L22 24 L0 12 L-22 24 Z" /></svg>}
         {notice}
-        {navEl}
-        {show.route && <RouteLine {...p} now={now} parking={parking} />}
+          {show.route && <RouteLine {...p} now={now} parking={parking} />}
         {(show.stats || show.arrival) && <Stats {...p} now={now} />}
       </section>
 
-      {voteEl}
       {sheetEl}
       {reportEl}
-      {planEl}
 
       <footer className="hud-foot">
         {appsOnly && <div className="hud-apps-row">{apps}</div>}
@@ -499,7 +356,20 @@ const DASHES = 18;
  * Oś trasy: Start → Cel, przejechana część na zielono, ciężarówka w miejscu, w którym jesteśmy.
  * Wszystkie znaczniki podpisujemy odległością od bieżącej pozycji („za 92 km”) — tak samo jak kafelki.
  */
-function RouteLine(p: Props & { now: number; parking?: NearestStation<Parking> }) {
+/** Dane osi trasy — HUD i dolny pasek Nawigacji (tablet). */
+export interface RouteLineProps {
+  origin?: string;
+  destination?: string;
+  /** Pozostała trasa (km do celu) i plan postojów liczony od bieżącej pozycji. */
+  route: { totalKm: number };
+  doneKm: number;
+  plan?: Plan;
+  service?: { kmLeft?: number };
+  now: number;
+  parking?: NearestStation<Parking>;
+}
+
+export function RouteLine(p: RouteLineProps) {
   const trackRef = useRef<HTMLDivElement>(null);
   const [trackW, setTrackW] = useState(600);
   useEffect(() => {
@@ -520,7 +390,7 @@ function RouteLine(p: Props & { now: number; parking?: NearestStation<Parking> }
     candidates.push({ icon: e.kind === "break" ? "coffee" : "bed", km: e.fromKm, label: fmtClock(e.start, p.now), tone: "stop" });
   }
   if (p.parking?.ahead) candidates.push({ icon: "parking", km: p.parking.km, label: "", tone: "parking" });
-  if (p.service.kmLeft !== undefined && p.service.kmLeft > 0) candidates.push({ icon: "wrench", km: p.service.kmLeft, label: "serwis", tone: "service" });
+  if (p.service?.kmLeft !== undefined && p.service.kmLeft > 0) candidates.push({ icon: "wrench", km: p.service.kmLeft, label: "serwis", tone: "service" });
   const markers: (Marker & { at: number })[] = [];
   for (const m of candidates) {
     if (m.km < 1 || m.km > left || total <= 0) continue;
@@ -562,7 +432,7 @@ function RouteLine(p: Props & { now: number; parking?: NearestStation<Parking> }
 
 /** Pokonano / Pozostało / Szacowany czas dojazdu — przyjazd z planu, czyli z przerwami i odpoczynkami po drodze. */
 /** Przyjazd z planu (z postojami) — ten sam w obu stylach. */
-function arrivalInfo(plan: Plan | undefined, deadline: DeadlinePlan | undefined, now: number) {
+export function arrivalInfo(plan: Plan | undefined, deadline: DeadlinePlan | undefined, now: number) {
   if (!plan) {
     return {
       clock: deadline?.earliest !== undefined ? fmtClock(deadline.earliest, now) : "—",
@@ -600,13 +470,6 @@ function Stats({ plan, deadline, doneKm, route, now, items }: Props & { now: num
 }
 
 /** Komunikaty głosowe — osobny komponent, żeby hook działał tylko w stylu Nawigacja. */
-function NavVoice({ nav, track, kmh, enabled }: { nav?: HudNavData; track: NavTrack; kmh: number | null; enabled: boolean }) {
-  const route = nav?.route ?? null;
-  const pos = track.pos;
-  const next = route && pos && !track.off ? nextInstruction(route.instructions, pos.km) : undefined;
-  useNavVoice(enabled && !!route, next, pos?.km, route?.warnings, kmh);
-  return null;
-}
 
 /** Główne drogi trasy z opisów manewrów: „A1 · S7 · A4” (autostrady, ekspresówki, drogi krajowe) — max 3. */
 export function routeRefs(list: NavInstruction[]) {
@@ -939,7 +802,7 @@ function Tile({ icon, label, tone, bar, children }: { icon: IconName; label: str
   );
 }
 
-type IconName = "sound" | "mute" | "warning" | "road" | "clock" | "pin" | "coffee" | "dots" | "flag" | "wheel" | "parking" | "truck" | "play" | "finish" | "chevron" | "briefcase" | "wrench" | "bed" | "nav" | "music" | "pip" | "search" | WeatherIcon;
+export type IconName = "sound" | "mute" | "warning" | "road" | "clock" | "pin" | "coffee" | "dots" | "flag" | "wheel" | "parking" | "truck" | "play" | "finish" | "chevron" | "briefcase" | "wrench" | "bed" | "nav" | "music" | "pip" | "search" | "close" | "gear" | "expand" | "exit" | "route" | WeatherIcon;
 
 const CLOUD = "M7 17a4.5 4.5 0 1 1 .9-8.9A6 6 0 0 1 19.3 9.6 3.8 3.8 0 0 1 18 17H7Z";
 const ICONS: Record<IconName, string> = {
@@ -962,6 +825,11 @@ const ICONS: Record<IconName, string> = {
   warning: "M12 3 2 21h20L12 3ZM12 10v5M12 18h.01",
   road: "M8 3 4 21M16 3l4 18M12 4v3M12 11v3M12 18v3",
   pip: "M3 5h18v14H3zM12 12h7v5h-7z",
+  close: "M6 6l12 12M18 6 6 18",
+  gear: "M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6ZM19.4 13.5l1.6 1.2-2 3.4-1.9-.7a7.5 7.5 0 0 1-2.1 1.2L14.7 21h-4l-.3-2.4a7.5 7.5 0 0 1-2.1-1.2l-1.9.7-2-3.4 1.6-1.2a7.6 7.6 0 0 1 0-3L4.4 9.3l2-3.4 1.9.7a7.5 7.5 0 0 1 2.1-1.2L10.7 3h4l.3 2.4a7.5 7.5 0 0 1 2.1 1.2l1.9-.7 2 3.4-1.6 1.2a7.6 7.6 0 0 1 0 3Z",
+  expand: "M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5",
+  exit: "M14 4h5a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1h-5M10 8l-4 4 4 4M6 12h10",
+  route: "M6 19a2 2 0 1 0 0-4 2 2 0 0 0 0 4ZM18 9a2 2 0 1 0 0-4 2 2 0 0 0 0 4ZM6 15V9a3 3 0 0 1 3-3h3M18 9v6a3 3 0 0 1-3 3h-3",
   search: "M10.5 17a6.5 6.5 0 1 0 0-13 6.5 6.5 0 0 0 0 13ZM15.3 15.3 21 21",
   music: "M9 18V5l11-2v13M9 18a3 3 0 1 1-6 0 3 3 0 0 1 6 0ZM20 16a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z",
   bed: "M3 18V7M3 14h18v4M21 14v-2a3 3 0 0 0-3-3h-7v5M7 12a1.8 1.8 0 1 0 0-3.6A1.8 1.8 0 0 0 7 12Z",
@@ -974,7 +842,7 @@ const ICONS: Record<IconName, string> = {
   storm: `${CLOUD}M12.5 17l-2 3h3l-2 3`,
 };
 
-function Icon({ name, className = "" }: { name: IconName; className?: string }) {
+export function Icon({ name, className = "" }: { name: IconName; className?: string }) {
   return (
     <svg className={`hud-ico ${className}`} viewBox="0 0 24 24" aria-hidden>
       <path d={ICONS[name]} />
@@ -985,7 +853,7 @@ function Icon({ name, className = "" }: { name: IconName; className?: string }) 
 /** „3 450” — tysiące ze spacją, jak w polskich liczbach. */
 const fmtThousands = (n: number) => Math.round(n).toString().replace(/\B(?=(\d{3})+(?!\d))/g, " ");
 
-function useTick(ms: number) {
+export function useTick(ms: number) {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     const id = setInterval(() => setNow(Date.now()), ms);
@@ -1032,13 +900,13 @@ export function exitFullscreen() {
   }
 }
 
-function toggleFullscreen() {
+export function toggleFullscreen() {
   if (fsElement()) exitFullscreen();
   else enterFullscreen();
 }
 
 /** Czy jesteśmy w pełnym ekranie — kierowca może z niego wyjść gestem, więc słuchamy zmian. */
-function useFullscreen() {
+export function useFullscreen() {
   const [on, setOn] = useState(() => !!fsElement());
   useEffect(() => {
     const update = () => setOn(!!fsElement());

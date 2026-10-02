@@ -61,7 +61,7 @@ export function DriverView({ driver, planNow, onChange }: Props) {
   );
 }
 
-const KIND_LABEL: Record<ActivityKind, string> = { drive: "Jazda", break: "Przerwa", work: "Inna praca" };
+const KIND_LABEL: Record<ActivityKind, string> = { drive: "Jazda", break: "Przerwa", work: "Praca" };
 const DEFAULT_MIN: Record<ActivityKind, number> = { drive: 60, break: 45, work: 30 };
 
 /** Wiersz odtwarzanego dnia — godziny jak na wydruku z tachografu („06:15”). */
@@ -93,6 +93,23 @@ function toTimed(start: number, rows: Row[]): TimedActivity[] {
     ref = to;
     return { kind: r.kind, from, to: to < from ? to + 86_400_000 : to };
   });
+}
+
+/** Pasek dnia jak wykres z tachografu: aktywności po kolei od początku dnia, luki (postój) na szaro. */
+function DayStrip({ start, timed }: { start: number; timed: TimedActivity[] }) {
+  if (!timed.length) return null;
+  const end = Math.max(...timed.map((a) => a.to));
+  const span = end - start;
+  if (span <= 0) return null;
+  const pct = (t: number) => `${((t - start) / span) * 100}%`;
+  return (
+    <div className="day-strip">
+      <div className="day-strip-bar">
+        {timed.map((a, i) => a.to > a.from && <span key={i} className={a.kind} style={{ left: pct(Math.max(start, a.from)), width: `${((a.to - Math.max(start, a.from)) / span) * 100}%` }} />)}
+      </div>
+      <div className="day-strip-axis"><span>{hhmm(start)}</span><span>{hhmm(end)}</span></div>
+    </div>
+  );
 }
 
 function LateStart({ driver, planNow, onApply }: { driver: DriverState; planNow: number; onApply: (p: Partial<DriverState>) => void }) {
@@ -137,26 +154,26 @@ function LateStart({ driver, planNow, onApply }: { driver: DriverState; planNow:
         <span className="field-label">Rzeczywisty początek dnia pracy</span>
         <input type="datetime-local" value={toLocalInput(start)} onChange={(e) => { const t = fromLocalInput(e.target.value); if (t) setStart(t); }} />
       </label>
-      <ol className="activities timed">
-        <li className="activities-head" aria-hidden>
-          <span>Aktywność</span><span>Od</span><span>Do</span><span />
-        </li>
+      <DayStrip start={start} timed={timed} />
+      <ol className="acts">
         {rows.map((a, i) => (
-          <li key={i}>
-            <select value={a.kind} onChange={(e) => update(i, { kind: e.target.value as ActivityKind })} aria-label="Aktywność">
-              {(Object.keys(KIND_LABEL) as ActivityKind[]).map((k) => <option key={k} value={k}>{KIND_LABEL[k]}</option>)}
-            </select>
-            <input type="time" value={a.from} onChange={(e) => update(i, { from: e.target.value })} aria-label="Od" />
-            <input type="time" value={a.to} onChange={(e) => update(i, { to: e.target.value })} aria-label="Do" />
-            <button className="icon-btn" aria-label="Usuń" onClick={() => setRows(rows.filter((_, j) => j !== i))}>×</button>
-            <span className="activity-len">{fmtDuration((timed[i].to - timed[i].from) / 60_000)}</span>
+          <li key={i} className={`act ${a.kind}`}>
+            <div className="act-kinds" role="radiogroup" aria-label="Aktywność">
+              {(Object.keys(KIND_LABEL) as ActivityKind[]).map((k) => (
+                <button key={k} role="radio" aria-checked={a.kind === k} className={a.kind === k ? "active" : ""} onClick={() => update(i, { kind: k })}>{KIND_LABEL[k]}</button>
+              ))}
+            </div>
+            <button className="icon-btn act-del" aria-label="Usuń" onClick={() => setRows(rows.filter((_, j) => j !== i))}>×</button>
+            <label className="act-time"><span>od</span><input type="time" value={a.from} onChange={(e) => update(i, { from: e.target.value })} /></label>
+            <label className="act-time"><span>do</span><input type="time" value={a.to} onChange={(e) => update(i, { to: e.target.value })} /></label>
+            <strong className="act-len">{fmtDuration((timed[i].to - timed[i].from) / 60_000)}</strong>
           </li>
         ))}
       </ol>
       <div className="row-buttons">
         <button className="ghost" onClick={() => add("drive")}>+ Jazda</button>
         <button className="ghost" onClick={() => add("break")}>+ Przerwa</button>
-        <button className="ghost" onClick={() => add("work")}>+ Inna praca</button>
+        <button className="ghost" onClick={() => add("work")}>+ Praca</button>
       </div>
       <div className="recon">
         <span>Jazda od początku dnia: <strong>{fmtDuration(r.drivenTodayMin)}</strong></span>

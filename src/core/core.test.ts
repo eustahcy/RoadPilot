@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { DriverState, parkingHint, simulate } from "./plan";
+import { DriverState, parkingHint, simulate, timeAtKm } from "./plan";
 import { reconstruct, reconstructTimed } from "./reconstruct";
 import { DEFAULT_SPEEDS, Route, Segment, segmentsFromProfile, Speeds } from "./route";
 import { betterOption, compareScenarios, explain, whatIfs } from "./scenarios";
@@ -51,6 +51,15 @@ describe("simulate", () => {
     const p = simulate(flat(300), fresh(), NOW, OFF, { kind: "now" });
     expect(kinds(p)).toEqual(["drive:270", "break:45", "drive:30", "arrive:0"]);
     expect(p.arrival).toBe(at(345));
+  });
+
+  it("timeAtKm: przyjazd do km po drodze z przerwą (punkt pośredni)", () => {
+    const r = flat(300);
+    const p = simulate(r, fresh(), NOW, OFF, { kind: "now" });
+    expect(timeAtKm(p, r, 100)).toBe(at(100));
+    // Za przerwą: 270 jazdy + 45 przerwy + 10 jazdy.
+    expect(timeAtKm(p, r, 280)).toBe(at(325));
+    expect(timeAtKm(p, r, 300)).toBe(p.arrival);
   });
 
   it("po przerwie dzielonej 15 min wystarczy 30 min", () => {
@@ -202,6 +211,20 @@ describe("plan pod rozładunek", () => {
     expect(d.plan!.departure).toBe(at(200));
   });
 
+  it("w trakcie jazdy: jedź dalej od teraz — bez odpoczynku przed wyjazdem i bez „wyjedź później”", () => {
+    // Stojąc dostałby długi odpoczynek przed wyjazdem; w trakcie jazdy: 270 + 45 + 30 min → przyjazd at(345).
+    expect(planForDeadline(flat(300), fresh(), NOW, OFF, at(1200), 30).kind).toBe("rest");
+    const d = planForDeadline(flat(300), fresh(), NOW, OFF, at(1200), 30, true);
+    expect(d.onTime).toBe(true);
+    expect(d.kind).toBe("now");
+    expect(d.plan!.departure).toBe(NOW);
+    expect(d.plan!.arrival).toBe(at(345));
+    expect(d.slackMin).toBe(1200 - 345);
+    const short = planForDeadline(flat(100), fresh(), NOW, OFF, at(300), 0, true);
+    expect(short.plan!.departure).toBe(NOW);
+    expect(short.plan!.arrival).toBe(at(100));
+  });
+
   it("gdy się nie da — pokazuje spóźnienie i co pomoże", () => {
     // 600 km bez wydłużenia wymaga odpoczynku po drodze; z wydłużeniem 690 min.
     const d = planForDeadline(flat(600), fresh({ extensionsLeft: 1 }), NOW, OFF, at(720), 0);
@@ -226,5 +249,15 @@ describe("odtworzenie dnia z godzinami", () => {
     expect(r.sinceBreakMin).toBe(75);
     expect(r.gapMin).toBe(45);
     expect(r.end).toBe(NOW + 5.5 * H);
+  });
+});
+
+describe("prędkość odcinka z jazdy kierowców", () => {
+  it("wolniejsza niż ustawiona — liczy się zmierzona; szybsza — nie wyżej niż ustawiona", () => {
+    const speeds: Speeds = { ...DEFAULT_SPEEDS, urban: 40, motorway: 80 };
+    const slow = new Route([{ type: "urban", km: 10, kmh: 20 }], speeds);
+    expect(slow.driveMinutes(0)).toBeCloseTo(30, 6); // 10 km / 20 km/h
+    const fast = new Route([{ type: "motorway", km: 80, kmh: 95 }], speeds);
+    expect(fast.driveMinutes(0)).toBeCloseTo(60, 6); // 80 km / 80 km/h (ustawiona)
   });
 });

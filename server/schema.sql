@@ -98,6 +98,8 @@ CREATE TABLE IF NOT EXISTS osm_restrictions (
   KEY (lat, lon),
   KEY (kind)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+-- Warunki z OSM (2026-10-01): godziny, dni, „nie dotyczy dojazdu” — JSON z conditional.mjs parseConditional.
+ALTER TABLE osm_restrictions ADD COLUMN IF NOT EXISTS cond TEXT NULL;
 
 -- Fotoradary, odcinkowe pomiary prędkości, kamery na czerwonym (OSM; import: server/enforcement-import.mjs).
 -- from_* — skąd jedzie mierzony pojazd (kierunek; NULL = oba), to_* — koniec odcinka (tylko section).
@@ -149,3 +151,135 @@ CREATE TABLE IF NOT EXISTS presence (
   updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
   CONSTRAINT fk_presence_user FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Parking przy celu (2026-09-30): opinie kierowców „czy da się stanąć koło firmy” (status 2 = jest dla ciężarówek,
+-- 1 = ograniczony, 0 = brak) i potwierdzenia innych. Jedna opinia na kierowcę w promieniu celu (zmiana nadpisuje).
+CREATE TABLE IF NOT EXISTS parking_opinions (
+  id INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  user_id INT UNSIGNED NOT NULL,
+  lat DOUBLE NOT NULL,
+  lon DOUBLE NOT NULL,
+  label VARCHAR(120) NOT NULL DEFAULT '',
+  status TINYINT NOT NULL,
+  note VARCHAR(280) NOT NULL DEFAULT '',
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  KEY (lat, lon),
+  KEY (user_id, updated_at),
+  CONSTRAINT fk_parking_user FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 👍 / 👎 pod opinią o parkingu — jeden głos na konto (zmiana nadpisuje, 0 = wycofanie).
+CREATE TABLE IF NOT EXISTS parking_votes (
+  user_id INT UNSIGNED NOT NULL,
+  opinion_id INT UNSIGNED NOT NULL,
+  vote TINYINT NOT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (user_id, opinion_id),
+  KEY (opinion_id),
+  CONSTRAINT fk_pvotes_user FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE,
+  CONSTRAINT fk_pvotes_opinion FOREIGN KEY (opinion_id) REFERENCES parking_opinions (id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Pinezki przy trasie (2026-09-30): stacje paliw, MOP-y i parkingi dla ciężarówek z OSM (import: server/poi-import.mjs).
+CREATE TABLE IF NOT EXISTS osm_pois (
+  osm_id VARCHAR(20) NOT NULL PRIMARY KEY,
+  kind VARCHAR(10) NOT NULL,
+  lat DOUBLE NOT NULL,
+  lon DOUBLE NOT NULL,
+  name VARCHAR(120) NOT NULL DEFAULT '',
+  truck TINYINT NOT NULL DEFAULT 0,
+  KEY (lat, lon)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Miejscowości (2026-10-01): do opisu miejsca przekroczenia w historii (import: server/place-import.mjs).
+CREATE TABLE IF NOT EXISTS osm_places (
+  osm_id VARCHAR(20) NOT NULL PRIMARY KEY,
+  kind VARCHAR(10) NOT NULL,
+  lat DOUBLE NOT NULL,
+  lon DOUBLE NOT NULL,
+  name VARCHAR(120) NOT NULL,
+  KEY (lat, lon)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Klucze Premium (2026-10-01): admin generuje klucz na N dni (NULL = bez terminu), kierowca wpisuje go w Ustawienia → Konto.
+CREATE TABLE IF NOT EXISTS premium_keys (
+  code CHAR(12) NOT NULL PRIMARY KEY,
+  days INT NULL,
+  note VARCHAR(120) NOT NULL DEFAULT '',
+  created_by INT UNSIGNED NOT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  used_by INT UNSIGNED NULL,
+  used_at DATETIME NULL,
+  KEY (created_at),
+  CONSTRAINT fk_pkeys_used FOREIGN KEY (used_by) REFERENCES users (id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Prędkości ciężarówek z jazdy kierowców (2026-10-01): komórka ~250 m × kierunek (0–7), mediana przejazdów
+-- (budowa: server/speed-build.mjs, co tydzień w scripts/weekly-update.sh).
+CREATE TABLE IF NOT EXISTS speed_cells (
+  cell VARCHAR(24) NOT NULL,
+  dir TINYINT NOT NULL,
+  passes INT NOT NULL,
+  users INT NOT NULL,
+  kmh SMALLINT NOT NULL,
+  PRIMARY KEY (cell, dir)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Błędy mapy (2026-10-01): ograniczenia, przez które przejechali kierowcy z niespełniającym pojazdem (suspects-build.mjs),
+-- i ograniczenia ukryte przez admina (nie wpływają na trasy ani ostrzeżenia).
+CREATE TABLE IF NOT EXISTS map_suspects (
+  osm_id VARCHAR(20) NOT NULL,
+  kind VARCHAR(12) NOT NULL,
+  value DECIMAL(7,2) NULL,
+  users INT NOT NULL,
+  lat DOUBLE NOT NULL,
+  lon DOUBLE NOT NULL,
+  name VARCHAR(120) NOT NULL DEFAULT '',
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (osm_id, kind)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS osm_overrides (
+  osm_id VARCHAR(20) NOT NULL,
+  kind VARCHAR(12) NOT NULL,
+  hidden_by INT UNSIGNED NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (osm_id, kind)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Ustawienia aplikacji zmieniane przez administratora (2026-10-02): np. link do wsparcia (Revolut) na stronie „Wsparcie”.
+CREATE TABLE IF NOT EXISTS app_config (
+  k VARCHAR(40) NOT NULL PRIMARY KEY,
+  v TEXT NOT NULL,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Słupki kilometrowe z OSM (highway=milestone, distance = km drogi; 2026-10-02) — pikietaż w Nawigacji.
+CREATE TABLE IF NOT EXISTS osm_milestones (
+  id INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  lat DOUBLE NOT NULL,
+  lon DOUBLE NOT NULL,
+  km DECIMAL(7, 3) NOT NULL,
+  ref VARCHAR(20) NOT NULL DEFAULT '',
+  KEY (lat, lon)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Licencje (2026-10-02): klucz wymyślony przez administratora (code = postać kanoniczna, label = jak wpisał), dla konta (for_user)
+-- albo dla wielu osób (max_uses, NULL = bez limitu), na N dni albo bez terminu. Użycia w premium_redemptions (1 na konto).
+ALTER TABLE premium_keys MODIFY code VARCHAR(40) NOT NULL;
+ALTER TABLE premium_keys ADD COLUMN IF NOT EXISTS label VARCHAR(40) NOT NULL DEFAULT '';
+ALTER TABLE premium_keys ADD COLUMN IF NOT EXISTS for_user INT UNSIGNED NULL;
+ALTER TABLE premium_keys ADD COLUMN IF NOT EXISTS max_uses INT NULL DEFAULT 1;
+CREATE TABLE IF NOT EXISTS premium_redemptions (
+  code VARCHAR(40) NOT NULL,
+  user_id INT UNSIGNED NOT NULL,
+  used_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (code, user_id),
+  KEY (user_id),
+  CONSTRAINT fk_redeem_user FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+-- Stare klucze RP-XXXX-XXXX: etykieta jak dotąd, kod bez myślników, dotychczasowe użycie jako wpis w premium_redemptions.
+UPDATE premium_keys SET label = code WHERE label = '';
+INSERT IGNORE INTO premium_redemptions (code, user_id, used_at) SELECT REPLACE(code, '-', ''), used_by, used_at FROM premium_keys WHERE used_by IS NOT NULL;
+UPDATE premium_keys SET code = REPLACE(code, '-', '') WHERE code LIKE 'RP-%';

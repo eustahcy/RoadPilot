@@ -1,7 +1,8 @@
+import { BreakStopSettings, DEFAULT_BREAK_STOP } from "./core/breakstop";
 // Stan aplikacji zapisywany lokalnie w urządzeniu (bez backendu).
 
 import { useEffect, useState } from "react";
-import { GpsTrack } from "./core/gps";
+import { Fix, GpsTrack } from "./core/gps";
 import { DayLog } from "./core/history";
 import { DriverState } from "./core/plan";
 import { DEFAULT_SPEEDS, ProfileId, Segment, Speeds } from "./core/route";
@@ -10,8 +11,10 @@ import { ServiceInfo } from "./core/service";
 import { ActiveStop } from "./core/stop";
 import { MusicApp } from "./core/apps";
 import { DEFAULT_HUD_ITEMS, HudItems, HudStyle } from "./hudConfig";
-import { DEFAULT_VEHICLE, NavEngine, NavPlace, NavRoute, Vehicle, RouteType } from "./nav";
+import { DEFAULT_VEHICLE, NavPlace, NavRoute, Vehicle, RouteType } from "./nav";
 import { DEFAULT_WORK, WorkSettings } from "./core/workday";
+import { EMPTY_PLACES, normalizePlaces, SavedPlaces } from "./core/places";
+import type { GapReview } from "./core/gapfix";
 
 export interface Trip {
   /** Miejsce startu — tylko do opisu osi trasy w HUD. */
@@ -63,14 +66,34 @@ export interface Settings {
   navEnabled: boolean;
   vehicle: Vehicle;
   /** Silnik tras i rodzaj trasy (Ustawienia → Pojazd i nawigacja). */
-  navEngine: NavEngine;
   routeType: RouteType;
   /** Komunikaty głosowe nawigacji (przycisk 🔊 w HUD). */
   navVoice: boolean;
   /** Znajomi widzą moją pozycję, postój, cel i stan tachografu (tylko zaakceptowani, tylko przy włączonym GPS). */
   friendsShare: boolean;
   /** Styl własnej mapy w HUD: dzień / noc / automatycznie (pogoda albo zegar). */
-  mapTheme: "auto" | "day" | "night";
+  /** Motyw Nawigacji: auto / dzień / noc, glass = szkło (mapa dzień / noc jak auto, panele półprzezroczyste z rozmyciem). */
+  mapTheme: "auto" | "day" | "night" | "glass";
+  /** Nawigacja → „Po drodze”: zasięg listy (km) i które najbliższe miejsca pokazać pod prędkością. */
+  aheadKm: number;
+  aheadStrip: AheadStrip;
+  /** Nawigacja: mapa pochylona (3D) albo płaska z góry, bardziej oddalona (2D). */
+  navMap: "3d" | "2d";
+  /** Propozycja MOP-u / parkingu na przerwę z zapasem (Nawigacja). */
+  breakStop: BreakStopSettings;
+  /** Nawigacja: dom, ulubione i ostatnie cele (z kontem synchronizowane razem z ustawieniami). */
+  places: SavedPlaces;
+}
+
+/** Pod prędkością w Nawigacji: najbliższy MOP, parking TIR i stacja przed nami (każde osobno do wyłączenia). */
+export interface AheadStrip {
+  mop: boolean;
+  parking: boolean;
+  fuel: boolean;
+  /** Najbliższy fotoradar i początek odcinkowego pomiaru (z ostrzeżeń trasy) — w czerwonej ramce. */
+  camera: boolean;
+  /** Najbliższe bramki (fioletowe). */
+  toll: boolean;
 }
 
 export interface AppState {
@@ -86,6 +109,8 @@ export interface AppState {
   odoKm: number;
   /** Otwarty tryb HUD — po ponownym uruchomieniu aplikacja wraca do niego. */
   hud: boolean;
+  /** Otwarty ekran nawigacji (zakładka „Nawigacja”) — osobny od HUD, też wraca po uruchomieniu. */
+  navOpen: boolean;
   /** Trwający postój oznaczony przez kierowcę („zaczynam przerwę”) — null, gdy jedzie. */
   stop: ActiveStop | null;
   /** Scenariusz wybrany przez kierowcę zamiast zalecanego — null = zalecany przez RoadPilot. */
@@ -94,6 +119,15 @@ export interface AppState {
   navRoute: NavRoute | null;
   /** Historia dzienna z GPS (najnowszy dzień pierwszy). */
   history: DayLog[];
+  /**
+   * Urządzenie, które liczy jazdę z GPS (telefon + tablet na jednym koncie): tylko ono dolicza minuty i km,
+   * inne biorą stan z konta. at = ostatni zaliczony odczyt (ms); po TRACKER_TTL_MS bez odczytów przejmuje inne.
+   */
+  tracker: { device: string; at: number } | null;
+  /** Odczyt GPS po luce czekający na drogę ciężarówki z serwera (tracking.ts useGapRoad) — tylko w tym urządzeniu. */
+  pendingGap?: { fix: Fix; from: { lat: number; lon: number }; asked: number } | null;
+  /** Ostatnia luka do wyjaśnienia przez kierowcę (co robił, gdy aplikacja była zamknięta) — tylko w tym urządzeniu. */
+  gapReview?: GapReview | null;
 }
 
 const KEY = "roadpilot:v1";
@@ -112,7 +146,7 @@ export function defaultState(now = Date.now()): AppState {
       weekDrivenMin: 0,
       prevWeekDrivenMin: 0,
     },
-    settings: { speeds: { ...DEFAULT_SPEEDS }, parkingBufferMin: 45, allowExtension: false, allowReducedRest: false, gps: false, liveEta: false, service: { date: null, km: null, odoAtSet: 0 }, hudMirror: false, ongoing: false, autoStop: true, hudAnimation: true, hudStyle: "full", hudItems: { full: { ...DEFAULT_HUD_ITEMS.full }, minimal: { ...DEFAULT_HUD_ITEMS.minimal }, nav: { ...DEFAULT_HUD_ITEMS.nav } }, work: { ...DEFAULT_WORK }, musicApp: "none", navEnabled: false, vehicle: { ...DEFAULT_VEHICLE }, navEngine: "tomtom", routeType: "fastest", navVoice: true, friendsShare: true, mapTheme: "auto" },
+    settings: { speeds: { ...DEFAULT_SPEEDS }, parkingBufferMin: 45, allowExtension: false, allowReducedRest: false, gps: false, liveEta: false, service: { date: null, km: null, odoAtSet: 0 }, hudMirror: false, ongoing: false, autoStop: true, hudAnimation: true, hudStyle: "full", hudItems: { full: { ...DEFAULT_HUD_ITEMS.full }, minimal: { ...DEFAULT_HUD_ITEMS.minimal } }, work: { ...DEFAULT_WORK }, musicApp: "none", navEnabled: false, vehicle: { ...DEFAULT_VEHICLE }, routeType: "fastest", navVoice: true, friendsShare: true, mapTheme: "auto", aheadKm: 50, aheadStrip: { mop: true, parking: true, fuel: true, camera: true, toll: true }, places: EMPTY_PLACES, navMap: "3d", breakStop: { ...DEFAULT_BREAK_STOP } },
     planTime: null,
     track: null,
     odoKm: 0,
@@ -120,14 +154,16 @@ export function defaultState(now = Date.now()): AppState {
     stop: null,
     choice: null,
     navRoute: null,
+    navOpen: false,
     history: [],
+    tracker: null,
   };
 }
 
 /** Elementy HUD scalone z domyślnymi; dawne „hudRoadInfo: false” wyłącza nazwę drogi w obu stylach. */
 function hudItems(base: Settings["hudItems"], saved?: Partial<Settings> & { hudRoadInfo?: boolean }): Settings["hudItems"] {
   const road = saved?.hudItems === undefined && saved?.hudRoadInfo === false ? { road: false } : {};
-  return { full: { ...base.full, ...saved?.hudItems?.full, ...road }, minimal: { ...base.minimal, ...saved?.hudItems?.minimal, ...road }, nav: { ...base.nav, ...saved?.hudItems?.nav, ...road } };
+  return { full: { ...base.full, ...saved?.hudItems?.full, ...road }, minimal: { ...base.minimal, ...saved?.hudItems?.minimal, ...road } };
 }
 
 /** Zapisany (lub pobrany z konta) stan scalony z domyślnym — nowe pola dostają wartości domyślne. */
@@ -139,7 +175,8 @@ export function normalize(s: Partial<AppState>): AppState {
     ...s,
     trip: { ...base.trip, ...s.trip },
     driver: { ...base.driver, ...s.driver },
-    settings: { ...base.settings, ...s.settings, speeds: { ...base.settings.speeds, ...s.settings?.speeds }, service: { ...base.settings.service, ...s.settings?.service }, work: { ...base.settings.work, ...s.settings?.work }, hudItems: hudItems(base.settings.hudItems, s.settings), vehicle: { ...base.settings.vehicle, ...s.settings?.vehicle } },
+    settings: { ...base.settings, ...s.settings, speeds: { ...base.settings.speeds, ...s.settings?.speeds }, service: { ...base.settings.service, ...s.settings?.service }, work: { ...base.settings.work, ...s.settings?.work }, // Dawny styl HUD „nav” to dziś osobny ekran nawigacji.
+      hudStyle: (s.settings?.hudStyle as string) === "nav" ? "full" : s.settings?.hudStyle ?? base.settings.hudStyle, hudItems: hudItems(base.settings.hudItems, s.settings), vehicle: { ...base.settings.vehicle, ...s.settings?.vehicle }, aheadStrip: { ...base.settings.aheadStrip, ...s.settings?.aheadStrip }, breakStop: { ...base.settings.breakStop, ...s.settings?.breakStop }, places: normalizePlaces(s.settings?.places) },
   };
 }
 

@@ -1,28 +1,35 @@
+import { applyGapAnswer, GapAnswer } from "./core/gapfix";
+import { addRecent, SavedPlaces } from "./core/places";
+import { TRUCK_SPEED } from "./core/rules";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, ApiError, Auth, isGuest, loadAuth, saveAuth, setGuest, User } from "./api";
 import { AuthScreen, ResetPasswordScreen } from "./components/AuthScreen";
 import { DriverView } from "./components/DriverView";
 import { HistoryCard } from "./components/HistoryCard";
+import { setWhere } from "./core/violations";
 import { InstallButton } from "./components/InstallButton";
 import { ConsentPrompt } from "./components/MapConsent";
-import { sendReport, useTraceCollector } from "./collect";
+import { endRoadworks, sendReport, snapRoad, useTraceCollector } from "./collect";
 import { polishVoiceMissing, speak, voiceSupported } from "./voice";
 import { GpsCard } from "./components/GpsCard";
 import { enterFullscreen, exitFullscreen, HudView } from "./components/HudView";
+import { NavView } from "./components/NavView";
+import { LicensePanel, licenseStatus } from "./components/License";
 import { PlanView } from "./components/PlanView";
 import { RouteView } from "./components/RouteView";
 import { SettingsCategory, SettingsView } from "./components/SettingsView";
-import { ALERTS_REFRESH, fetchRoute, NavAccess, NavRoute, refreshWarnings, voteAlert, withWarnings } from "./nav";
+import { ALERTS_REFRESH, POIS_VERSION, fetchRoute, LIVE_TRAFFIC, refreshLiveTraffic, refreshTraffic, TRAFFIC_ON, TRAFFIC_REFRESH, NavAccess, NavPlace, NavRoute, refreshWarnings, viaAhead, voteAlert, withWarnings } from "./nav";
 import { locate } from "./core/navmatch";
 import { planForDeadline } from "./core/deadline";
-import { GPS, recentSpeed, uniformSpeeds } from "./core/gps";
-import { remainingSegments, Route, segmentsFromProfile } from "./core/route";
+import { GPS, recentSpeed } from "./core/gps";
+import { remainingSegments, Route, segmentsFromProfile, withLiveSpeed, withSlowStretches } from "./core/route";
 import { Better, betterOption, compareScenarios, driverStatus, ScenarioId, whatIfs } from "./core/scenarios";
 import { serviceStatus } from "./core/service";
 import { planAfterStop } from "./core/stop";
 import { fmtClock, fmtTime } from "./format";
 import { AppState, defaultState, floorMinute, useNow, usePersistentState } from "./state";
 import { useParkings, useRoads, useWeather } from "./nearby";
+import { inVtiles, useVtiles } from "./vtiles";
 import { dayKey, daySummary } from "./core/history";
 import { ongoingInfo, useOngoingNotification } from "./ongoing";
 import { resetSync, useSync } from "./sync";
@@ -37,15 +44,20 @@ import { ON_ROUTE_M } from "./core/navmatch";
 import { FriendsCard } from "./components/Friends";
 import { autoTheme } from "./mapStyle";
 
-type Tab = "plan" | "route" | "driver" | "history" | "settings";
+type Tab = "plan" | "route" | "nav" | "driver" | "history" | "settings";
 
 const TABS: { id: Tab; label: string; icon: string }[] = [
   { id: "plan", label: "Plan", icon: "M4 12h4l3-8 4 16 3-8h2" },
   { id: "route", label: "Trasa", icon: "M6 20c0-6 12-4 12-10a4 4 0 0 0-8 0M6 20h.01M18 10h.01" },
+  { id: "nav", label: "Nawigacja", icon: "M3 11l18-8-8 18-2-8-8-2Z" },
   { id: "driver", label: "Tachograf", icon: "M12 7v5l3 2M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18Z" },
   { id: "history", label: "Historia", icon: "M5 4h14v16H5zM9 9h6M9 13h6M9 17h3" },
   { id: "settings", label: "Ustawienia", icon: "M4 7h10M18 7h2M4 17h4M12 17h8M14 5v4M8 15v4" },
 ];
+/** Tachograf nie ma własnej zakładki na pasku — jest w Trasie (przełącznik Trasa / Tachograf). */
+const BAR_TABS = TABS.filter((t) => t.id !== "driver");
+const BAR_NAV_AT = BAR_TABS.findIndex((t) => t.id === "nav");
+const barActive = (bar: Tab, tab: Tab) => bar === tab || (bar === "route" && tab === "driver");
 
 function App() {
   const [state, setState] = usePersistentState();
@@ -106,11 +118,15 @@ function App() {
   // Poza trasą (albo gdy w tym urządzeniu nie ma trasy, a konto ma cel) HUD prosi o trasę od bieżącej pozycji.
   const [rerouting, setRerouting] = useState(false);
   const navDest = state.navRoute?.to ?? trip.dest;
-  const reroute = async () => {
+  /** Nowa trasa od pozycji; `addAvoid` — „Omiń blokadę drogi” (punkty dopisane do omijanych na tej trasie). */
+  const reroute = async (addAvoid: { lat: number; lon: number }[] = []) => {
     if (!auth || !navDest || !live || rerouting) return;
     setRerouting(true);
     try {
-      const next = await fetchRoute(auth.token, { lat: live.lat, lon: live.lon }, navDest, settings.vehicle, Date.now(), settings.navEngine, settings.routeType);
+      // Punkty pośrednie, których jeszcze nie minęliśmy, i omijane blokady zostają na nowej trasie.
+      const via = state.navRoute ? viaAhead(state.navRoute, live) : [];
+      const avoid = [...(state.navRoute?.avoid ?? []), ...addAvoid].slice(-12);
+      const next = await fetchRoute(auth.token, { lat: live.lat, lon: live.lon }, navDest, settings.vehicle, Date.now(), settings.routeType, via, avoid);
       setState((s) => ({ ...s, navRoute: next, trip: tripFromRoute(s.trip, next) }));
     } catch {
       /* brak sieci lub limit — HUD spróbuje ponownie za minutę */
@@ -118,9 +134,35 @@ function App() {
       setRerouting(false);
     }
   };
+  /** Odpowiedź „co robiłem bez aplikacji” — tachograf i historia przeliczone od stanu sprzed luki (core/gapfix). */
+  const answerGap = (a: GapAnswer) =>
+    setState((s) => {
+      if (!s.gapReview) return s;
+      const r = applyGapAnswer(s.gapReview, a, s.history, Date.now(), s.stop?.start ?? null);
+      return { ...s, driver: r.driver, history: r.history, gapReview: { ...s.gapReview, answer: a } };
+    });
+  /** Wybrana trasa (z wyszukiwarki, ulubionych, ostatnich) — cel trafia na początek „Ostatnich tras”. */
+  const chooseRoute = (r: NavRoute) =>
+    setState((s) => ({ ...s, navRoute: r, trip: tripFromRoute(s.trip, r), settings: { ...s.settings, places: addRecent(s.settings.places, r.to, Date.now(), r) } }));
+  const setPlaces = (places: SavedPlaces) => setState((s) => ({ ...s, settings: { ...s.settings, places } }));
+  /** Koniec nawigacji: bez trasy i bez celu — sama trasa bez celu wyznaczyłaby się od razu od nowa (useNavTrack). */
+  const endNav = () => setState((s) => ({ ...s, navRoute: null, trip: { ...s.trip, dest: null } }));
+  /** Zmiana punktów pośrednich (dodanie z mapy / usunięcie) — trasa od razu od nowa; błąd idzie do ekranu nawigacji. */
+  const setVia = async (via: NavPlace[]) => {
+    if (!auth || !navDest) return;
+    const from = live ? { lat: live.lat, lon: live.lon } : state.navRoute?.from;
+    if (!from) throw new Error("Brak pozycji startu — włącz GPS.");
+    setRerouting(true);
+    try {
+      const next = await fetchRoute(auth.token, from, navDest, settings.vehicle, Date.now(), settings.routeType, via, state.navRoute?.avoid);
+      setState((s) => ({ ...s, navRoute: next, trip: tripFromRoute(s.trip, next) }));
+    } finally {
+      setRerouting(false);
+    }
+  };
   // Trasa sprzed ostrzeżeń (albo z innej wersji) — dociągamy ostrzeżenia raz, bez nowej trasy z TomTom.
   const navRouteAt = state.navRoute?.at;
-  const needWarnings = navAccess === "premium" && !!state.navRoute && !state.navRoute.warnings;
+  const needWarnings = navAccess === "premium" && !!state.navRoute && (!state.navRoute.warnings || !state.navRoute.pois || state.navRoute.poisV !== POIS_VERSION);
   useEffect(() => {
     if (!needWarnings || !auth || !state.navRoute) return;
     const r = state.navRoute;
@@ -130,16 +172,12 @@ function App() {
   // Nawigacja jest zawsze włączona dla Premium (bez przełącznika w Ustawieniach); cel można wybrać też w HUD.
   const navOn = navAccess === "premium";
   // Własne kafelki mapy (OSM, Polska): czy serwer je ma i czy jesteśmy w ich zasięgu — inaczej kafelki TomTom.
-  const [vtiles, setVtiles] = useState<{ available: boolean; bounds: number[] } | null>(null);
-  useEffect(() => {
-    if (!auth || !navOn) return;
-    api<{ available: boolean; bounds: number[] }>("GET", "/vtiles/meta", undefined, auth.token).then(setVtiles).catch(() => setVtiles(null));
-  }, [auth, navOn]);
+  const vtiles = useVtiles(navOn ? auth?.token : null);
   const dayOff = state.stop?.dayEnd === true;
   const work = workStatus(state.driver.shiftStart, now, settings.work, state.driver.reducedRestsLeft);
   useWorkReminders(settings.work, state.driver.shiftStart, state.driver.reducedRestsLeft, dayOff);
 
-  const { status: gpsStatus, live } = useGpsTracking(settings.gps, setState);
+  const { status: gpsStatus, live } = useGpsTracking(settings.gps, setState, auth?.token ?? null, state.pendingGap, !sync.ready);
   useTraceCollector(auth?.token ?? null, consent && settings.gps, live);
   // W czasie jazdy co kilka minut dociągamy ostrzeżenia na odcinek przed nami — świeże zgłoszenia kontroli.
   const liveRef = useRef(live);
@@ -158,13 +196,45 @@ function App() {
     return () => clearInterval(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [navOn, auth?.token, navRouteAt, hasWarnings]);
+  // Korki z jazdy kierowców RoadPilot (bez TomTom) co LIVE_TRAFFIC.everyMs — także odcinek, na którym sami stoimy.
+  useEffect(() => {
+    if (!navOn || !auth || TRAFFIC_ON) return;
+    const tick = () => {
+      const r = routeRef.current;
+      if (!r || document.visibilityState !== "visible") return;
+      const pos = liveRef.current ? locate(r.points, liveRef.current) : undefined;
+      if (pos && pos.offM > 200) return;
+      refreshLiveTraffic(auth.token, r, pos?.km ?? 0).then((t) => t && setState((s) => (s.navRoute?.at === r.at ? { ...s, navRoute: { ...s.navRoute, ...t } } : s)));
+    };
+    tick();
+    const id = setInterval(tick, LIVE_TRAFFIC.everyMs);
+    return () => clearInterval(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [navOn, auth?.token, navRouteAt]);
+  // Korki przed nami co TRAFFIC_REFRESH.everyMs (oba silniki); trasa z własnego silnika od razu — sama korków nie ma.
+  useEffect(() => {
+    if (!navOn || !auth || !TRAFFIC_ON) return;
+    const tick = () => {
+      const r = routeRef.current;
+      if (!r || document.visibilityState !== "visible") return;
+      const pos = liveRef.current ? locate(r.points, liveRef.current) : undefined;
+      if (pos && pos.offM > 200) return;
+      refreshTraffic(auth.token, r, pos?.km ?? 0).then((t) => t && setState((s) => (s.navRoute?.at === r.at ? { ...s, navRoute: { ...s.navRoute, ...t } } : s)));
+    };
+    if (routeRef.current && routeRef.current.engine !== "tomtom") tick();
+    const id = setInterval(tick, TRAFFIC_REFRESH.everyMs);
+    return () => clearInterval(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [navOn, auth?.token, navRouteAt]);
   useAutoStop(settings.gps && settings.autoStop, live, state.stop !== null, setState);
   // Parkingi, drogi i pogoda tylko w HUD — poza nim pozycja nie wychodzi z telefonu.
   const online = state.hud && settings.gps;
   const parkings = useParkings(live, online, now);
   const weather = useWeather(live, online, now);
   const hudItems = settings.hudItems[settings.hudStyle];
-  const inVtiles = !!vtiles?.available && !!live && live.lon >= vtiles.bounds[0] && live.lat >= vtiles.bounds[1] && live.lon <= vtiles.bounds[2] && live.lat <= vtiles.bounds[3];
+  const inVtilesNow = inVtiles(vtiles, live);
+  /** Styl własnej mapy (dzień / noc, pojazd do zakazów) — Nawigacja i porównanie tras. */
+  const mapStyle = { theme: settings.mapTheme === "auto" || settings.mapTheme === "glass" ? autoTheme(weather.data?.isDay, now) : settings.mapTheme, vehicle: settings.vehicle };
   const roads = useRoads(live, online && hudItems.road, now);
   const today = state.history.find((d) => d.date === dayKey(now));
   const avgKmh = today ? daySummary(today).avgKmh : undefined;
@@ -174,17 +244,21 @@ function App() {
 
   const route = useMemo(() => {
     const full = trip.profile === "custom" ? trip.segments : segmentsFromProfile(trip.distance, trip.profile);
-    const segments = remainingSegments(full, trip.doneKm);
-    return liveKmh ? new Route(segments, uniformSpeeds(liveKmh)) : new Route(segments, settings.speeds, trip.trafficPct);
-  }, [trip, settings.speeds, liveKmh]);
+    // Korki przed nami (z jazdy kierowców) — wolniej na ich odcinkach; km trasy nawigacji → km pozostałej trasy (od trip.doneKm).
+    const jams = (state.navRoute?.traffic ?? []).filter((t) => t.live && t.kmh !== undefined && t.toKm > trip.doneKm).map((t) => ({ fromKm: t.km - trip.doneKm, toKm: t.toKm - trip.doneKm, kmh: t.kmh! }));
+    const segments = withSlowStretches(remainingSegments(full, trip.doneKm), jams);
+    return new Route(liveKmh ? withLiveSpeed(segments, liveKmh, GPS.liveEtaMin) : segments, settings.speeds, trip.trafficPct);
+  }, [trip, settings.speeds, liveKmh, state.navRoute?.traffic]);
 
   const options = { allowExtension: settings.allowExtension, allowReducedRest: settings.allowReducedRest };
   const comparison = useMemo(() => compareScenarios(route, driver, planNow, options), [route, driver, planNow, options.allowExtension, options.allowReducedRest]);
   const hints = useMemo(() => whatIfs(route, driver, planNow, options), [route, driver, planNow, options.allowExtension, options.allowReducedRest]);
   const status = driverStatus(driver, planNow);
+  // Jedziemy (średnia z GPS z ostatnich minut, bez ręcznego postoju) — plan pod awizację nie każe wtedy stawać ani „wyjeżdżać później”.
+  const moving = settings.gps && recentKmh !== undefined && recentKmh >= GPS.minLiveKmh && !(state.stop && !state.stop.auto) && state.planTime === null;
   const deadline = useMemo(
-    () => (trip.unloadAt !== null ? planForDeadline(route, driver, planNow, options, trip.unloadAt, trip.unloadBufferMin) : undefined),
-    [route, driver, planNow, trip.unloadAt, trip.unloadBufferMin, options.allowExtension, options.allowReducedRest],
+    () => (trip.unloadAt !== null ? planForDeadline(route, driver, planNow, options, trip.unloadAt, trip.unloadBufferMin, moving) : undefined),
+    [route, driver, planNow, trip.unloadAt, trip.unloadBufferMin, options.allowExtension, options.allowReducedRest, moving],
   );
 
   const best = comparison.scenarios.find((s) => s.id === comparison.bestId);
@@ -222,9 +296,25 @@ function App() {
   useOngoingNotification(settings.ongoing, ongoingInfo(activePlan, status, state.stop, now), () => setOngoing(false));
 
   const go = (t: Tab) => {
+    // Nawigacja to osobny ekran na cały ekran (jak HUD), nie zakładka w powłoce.
+    if (t === "nav") {
+      enterFullscreen();
+      setState((s) => ({ ...s, navOpen: true, planTime: null }));
+      return;
+    }
     setTab(t);
     setSettingsCat(null);
     window.scrollTo({ top: 0 });
+  };
+  const tabButton = (t: (typeof TABS)[number]) => (
+    <button key={t.id} className={barActive(t.id, tab) ? "active" : ""} onClick={() => go(t.id)} aria-current={barActive(t.id, tab) ? "page" : undefined}>
+      <svg viewBox="0 0 24 24" aria-hidden><path d={t.icon} /></svg>
+      <span>{t.label}</span>
+    </button>
+  );
+  const exitNav = () => {
+    exitFullscreen();
+    setState((s) => ({ ...s, navOpen: false }));
   };
 
   const setGps = (on: boolean) => setState((s) => ({ ...s, settings: { ...s.settings, gps: on }, track: on ? s.track : null }));
@@ -261,6 +351,14 @@ function App() {
     setGuestMode(true);
   };
   // Wylogowanie: najpierw wysyłamy zaległe zmiany, potem czyścimy telefon — dane zostają na koncie.
+  /** Konto po zmianie na serwerze (np. licencja z klucza) — zapisane w telefonie. */
+  const setUser = (user: User) =>
+    setAuth((a) => {
+      if (!a) return a;
+      const next = { ...a, user };
+      saveAuth(next);
+      return next;
+    });
   const signOut = async () => {
     if (auth) {
       await sync.push();
@@ -281,6 +379,79 @@ function App() {
 
   if (resetToken) return <ResetPasswordScreen token={resetToken} onAuth={(a) => { closeReset(); signIn(a); }} onCancel={closeReset} />;
   if (!auth && !guest) return <AuthScreen onAuth={signIn} onGuest={continueAsGuest} />;
+
+
+  if (state.navOpen) {
+    return (
+      <NavView
+        gapReview={state.gapReview}
+        onGapAnswer={answerGap}
+        license={{ status: licenseStatus(auth?.user), page: <LicensePanel token={auth?.token ?? null} user={auth?.user ?? null} onUser={setUser} /> }}
+        settings={{ value: settings, onChange: (patch) => setState((s) => ({ ...s, settings: { ...s.settings, ...patch } })) }}
+        mapMode={settings.navMap}
+        onMapMode={(navMap) => setState((s) => ({ ...s, settings: { ...s.settings, navMap } }))}
+        nav={navOn ? { route: state.navRoute, dest: navDest, rerouting, onReroute: () => reroute(), onAvoid: reroute, onVia: setVia, onEnd: endNav } : undefined}
+        planner={navOn && auth ? {
+          token: auth.token,
+          vehicle: settings.vehicle,
+          routeType: settings.routeType,
+          position: live ? { lat: live.lat, lon: live.lon } : null,
+          onRoute: chooseRoute,
+          mapStyle,
+          places: settings.places,
+          onPlaces: setPlaces,
+        } : undefined}
+        voice={{
+          supported: voiceSupported(),
+          on: settings.navVoice,
+          toggle: () => {
+            const on = !settings.navVoice;
+            // iPhone odblokowuje mowę tylko w dotknięciu — od razu mówimy potwierdzenie.
+            if (on) speak("Komunikaty głosowe włączone.");
+            if (on && polishVoiceMissing()) {
+              alert("Telefon nie ma polskiego głosu, więc komunikaty mogą być po angielsku.\n\nSamsung: Ustawienia → Zarządzanie ogólne → Zamiana tekstu na mowę → wybierz „Usługi Google” (Mowa Google) i pobierz język polski. Potem uruchom RoadPilot ponownie.");
+            }
+            else if (voiceSupported()) speechSynthesis.cancel();
+            setState((s) => ({ ...s, settings: { ...s.settings, navVoice: on } }));
+          },
+        }}
+        mapToken={navOn ? auth?.token : undefined}
+        mapVector={navOn && inVtilesNow ? mapStyle : undefined}
+        report={consent && auth ? {
+          onSend: async (kind, value, at, note) => {
+            // Z mapy: punkt na osi drogi, bez kierunku (nie wiemy, którą stroną jedzie się przez ograniczenie). Roboty: rodzaj w note.
+            if (at) return await sendReport(auth.token, { kind, lat: at.lat, lon: at.lon, heading: null, value, note: note ?? `mapa${at.name ? `: ${at.name}` : ""}` });
+            if (!live) throw new Error("Brak pozycji GPS.");
+            return await sendReport(auth.token, { kind, lat: live.lat, lon: live.lon, heading: live.heading, value, note: note ?? "" });
+          },
+          onWorksEnd: async (id) => {
+            if (!live) throw new Error("Brak pozycji GPS.");
+            return (await endRoadworks(auth.token, id, live)).km;
+          },
+          onVote: async (w, vote) => {
+            await voteAlert(auth.token, w, vote);
+          },
+          onSnap: (at) => snapRoad(auth.token, at),
+          onBadTurn: async (t) => {
+            await sendReport(auth.token, { kind: "bad_turn", lat: t.lat, lon: t.lon, heading: t.heading, value: null, note: t.note });
+          },
+        } : undefined}
+        friends={auth ? friends.friends : undefined}
+        live={live}
+        gpsOn={settings.gps}
+        gpsStatus={gpsStatus}
+        onEnableGps={() => setGps(true)}
+        route={route}
+        plan={activePlan}
+        deadline={deadline}
+        stopControls={stopProps}
+        vehicleMaxKmh={settings.vehicle.maxKmh}
+        truck={settings.vehicle.weightKg > TRUCK_SPEED.minWeightKg}
+        ahead={{ km: settings.aheadKm, strip: settings.aheadStrip }}
+        onExit={exitNav}
+      />
+    );
+  }
 
   if (state.hud) {
     return (
@@ -304,40 +475,6 @@ function App() {
         items={hudItems}
         onStyle={(hudStyle: HudStyle) => setState((s) => ({ ...s, settings: { ...s.settings, hudStyle } }))}
         floating={floating}
-        nav={navOn ? { route: state.navRoute, dest: navDest, rerouting, onReroute: reroute } : undefined}
-        mapToken={navOn ? auth?.token : undefined}
-        mapVector={navOn && inVtiles ? { theme: settings.mapTheme === "auto" ? autoTheme(weather.data?.isDay, now) : settings.mapTheme, vehicle: settings.vehicle } : undefined}
-        planner={navOn && auth ? {
-          token: auth.token,
-          vehicle: settings.vehicle,
-          engine: settings.navEngine,
-          routeType: settings.routeType,
-          position: live ? { lat: live.lat, lon: live.lon } : null,
-          onRoute: (r: NavRoute) => setState((s) => ({ ...s, navRoute: r, trip: tripFromRoute(s.trip, r) })),
-        } : undefined}
-        voice={{
-          supported: voiceSupported(),
-          on: settings.navVoice,
-          toggle: () => {
-            const on = !settings.navVoice;
-            // iPhone odblokowuje mowę tylko w dotknięciu — od razu mówimy potwierdzenie.
-            if (on) speak("Komunikaty głosowe włączone.");
-            if (on && polishVoiceMissing()) {
-              alert("Telefon nie ma polskiego głosu, więc komunikaty mogą być po angielsku.\n\nSamsung: Ustawienia → Zarządzanie ogólne → Zamiana tekstu na mowę → wybierz „Usługi Google” (Mowa Google) i pobierz język polski. Potem uruchom RoadPilot ponownie.");
-            }
-            else if (voiceSupported()) speechSynthesis.cancel();
-            setState((s) => ({ ...s, settings: { ...s.settings, navVoice: on } }));
-          },
-        }}
-        report={consent && auth ? {
-          onSend: async (kind, value) => {
-            if (!live) throw new Error("Brak pozycji GPS.");
-            await sendReport(auth.token, { kind, lat: live.lat, lon: live.lon, heading: live.heading, value, note: "" });
-          },
-          onVote: async (w, vote) => {
-            await voteAlert(auth.token, w, vote);
-          },
-        } : undefined}
         avgKmh={avgKmh}
         animation={settings.hudAnimation}
         onAnimation={(hudAnimation) => setState((s) => ({ ...s, settings: { ...s.settings, hudAnimation } }))}
@@ -350,7 +487,20 @@ function App() {
         musicApp={settings.musicApp}
         better={better}
         onBetter={pickBetter}
+        report={consent && auth ? {
+          onSend: async (kind, value) => {
+            if (!live) throw new Error("Brak pozycji GPS.");
+            await sendReport(auth.token, { kind, lat: live.lat, lon: live.lon, heading: live.heading, value, note: "" });
+          },
+          onVote: async (w, vote) => {
+            await voteAlert(auth.token, w, vote);
+          },
+        } : undefined}
         friends={auth ? friends.friends : undefined}
+        navRoute={state.navRoute}
+        limitToken={navOn ? auth?.token : undefined}
+        vehicleMaxKmh={settings.vehicle.maxKmh}
+        truck={settings.vehicle.weightKg > TRUCK_SPEED.minWeightKg}
       />
     );
   }
@@ -419,6 +569,12 @@ function App() {
             onOption={(option, value) => setState((s) => ({ ...s, settings: { ...s.settings, [option]: value } }))}
           />
         )}
+        {(tab === "route" || tab === "driver") && (
+          <div className="subtabs" role="tablist">
+            <button role="tab" aria-selected={tab === "route"} className={tab === "route" ? "active" : ""} onClick={() => go("route")}>Trasa</button>
+            <button role="tab" aria-selected={tab === "driver"} className={tab === "driver" ? "active" : ""} onClick={() => go("driver")}>Tachograf</button>
+          </div>
+        )}
         {tab === "route" && (
           <RouteView
             trip={trip}
@@ -426,7 +582,6 @@ function App() {
             onChange={(t) => setState((s) => ({ ...s, trip: t }))}
             nav={{
               access: navAccess,
-              engine: settings.navEngine,
               routeType: settings.routeType,
               token: auth?.token ?? null,
               enabled: navAccess === "premium",
@@ -435,16 +590,20 @@ function App() {
               route: state.navRoute,
               position: settings.gps && live ? { lat: live.lat, lon: live.lon } : null,
               onDest: (dest) => setState((s) => ({ ...s, trip: { ...s.trip, dest, destination: dest ? dest.label : s.trip.destination } })),
-              onRoute: (r: NavRoute) => setState((s) => ({ ...s, navRoute: r, trip: tripFromRoute(s.trip, r) })),
-              onClear: () => setState((s) => ({ ...s, navRoute: null })),
+              onRoute: chooseRoute,
+              places: settings.places,
+              onPlaces: setPlaces,
+              onClear: endNav,
               onSettings: () => { go("settings"); setSettingsCat("vehicle"); },
+              mapStyle,
             }}
           />
         )}
         {tab === "driver" && <DriverView driver={state.driver} planNow={viewNow} onChange={(d) => setState((s) => ({ ...s, driver: d }))} />}
-        {tab === "history" && <HistoryCard history={state.history} now={now} gpsOn={settings.gps} onClear={() => setState((s) => ({ ...s, history: [] }))} />}
+        {tab === "history" && <HistoryCard history={state.history} now={now} gpsOn={settings.gps} onClear={() => setState((s) => ({ ...s, history: [] }))} token={auth?.token ?? null} onWhere={(id, where) => setState((s) => ({ ...s, history: setWhere(s.history, id, where) }))} gapReview={state.gapReview} onGapAnswer={answerGap} />}
         {tab === "settings" && (
           <SettingsView
+            key={settingsCat ?? "none"}
             initialCategory={settingsCat}
             state={state}
             now={now}
@@ -465,6 +624,7 @@ function App() {
               onLogout: signOut,
               onSyncNow: sync.push,
               onDelete: deleteAccount,
+              onUser: setUser,
             }}
           />
         )}
@@ -473,6 +633,7 @@ function App() {
           <button className="primary full" onClick={() => go("plan")}>Pokaż plan</button>
         )}
 
+        <button className="support-link" onClick={() => { go("settings"); setSettingsCat("support"); }}>♥ Wesprzyj rozwój RoadPilot</button>
         <p className="disclaimer">
           RoadPilot jest asystentem planowania. Nie zastępuje homologowanego tachografu ani oficjalnej rejestracji czasu pracy — dane
           i zgodność z przepisami zawsze weryfikuj z tachografem. Limity wg rozporządzenia (WE) 561/2006.
@@ -480,12 +641,13 @@ function App() {
       </main>
 
       <nav className="tabbar">
-        {TABS.map((t) => (
-          <button key={t.id} className={tab === t.id ? "active" : ""} onClick={() => go(t.id)} aria-current={tab === t.id ? "page" : undefined}>
-            <svg viewBox="0 0 24 24" aria-hidden><path d={t.icon} /></svg>
-            <span>{t.label}</span>
-          </button>
-        ))}
+        {/* Nawigacja na środku w zielonej bańce — po bokach pozostałe zakładki. */}
+        <div className="tabbar-side">{BAR_TABS.slice(0, BAR_NAV_AT).map(tabButton)}</div>
+        <button className="tabbar-nav" onClick={() => go("nav")}>
+          <i><svg viewBox="0 0 24 24" aria-hidden><path d={BAR_TABS[BAR_NAV_AT].icon} /></svg></i>
+          <span>{BAR_TABS[BAR_NAV_AT].label}</span>
+        </button>
+        <div className="tabbar-side">{BAR_TABS.slice(BAR_NAV_AT + 1).map(tabButton)}</div>
       </nav>
     </div>
   );
@@ -493,7 +655,7 @@ function App() {
 
 /** Trasa z nawigacji zasila silnik przerw: odcinki wg typu drogi (zaokrąglone do 0,1 km), licznik GPS od zera. */
 function tripFromRoute(trip: AppState["trip"], r: NavRoute): AppState["trip"] {
-  const segments = r.segments.map((x) => ({ type: x.type, km: Math.round(x.km * 10) / 10 })).filter((x) => x.km > 0);
+  const segments = r.segments.map((x) => ({ type: x.type, km: Math.round(x.km * 10) / 10, ...(x.kmh ? { kmh: x.kmh } : {}) })).filter((x) => x.km > 0);
   return { ...trip, dest: r.to, destination: r.to.label, profile: "custom", segments, distance: Math.round(r.lengthKm * 10) / 10, doneKm: 0 };
 }
 

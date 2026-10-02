@@ -62,7 +62,7 @@ export function GpsCard({ on, status, doneKm, leftKm, recentKmh, liveEta, liveUs
         hint={
           liveEta && !liveUsed
             ? `Teraz liczę z prędkości typów dróg — średnia jest niedostępna lub poniżej ${GPS.minLiveKmh} km/h (postój, korek).`
-            : "Zamiast średnich dla typów dróg. Na postoju i w korku wraca do zwykłego wyliczenia."
+            : `Średnia liczy się tylko na najbliższe ${GPS.liveEtaMin} min jazdy (korek, roboty) — dalej prędkości typów dróg, więc przyjazd nie skacze.`
         }
       />
       <p className="muted small">

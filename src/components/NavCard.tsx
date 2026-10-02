@@ -1,12 +1,15 @@
+import { GlVector } from "./GlMap";
 import { useEffect, useState } from "react";
 import { ApiError } from "../api";
 import { fmtDuration, fmtKm, fmtTime } from "../format";
+import { ParkingCard } from "./ParkingCard";
 import { RouteCompare } from "./RouteCompare";
-import { currentPosition, fetchRoutes, isAlert, NavAccess, NavEngine, NavPlace, NavRoute, RouteType, RouteWarning, searchPlaces, Vehicle, warningText } from "../nav";
+import { PlaceActions, PlaceShortcuts } from "./SavedPlaces";
+import { SavedPlaces } from "../core/places";
+import { currentPosition, fetchRoutes, isAlert, NavAccess, NavPlace, NavRoute, RouteType, RouteWarning, searchPlaces, TRAFFIC_ON, Vehicle, warningText } from "../nav";
 
 export interface NavProps {
   access: NavAccess;
-  engine: NavEngine;
   routeType: RouteType;
   /** Token sesji — nawigacja idzie przez konto (Premium). */
   token: string | null;
@@ -20,6 +23,11 @@ export interface NavProps {
   onRoute: (r: NavRoute) => void;
   onClear: () => void;
   onSettings: () => void;
+  /** Styl własnej mapy do porównania tras. */
+  mapStyle?: GlVector;
+  /** Dom, ulubione, ostatnie cele. */
+  places: SavedPlaces;
+  onPlaces: (p: SavedPlaces) => void;
 }
 
 /** Nawigacja dla ciężarówek (beta): cel z wyszukiwarki i trasa TomTom z danymi pojazdu. */
@@ -86,7 +94,7 @@ export function NavCard(p: NavProps) {
     setError(null);
     try {
       const from = p.position ?? (await currentPosition());
-      const all = await fetchRoutes(p.token!, from, p.dest, p.vehicle, Date.now(), p.engine, p.routeType);
+      const all = await fetchRoutes(p.token!, from, p.dest, p.vehicle, Date.now(), p.routeType);
       setOptions(all);
       p.onRoute(all[0]);
     } catch (e) {
@@ -112,7 +120,9 @@ export function NavCard(p: NavProps) {
           </span>
           <button className="ghost" onClick={() => setEditing(true)}>Zmień</button>
         </div>
-      ) : (
+      ) : null}
+      {p.dest && !editing && <PlaceActions place={p.dest} places={p.places} onPlaces={p.onPlaces} />}
+      {(!p.dest || editing) && (
         <div className="nav-search">
           <label className="field wide">
             <span className="field-label">Cel — adres lub nazwa firmy</span>
@@ -131,6 +141,7 @@ export function NavCard(p: NavProps) {
               ))}
             </ul>
           )}
+          {query.trim().length < 3 && <PlaceShortcuts places={p.places} onPlaces={p.onPlaces} onPick={pick} />}
           {p.dest && <button className="text-btn" onClick={() => { setEditing(false); setQuery(""); }}>Anuluj</button>}
         </div>
       )}
@@ -139,7 +150,7 @@ export function NavCard(p: NavProps) {
         <div className="nav-summary">
           <b>{fmtKm(r.lengthKm)}</b>
           <span>
-            {r.engine === "roadpilot" ? "RoadPilot (OSM)" : "TomTom"}: {fmtDuration(r.travelMin)} jazdy{r.trafficMin >= 1 ? ` (korki +${fmtDuration(r.trafficMin)})` : ""} · wyznaczona {fmtTime(r.at)}
+            {r.engine === "roadpilot" ? "RoadPilot (OSM)" : "TomTom"}: {fmtDuration(r.travelMin)} jazdy{TRAFFIC_ON && r.trafficMin >= 1 ? ` (korki +${fmtDuration(r.trafficMin)})` : ""} · wyznaczona {fmtTime(r.at)}
           </span>
           {r.fallback && <span className="warn-text small">TomTom niedostępny lub limit wyczerpany — trasa z silnika RoadPilot (bez pasów ruchu i korków).</span>}
           {r.ferry && <span className="warn-text">Trasa zawiera prom.</span>}
@@ -159,12 +170,16 @@ export function NavCard(p: NavProps) {
         </div>
       )}
 
+      {r?.realSpeedShare ? <p className="muted small">Czas z jazdy kierowców RoadPilot na {Math.round(r.realSpeedShare * 100)}% trasy.</p> : null}
+      {r?.gate && <p className="gate-note">Trasa prowadzi do wjazdu dla ciężarówek zgłoszonego przez kierowcę.</p>}
       {r && p.token && options.length > 1 && options.some((o) => o.to.lat === r.to.lat && o.to.lon === r.to.lon) && (
         <>
           <div className="stop-label">Porównanie tras</div>
-          <RouteCompare routes={options} selectedAt={r.at} token={p.token} onPick={p.onRoute} />
+          <RouteCompare routes={options} selectedAt={r.at} token={p.token} onPick={p.onRoute} mapStyle={p.mapStyle} />
         </>
       )}
+
+      {p.dest && !editing && p.token && <ParkingCard dest={p.dest} token={p.token} />}
 
       {error && <p className="auth-error">{error}</p>}
 

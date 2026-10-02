@@ -88,6 +88,16 @@ const ICONS: Record<string, React.ReactNode> = {
       <Truck x={11} y={17} s={1} />
     </Sign>
   ),
+  // Roboty drogowe: pomarańczowy trójkąt ostrzegawczy z robotnikiem przy łopacie (znak A-14).
+  roadworks: (
+    <>
+      <path d="M24 4 45 42H3z" fill="#fff" stroke={RED} strokeWidth="4" strokeLinejoin="round" />
+      <path d="M24 9 40.5 39h-33z" fill="#f2a230" />
+      <circle cx="21" cy="19" r="2.6" fill="#111" />
+      <path d="M21 22.5l-2.5 7 3 1 1 6M18.5 29.5l-3 7M21 24l5 2M26 26l3.5 8.5M27 34h6" stroke="#111" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" fill="none" />
+      <path d="M30 32l5-1 1 4.5h-7z" fill="#111" />
+    </>
+  ),
   closed: (
     <>
       <rect x="4" y="16" width="40" height="11" rx="2" fill="#fff" stroke="#111" strokeWidth="1.5" />
@@ -99,6 +109,33 @@ const ICONS: Record<string, React.ReactNode> = {
     <>
       <rect x="6" y="6" width="36" height="36" rx="5" fill="#1f5fd1" stroke="#fff" strokeWidth="2" />
       <text x="24" y="35" textAnchor="middle" fontSize="26" fontWeight="900" fill="#fff" fontFamily="system-ui, sans-serif">P</text>
+    </>
+  ),
+  // MOP: niebieska tablica z P i znakiem stacji / baru (jak znak MOP), stacja: pomarańczowy dystrybutor.
+  mop: (
+    <>
+      <rect x="6" y="6" width="36" height="36" rx="5" fill="#1f5fd1" stroke="#fff" strokeWidth="2" />
+      <text x="20" y="31" textAnchor="middle" fontSize="20" fontWeight="900" fill="#fff" fontFamily="system-ui, sans-serif">P</text>
+      <path d="M30 18h6v14h-6zM36 22h2.5v7.5a1.5 1.5 0 0 0 3 0V20l-2-2" fill="#fff" stroke="#fff" strokeWidth="1" strokeLinejoin="round" />
+      <text x="24" y="40" textAnchor="middle" fontSize="7.5" fontWeight="900" fill="#fff" fontFamily="system-ui, sans-serif">MOP</text>
+    </>
+  ),
+  fuel: (
+    <>
+      <rect x="6" y="6" width="36" height="36" rx="5" fill="#e07a1f" stroke="#fff" strokeWidth="2" />
+      <path d="M14 36V13h13v23zM17 16v7h7v-7zM27 21h3.5l2.5 2.5v9a2 2 0 0 0 4 0V18l-3.5-3.5" fill="#fff" stroke="#fff" strokeWidth="1.4" strokeLinejoin="round" />
+    </>
+  ),
+  // Wjazd dla ciężarówek: szlaban w pasy i ciężarówka.
+  gate: (
+    <>
+      <rect x="6" y="6" width="36" height="36" rx="5" fill="#2a8a4a" stroke="#fff" strokeWidth="2" />
+      <path d="M11 16V36" stroke="#fff" strokeWidth="3" strokeLinecap="round" />
+      <rect x="10" y="13" width="28" height="6" rx="1.5" fill="#fff" />
+      <path d="M17 13v6M24 13v6M31 13v6" stroke="#e0342f" strokeWidth="3" />
+      <rect x="18" y="24" width="12" height="8" rx="1" fill="#fff" />
+      <path d="M30 26h4l3 3v3h-7z" fill="#fff" />
+      <circle cx="21" cy="34" r="2" fill="#fff" /><circle cx="33" cy="34" r="2" fill="#fff" />
     </>
   ),
   other: (

@@ -251,6 +251,15 @@ export function positionAt(plan: Plan, route: Route, at: number): number {
   return route.totalKm;
 }
 
+/** Kiedy plan (z przerwami po drodze) dojeżdża do km `km` trasy — np. do punktu pośredniego. Poza planem: koniec planu. */
+export function timeAtKm(plan: Plan, route: Route, km: number): number {
+  for (const e of plan.events) {
+    if (km <= e.fromKm) return e.start;
+    if (e.kind === "drive" && km <= e.toKm) return e.start + route.driveMinutes(e.fromKm, km) * MIN;
+  }
+  return plan.arrival;
+}
+
 export interface ParkingHint {
   stop: PlanEvent;
   /** Od kiedy szukać parkingu. */

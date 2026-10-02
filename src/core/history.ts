@@ -1,5 +1,9 @@
-// Historia dzienna z GPS: początek i koniec jazdy, czas jazdy, postoje, km i średnia prędkość.
+// Historia dzienna z GPS: początek i koniec jazdy, czas jazdy, postoje, km i średnia prędkość; luki (aplikacja zamknięta)
+// z oszacowaną jazdą i przekroczenia (core/violations.ts).
 // Dzień = data kalendarzowa w strefie lokalnej (jak nextWeekStart). Zapis jest pomocniczy — prawnym jest tachograf.
+
+import type { GapEstimate } from "./gps";
+import type { Violation } from "./violations";
 
 const MIN = 60_000;
 
@@ -18,7 +22,11 @@ export interface DayLog {
   end: number | null;
   driveMin: number;
   km: number;
-  stops: { start: number; end: number }[];
+  /** est = postój oszacowany w luce (aplikacja była zamknięta). */
+  stops: { start: number; end: number; est?: boolean }[];
+  /** Luki w odczytach: aplikacja zamknięta — jazda i km oszacowane (z drogi na mapie albo linii prostej). */
+  gaps?: GapEstimate[];
+  violations?: Violation[];
 }
 
 const pad = (n: number) => String(n).padStart(2, "0");
@@ -28,7 +36,7 @@ export function dayKey(t: number) {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 }
 
-function withDay(log: DayLog[], t: number, f: (d: DayLog) => DayLog): DayLog[] {
+export function withDay(log: DayLog[], t: number, f: (d: DayLog) => DayLog): DayLog[] {
   const date = dayKey(t);
   const i = log.findIndex((d) => d.date === date);
   const day = i >= 0 ? log[i] : { date, start: null, end: null, driveMin: 0, km: 0, stops: [] };
@@ -49,10 +57,15 @@ export function recordDrive(log: DayLog[], end: number, driveMin: number, km: nu
   }));
 }
 
-/** Zapisuje zakończony postój (w dniu, w którym się zaczął). */
-export function recordStop(log: DayLog[], start: number, end: number): DayLog[] {
+/** Zapisuje zakończony postój (w dniu, w którym się zaczął). `est` — postój oszacowany w luce. */
+export function recordStop(log: DayLog[], start: number, end: number, est = false): DayLog[] {
   if ((end - start) / MIN < HISTORY.minStopMin) return log;
-  return withDay(log, start, (d) => ({ ...d, stops: [...d.stops, { start, end }].sort((a, b) => a.start - b.start) }));
+  return withDay(log, start, (d) => ({ ...d, stops: [...d.stops, est ? { start, end, est } : { start, end }].sort((a, b) => a.start - b.start) }));
+}
+
+/** Zapisuje lukę z oszacowaniem (w dniu, w którym się zaczęła). */
+export function recordGap(log: DayLog[], gap: GapEstimate): DayLog[] {
+  return withDay(log, gap.start, (d) => ({ ...d, gaps: [...(d.gaps ?? []), gap] }));
 }
 
 /** Podsumowanie dnia do widoku. */

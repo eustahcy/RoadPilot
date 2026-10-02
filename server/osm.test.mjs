@@ -23,3 +23,27 @@ describe("OSM → ograniczenia dla ciężarówek", () => {
     expect(featureRows({ type: "Feature", id: "w3", geometry: { type: "LineString", coordinates: [[19, 52], [19.1, 52]] }, properties: { hgv: "yes" } })).toEqual([]);
   });
 });
+
+describe("ograniczenia warunkowe z OSM", () => {
+  const way = (tags) => ({ id: "w1", properties: tags, geometry: { type: "LineString", coordinates: [[19, 52], [19.001, 52.001]] } });
+  it("maxweight 12 + none @ destination → wiersz masy z warunkiem", () => {
+    const [r] = featureRows(way({ maxweight: "12", "maxweight:conditional": "none @ destination" }));
+    expect(r).toMatchObject({ kind: "weight", value: 12 });
+    expect(JSON.parse(r.cond)).toEqual([{ value: "none", users: ["destination"] }]);
+  });
+  it("sam zakaz nocny (hgv:conditional) → osobny wiersz hgv bez wartości stałej", () => {
+    const rows = featureRows(way({ highway: "residential", "hgv:conditional": "no @ (22:00-06:00)" }));
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ kind: "hgv", value: null, raw: "" });
+    expect(JSON.parse(rows[0].cond)[0].value).toBe("no");
+  });
+});
+
+describe("strome odcinki (incline)", () => {
+  const way = (tags) => ({ id: "w2", properties: tags, geometry: { type: "LineString", coordinates: [[19, 52], [19.001, 52.001]] } });
+  it("≥ 8% → ograniczenie incline z wartością bezwzględną; łagodne i bez liczby pomijane", () => {
+    expect(featureRows(way({ incline: "-12%" }))[0]).toMatchObject({ kind: "incline", value: 12 });
+    expect(featureRows(way({ incline: "5%" }))).toEqual([]);
+    expect(featureRows(way({ incline: "up" }))).toEqual([]);
+  });
+});

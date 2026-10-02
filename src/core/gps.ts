@@ -30,8 +30,14 @@ export interface GpsTrack {
   samples: { t: number; km: number }[];
   /** Początek bieżącego postoju — null, gdy jedziemy. */
   stopSince: number | null;
-  /** Na postoju: od kiedy odczyty pokazują ruch, jeszcze niepotwierdzony odległością (null/brak = nie ma). */
+  /** Na postoju: od kiedy odczyty pokazują ruch, jeszcze niepotwierdzony drogą (null/brak = nie ma). */
   moveSince?: number | null;
+  /** Na postoju: pozycja z ostatniego odczytu — prędkość między odczytami, gdy odbiornik jej nie podaje (kotwica stoi w miejscu postoju). */
+  lastFix?: { lat: number; lon: number } | null;
+  /** Na postoju: droga (km) z odczytów z prędkością ≥ resumeKmh od moveSince — ruszenie potwierdza się, gdy dojdzie do confirmMoveM. */
+  moveKm?: number;
+  /** Na postoju: czas ostatniego odczytu z taką prędkością — krótkie stanie (światła) nie zeruje drogi, dłuższe niż resumeHoldMin tak. */
+  lastMoveT?: number | null;
 }
 
 export const GPS = {
@@ -45,13 +51,22 @@ export const GPS = {
   maxKmh: 150,
   /** Przerwa w odczytach (aplikacja zamknięta / ekran wyłączony), od której odcinek jest „luką”. */
   gapMin: 2,
-  /** Luka: droga ≈ linia prosta × ten współczynnik. */
+  /** Luka bez drogi z serwera: droga ≈ linia prosta × ten współczynnik. */
   gapRoadFactor: 1.2,
-  /** Luka: czas jazdy szacowany z tej średniej (km/h) — resztę luki traktujemy jako postój. */
+  /** Luka bez drogi z serwera: czas jazdy szacowany z tej średniej (km/h) — resztę luki traktujemy jako postój. */
   gapAvgKmh: 70,
+  /** Od tylu km przesunięcia w luce warto zapytać serwer o prawdziwą drogę (bliżej linia prosta wystarcza). */
+  gapLookupKm: 2,
+  /**
+   * Droga z serwera, której przejazd trwa dłużej niż luka × tyle, jest nie do przejechania w tym czasie (mapa dopasowała
+   * punkt do innej drogi, objazd) — wtedy liczymy z linii prostej.
+   */
+  gapRoadSlack: 1.5,
   /** Okno średniej prędkości (min) i minimalna długość danych w oknie, żeby jej użyć. */
   windowMin: 10,
   minWindowMin: 5,
+  /** Przyjazd z aktualnego tempa: średnia z GPS obejmuje tyle minut jazdy przed nami, dalej zwykłe prędkości. */
+  liveEtaMin: 15,
   /** Poniżej tej średniej (km/h) nie liczymy przyjazdu z prędkości — to postój lub korek. */
   minLiveKmh: 10,
   sampleEveryMs: 15_000,
@@ -64,6 +79,18 @@ export const GPS = {
    * zgłosić chwilową prędkość albo skok pozycji — bez tego jeden taki odczyt kończył przerwę i zaczynał ją od nowa.
    */
   confirmMoveM: 200,
+  /**
+   * Na postoju ruch liczy się jako ruszenie dopiero od tej prędkości (km/h) — kierowca idący z telefonem (toaleta, sklep na MOP-ie)
+   * ma 5–6 km/h. Do potwierdzenia ruszenia liczy się tylko droga z odczytów z co najmniej tą prędkością.
+   */
+  resumeKmh: 10,
+  /**
+   * Zatrzymanie krótsze niż tyle minut (światła, skrzyżowanie, korek) nie zeruje drogi zbieranej do potwierdzenia ruszenia —
+   * wcześniej każde zwolnienie poniżej resumeKmh zaczynało liczenie 200 m od nowa i w mieście postój nie kończył się wcale.
+   */
+  resumeHoldMin: 3,
+  /** Luka na postoju z przesunięciem mniejszym niż tyle km to spacer / przestawienie auta na parkingu, nie jazda. */
+  gapMinKm: 1,
 } as const;
 
 export function startTrack(fix: Fix): GpsTrack {
@@ -82,56 +109,126 @@ export interface FixResult {
   km: number;
   /** Minuty jazdy od poprzedniego odczytu. */
   driveMin: number;
+  /** Koniec tej jazdy (ms) — zwykle chwila odczytu; w luce, gdy teraz stoimy, wcześniej. */
+  driveEnd: number;
   /** Postój, który właśnie się skończył (ruszyliśmy) — do zaliczenia przerwy/odpoczynku. */
   stopEnded?: { start: number; end: number };
+  /** Luka w odczytach (aplikacja zamknięta) z oszacowaną jazdą i postojem. */
+  gap?: GapEstimate;
 }
 
-/** Przetwarza kolejny odczyt. Odczyty niedokładne lub starsze niż poprzedni nic nie zmieniają. */
-export function addFix(track: GpsTrack, fix: Fix): FixResult {
+/** Droga ciężarówki między pozycją sprzed luki i po niej (z serwera, mapa OSM) — km i czas jazdy (min). */
+export interface GapRoad {
+  km: number;
+  min: number;
+}
+
+/** Co oszacowaliśmy dla luki: kiedy, ile km i jazdy, czy z prawdziwej drogi (road) czy z linii prostej. */
+export interface GapEstimate {
+  start: number;
+  end: number;
+  km: number;
+  driveMin: number;
+  road: boolean;
+  /** Kierowca uzupełnił, co robił (core/gapfix) — jazda w luce z odpowiedzi, nie z oszacowania. */
+  answered?: boolean;
+}
+
+/** Ten odczyt kończy lukę z przesunięciem, przy którym warto znać prawdziwą drogę (GPS.gapLookupKm). */
+export function gapNeedsRoad(track: GpsTrack, fix: Fix): boolean {
+  return fix.accuracy <= GPS.maxAccuracyM && (fix.t - track.lastT) / MIN >= GPS.gapMin && distanceM(track.anchor, fix) >= GPS.gapLookupKm * 1000;
+}
+
+/**
+ * Przetwarza kolejny odczyt. Odczyty niedokładne lub starsze niż poprzedni nic nie zmieniają.
+ * `road` = prawdziwa droga dla luki (z serwera); `stopped` = trwa ręczny / automatyczny postój (AppState.stop).
+ */
+export function addFix(track: GpsTrack, fix: Fix, opts: { road?: GapRoad | null; stopped?: boolean } = {}): FixResult {
   const dt = (fix.t - track.lastT) / MIN;
-  if (dt <= 0 || fix.accuracy > GPS.maxAccuracyM) return { track, km: 0, driveMin: 0 };
+  if (dt <= 0 || fix.accuracy > GPS.maxAccuracyM) return { track, km: 0, driveMin: 0, driveEnd: fix.t };
 
   const straight = distanceM(track.anchor, fix);
   const moved = straight >= Math.max(GPS.minMoveM, fix.accuracy, track.anchor.accuracy);
   const gap = dt >= GPS.gapMin;
-  let km = moved ? (straight / 1000) * (gap ? GPS.gapRoadFactor : 1) : 0;
+  const road = gap && moved && opts.road && opts.road.min <= dt * GPS.gapRoadSlack ? opts.road : null;
+  let km = moved ? (road ? road.km : (straight / 1000) * (gap ? GPS.gapRoadFactor : 1)) : 0;
   if (km / (dt / 60) > GPS.maxKmh) km = 0; // skok pozycji
 
-  let driveMin: number;
-  let moveSince: number | null = null;
-  if (gap) {
-    // Nie wiemy, co działo się między odczytami: jazdę szacujemy z dystansu, resztę uznajemy za postój.
-    driveMin = Math.min(dt, (km / GPS.gapAvgKmh) * 60);
-  } else {
-    const kmh = Math.max(km / (dt / 60), (fix.speed ?? 0) * 3.6);
-    driveMin = kmh >= GPS.movingKmh ? dt : 0;
-    if (driveMin > 0 && track.stopSince !== null) {
-      // Na postoju ruch musi się potwierdzić odległością od miejsca postoju (kotwica stoi w miejscu, dopóki czekamy).
-      const since = track.moveSince ?? track.lastT;
-      // Za szybko jak na drogę od początku ruchu → to skok pozycji, nie ruszenie.
-      const plausible = straight / 1000 / ((fix.t - since) / 60 / MIN) <= GPS.maxKmh;
-      if (straight < GPS.confirmMoveM || !plausible) {
-        return { track: { ...track, lastT: fix.t, moveSince: since }, km: 0, driveMin: 0 };
-      }
-      // Potwierdzone: jedziemy od pierwszego odczytu z ruchem, droga — od miejsca postoju.
-      driveMin = (fix.t - since) / MIN;
-      km = straight / 1000;
+  if (gap) return addGap(track, fix, dt, km, road, moved, !!opts.stopped);
+
+  const kmh = Math.max(km / (dt / 60), (fix.speed ?? 0) * 3.6);
+  let driveMin = kmh >= GPS.movingKmh ? dt : 0;
+  if (driveMin > 0 && track.stopSince !== null) {
+    // Na postoju ruch musi się potwierdzić odległością od miejsca postoju (kotwica stoi w miejscu, dopóki czekamy)
+    // i prędkością jak na auto, nie pieszego: z odbiornika, a gdy jej nie podaje — z przesunięcia od poprzedniego odczytu.
+    const prev = track.lastFix ?? track.anchor;
+    const stepM = distanceM(prev, fix);
+    const stepKmh = fix.speed !== null && Number.isFinite(fix.speed) ? fix.speed * 3.6 : stepM / 1000 / (dt / 60);
+    const here = { lat: fix.lat, lon: fix.lon };
+    if (stepKmh < GPS.resumeKmh) return { track: { ...track, lastT: fix.t, lastFix: here, ...movePending(track, fix.t) }, km: 0, driveMin: 0, driveEnd: fix.t };
+    const pending = movePending(track, fix.t);
+    const since = pending.moveSince ?? track.lastT;
+    // Krok szybszy niż auto → skok pozycji: nie dodajemy go do drogi.
+    const moveKm = (pending.moveKm ?? 0) + (stepM / 1000 / (dt / 60) <= GPS.maxKmh ? stepM / 1000 : 0);
+    if (moveKm * 1000 < GPS.confirmMoveM) {
+      return { track: { ...track, lastT: fix.t, lastFix: here, moveSince: since, moveKm, lastMoveT: fix.t }, km: 0, driveMin: 0, driveEnd: fix.t };
     }
+    // Potwierdzone: jedziemy od pierwszego odczytu z ruchem, droga — zebrana od tego czasu.
+    driveMin = (fix.t - since) / MIN;
+    km = moveKm;
   }
 
   let stopSince = track.stopSince;
   let stopEnded: FixResult["stopEnded"];
   if (driveMin > 0) {
-    // Postój kończy się tam, gdzie zaczyna się jazda (przy luce — na jej końcu minus czas jazdy).
+    // Postój kończy się tam, gdzie zaczyna się jazda.
     const driveStart = fix.t - driveMin * MIN;
     if (stopSince !== null && driveStart > stopSince) stopEnded = { start: stopSince, end: driveStart };
     stopSince = null;
-    // Luka to ruch „bez szczegółów” — nie zaliczamy w niej przerwy, ale postój po niej liczymy od nowa.
-    if (gap && driveMin < dt) stopEnded = undefined;
   } else if (stopSince === null) {
     stopSince = track.lastT;
   }
 
+  const next = nextTrack(track, fix, moved, km, stopSince, null);
+  // Stanie na światłach w trakcie potwierdzania ruszenia — zebrana droga zostaje (do resumeHoldMin).
+  return { track: stopSince !== null ? { ...next, ...movePending(track, fix.t) } : next, km, driveMin, driveEnd: fix.t, stopEnded };
+}
+
+/** Na postoju: niepotwierdzony jeszcze ruch, jeśli ostatni odczyt z prędkością jazdy był niedawno; inaczej wyzerowany. */
+function movePending(track: GpsTrack, t: number): Pick<GpsTrack, "moveSince" | "moveKm" | "lastMoveT"> {
+  const fresh = track.moveSince != null && track.lastMoveT != null && t - track.lastMoveT <= GPS.resumeHoldMin * MIN;
+  return fresh ? { moveSince: track.moveSince, moveKm: track.moveKm ?? 0, lastMoveT: track.lastMoveT } : { moveSince: null, moveKm: 0, lastMoveT: null };
+}
+
+/**
+ * Luka (aplikacja zamknięta, ekran wygaszony): nie wiemy, co się działo, więc szacujemy. Jazda = czas przejazdu prawdziwej drogi
+ * ciężarówką (z serwera) albo linia prosta × 1,2 przy 70 km/h; reszta luki to postój — zaliczany jak każdy inny (przerwa, odpoczynek).
+ * Kolejność: stoimy przed luką albo jedziemy teraz → najpierw postój, potem jazda (ruszyliśmy z postoju, który znamy);
+ * jechaliśmy i teraz stoimy → najpierw jazda, a postój trwa do teraz (dalej liczy się jako bieżący postój).
+ */
+function addGap(track: GpsTrack, fix: Fix, dt: number, km: number, road: GapRoad | null, moved: boolean, stopped: boolean): FixResult {
+  // Na postoju kilkaset metrów w luce (ekran zgasł w drodze do toalety) to nie jazda.
+  if ((track.stopSince !== null || stopped) && km < GPS.gapMinKm) {
+    km = 0;
+    moved = false;
+  }
+  const driveMin = km > 0 ? Math.min(dt, road ? road.min : (km / GPS.gapAvgKmh) * 60) : 0;
+  const gap: GapEstimate | undefined = moved ? { start: track.lastT, end: fix.t, km, driveMin, road: !!road } : undefined;
+  if (driveMin <= 0) {
+    // Nie ruszyliśmy się — luka to postój (np. noc z zamkniętą aplikacją), liczony dalej od początku.
+    return { track: nextTrack(track, fix, moved, km, track.stopSince ?? track.lastT, null), km, driveMin: 0, driveEnd: fix.t, gap };
+  }
+  const movingNow = (fix.speed ?? 0) * 3.6 >= GPS.movingKmh;
+  if (track.stopSince !== null || stopped || movingNow) {
+    const start = track.stopSince ?? track.lastT;
+    const end = fix.t - driveMin * MIN;
+    return { track: nextTrack(track, fix, moved, km, null, null), km, driveMin, driveEnd: fix.t, stopEnded: end > start ? { start, end } : undefined, gap };
+  }
+  const driveEnd = track.lastT + driveMin * MIN;
+  return { track: nextTrack(track, fix, moved, km, driveEnd < fix.t ? driveEnd : null, null), km, driveMin, driveEnd, gap };
+}
+
+function nextTrack(track: GpsTrack, fix: Fix, moved: boolean, km: number, stopSince: number | null, moveSince: number | null): GpsTrack {
   const odoKm = track.odoKm + km;
   const last = track.samples[track.samples.length - 1];
   const samples = fix.t - last.t >= GPS.sampleEveryMs ? [...track.samples, { t: fix.t, km: odoKm }] : track.samples;
@@ -141,17 +238,13 @@ export function addFix(track: GpsTrack, fix: Fix): FixResult {
   const kept = firstIn > 1 ? samples.slice(firstIn - 1) : samples;
 
   return {
-    track: {
-      anchor: moved ? { lat: fix.lat, lon: fix.lon, accuracy: fix.accuracy } : track.anchor,
-      lastT: fix.t,
-      odoKm,
-      samples: kept,
-      stopSince,
-      moveSince,
-    },
-    km,
-    driveMin,
-    stopEnded,
+    anchor: moved ? { lat: fix.lat, lon: fix.lon, accuracy: fix.accuracy } : track.anchor,
+    lastT: fix.t,
+    odoKm,
+    samples: kept,
+    stopSince,
+    moveSince,
+    lastFix: stopSince !== null ? { lat: fix.lat, lon: fix.lon } : null,
   };
 }
 
@@ -167,11 +260,6 @@ export function recentSpeed(track: GpsTrack | null, now: number): number | undef
   const span = (end.t - start.t) / MIN;
   if (span < GPS.minWindowMin) return undefined;
   return ((end.km - start.km) / span) * 60;
-}
-
-/** Ta sama prędkość dla każdego typu drogi — przyjazd liczony z aktualnej średniej. */
-export function uniformSpeeds(kmh: number): Speeds {
-  return Object.fromEntries(ROAD_TYPES.map((t) => [t, kmh])) as Record<RoadType, number>;
 }
 
 /** Dolicza jazdę do liczników kierowcy. */

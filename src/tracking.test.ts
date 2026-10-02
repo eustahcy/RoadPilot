@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { distanceM, Fix } from "./core/gps";
 import { defaultState } from "./state";
-import { applyFix, endDay, finishStop, startDay, startStop } from "./tracking";
+import { applyFix, endDay, finishStop, startDay, startStop, TRACKER_TTL_MS } from "./tracking";
 
 const MIN = 60_000;
 const NOW = Date.UTC(2026, 8, 30, 12, 0);
@@ -31,6 +31,34 @@ describe("ręczny postój + GPS", () => {
     expect(s.driver.sinceBreakMin).toBeGreaterThan(0);
     expect(s.driver.sinceBreakMin).toBeLessThanOrEqual(1);
     expect(s.driver.splitBreakTaken).toBe(false);
+  });
+
+  it("jazda po mieście ze staniem na światłach co ~125 m kończy przerwę po 200 m jazdy", () => {
+    let s = startStop(parked(0), NOW, 45);
+    for (let m = 0.25; m <= 46; m += 0.25) s = applyFix(s, fix(m, 0));
+    let t = NOW + 46 * MIN, km = 0, endedAt = -1;
+    // Odczyt co 1 s: 15 s jazdy 30 km/h, 10 s stania — wcześniej każde stanie zaczynało liczenie 200 m od nowa.
+    for (let i = 0; i < 600 && endedAt < 0; i++) {
+      t += 1000;
+      const kmh = i % 25 < 15 ? 30 : 0;
+      km += kmh / 3600;
+      s = applyFix(s, { t, lat: km / KM_PER_DEG, lon: 0, accuracy: 10, speed: kmh / 3.6 });
+      if (!s.stop) endedAt = i;
+    }
+    expect(endedAt).toBeGreaterThan(0);
+    expect(km).toBeLessThan(0.25);
+    expect(s.driver.sinceBreakMin).toBeLessThanOrEqual(1);
+  });
+
+  it("spacer z telefonem (6 km/h) na przerwie nie kończy jej", () => {
+    let s = startStop(parked(10), NOW + 10 * MIN, 45);
+    let t = NOW + 10 * MIN, km = 0;
+    for (let i = 0; i < 300; i++) {
+      t += 1000;
+      km += 6 / 3600;
+      s = applyFix(s, { t, lat: km / KM_PER_DEG, lon: 0, accuracy: 10, speed: 6 / 3.6 });
+    }
+    expect(s.stop).not.toBeNull();
   });
 
   it("pojedynczy fałszywy odczyt ruchu nie kończy przerwy (nie zaczyna jej od nowa)", () => {
@@ -87,3 +115,80 @@ describe("dzień pracy", () => {
     expect(s.driver.drivenTodayMin).toBeLessThanOrEqual(1);
   });
 });
+
+describe("dwa urządzenia na jednym koncie", () => {
+  /** Jazda 60 km/h od `from` do `to` minut na urządzeniu `dev`. */
+  function drive(s: ReturnType<typeof defaultState>, dev: string, from: number, to: number) {
+    for (let m = from; m <= to; m += 0.25) s = applyFix(s, fix(m, m), dev);
+    return s;
+  }
+
+  it("jazdę dolicza tylko urządzenie, które ją liczy — drugie prowadzi tylko własny licznik", () => {
+    const phone = drive(defaultState(NOW), "phone", 0, 10);
+    expect(phone.tracker).toMatchObject({ device: "phone" });
+    expect(phone.driver.drivenTodayMin).toBeCloseTo(10, 0);
+    // Tablet dostał stan z konta i też ma GPS: nie dolicza tych samych minut drugi raz.
+    const tablet = drive({ ...phone, track: null }, "tablet", 10.25, 12);
+    expect(tablet.driver.drivenTodayMin).toBe(phone.driver.drivenTodayMin);
+    expect(tablet.track).not.toBeNull();
+  });
+
+  it("gdy liczące urządzenie milknie (aplikacja w tle), po TRACKER_TTL_MS przejmuje drugie — bez podwójnego liczenia", () => {
+    const phone = drive(defaultState(NOW), "phone", 0, 10);
+    const ttlMin = TRACKER_TTL_MS / MIN;
+    let tablet = drive({ ...phone, track: null }, "tablet", 10.25, 10 + ttlMin - 0.25);
+    expect(tablet.driver.drivenTodayMin).toBe(phone.driver.drivenTodayMin);
+    tablet = drive(tablet, "tablet", 10 + ttlMin + 0.25, 20);
+    expect(tablet.tracker).toMatchObject({ device: "tablet" });
+    // Doliczone tylko minuty od przejęcia (nie cały czas od startu licznika tabletu).
+    expect(tablet.driver.drivenTodayMin - phone.driver.drivenTodayMin).toBeCloseTo(20 - 10 - ttlMin, 0);
+  });
+});
+
+describe("luka — aplikacja zamknięta", () => {
+  const moving = (min: number, km: number): Fix => ({ ...fix(min, km), speed: 22 });
+  it("z kontem odczyt po luce czeka na drogę z serwera; potem liczy jazdę z niej i zalicza postój jako przerwę", () => {
+    let s = defaultState(NOW);
+    s = { ...s, driver: { ...s.driver, drivenTodayMin: 100, sinceBreakMin: 100 } };
+    for (let m = 0; m <= 10; m += 0.25) s = applyFix(s, fix(m, m), undefined, { lookup: true });
+    const before = s.driver.drivenTodayMin;
+    const waiting = applyFix(s, moving(130, 110), undefined, { lookup: true });
+    expect(waiting.pendingGap?.fix.t).toBe(NOW + 130 * MIN);
+    expect(waiting.driver).toBe(s.driver);
+    // Serwer: 115 km, 70 min jazdy → reszta (50 min) to przerwa przed ruszeniem.
+    s = applyFix({ ...waiting, pendingGap: null }, waiting.pendingGap!.fix, undefined, { road: { km: 115, min: 70 } });
+    expect(s.driver.drivenTodayMin).toBeCloseTo(before + 70, 5);
+    expect(s.driver.sinceBreakMin).toBeCloseTo(70, 5);
+    const day = s.history[0];
+    expect(day.gaps?.[0]).toMatchObject({ km: 115, driveMin: 70, road: true });
+    expect(day.stops.at(-1)).toMatchObject({ start: NOW + 10 * MIN, end: NOW + 60 * MIN, est: true });
+  });
+
+  it("serwer milczy — po GAP_WAIT_MS liczymy z linii prostej", () => {
+    let s = defaultState(NOW);
+    for (let m = 0; m <= 10; m += 0.25) s = applyFix(s, fix(m, m), undefined, { lookup: true });
+    s = applyFix(s, fix(130, 110), undefined, { lookup: true });
+    s = applyFix(s, fix(130.1, 110), undefined, { lookup: true }); // 6 s — jeszcze czekamy
+    expect(s.pendingGap).toBeTruthy();
+    s = applyFix(s, fix(131, 110), undefined, { lookup: true });
+    expect(s.pendingGap).toBeNull();
+    expect(s.history[0].gaps?.[0]).toMatchObject({ road: false });
+  });
+
+  it("przekroczenie w czasie jazdy trafia do historii z pozycją", () => {
+    let s = defaultState(NOW);
+    s = { ...s, driver: { ...s.driver, drivenTodayMin: 265, sinceBreakMin: 265 } };
+    for (let m = 0; m <= 15; m += 0.25) s = applyFix(s, fix(m, m));
+    const v = s.history[0].violations?.find((x) => x.kind === "continuous");
+    expect(v).toMatchObject({ open: true, limitMin: 270 });
+    expect(v!.overMin).toBeCloseTo(10, 0);
+    expect(v!.lat).toBeGreaterThan(0);
+  });
+
+  it("„Rozpocznij dzień” po za krótkim odpoczynku zapisuje przekroczenie", () => {
+    let s = endDay(parked(0), NOW);
+    s = startDay(s, NOW + 7 * 60 * MIN);
+    expect(s.history.flatMap((d) => d.violations ?? []).find((x) => x.kind === "shortRest")).toMatchObject({ overMin: 120 });
+  });
+});
+

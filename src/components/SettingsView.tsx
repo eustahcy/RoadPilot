@@ -1,3 +1,5 @@
+import { BREAK_STOP } from "../core/breakstop";
+import { autoTheme } from "../mapStyle";
 import { useEffect, useState } from "react";
 import { AdminUser, api, ApiError, User } from "../api";
 import { DEFAULT_SPEEDS, ROAD_LABELS, ROAD_TYPES } from "../core/route";
@@ -11,7 +13,9 @@ import { EXTENDED_WORK_MIN, WorkSettings } from "../core/workday";
 import { MUSIC_APPS, MusicApp } from "../core/apps";
 import { DEFAULT_HUD_ITEMS, HUD_ITEMS, HUD_STYLES, HudItems } from "../hudConfig";
 import { floatingSupported } from "../floating";
-import { DEFAULT_VEHICLE, NavAccess, ROUTE_TYPES, Vehicle } from "../nav";
+import { SupportContent } from "./Support";
+import { LicenseAdmin, LicensePanel, licenseStatus, premiumText } from "./License";
+import { DEFAULT_VEHICLE, NavAccess, NO_AVOID, ROUTE_TYPES, Vehicle } from "../nav";
 import { MapDataSection } from "./MapConsent";
 import { AdminMap } from "./AdminMap";
 import { REPORT_KINDS } from "../collect";
@@ -41,10 +45,15 @@ interface AccountProps {
   onLogout: () => Promise<void>;
   onSyncNow: () => Promise<void>;
   onDelete: (password: string) => Promise<void>;
+  /** Dane konta po zmianie na serwerze (np. Premium z klucza). */
+  onUser: (u: User) => void;
 }
 
-export type SettingsCategory = "account" | "friends" | "planning" | "work" | "service" | "vehicle" | "gps" | "hud" | "apps" | "data" | "admin";
+export type SettingsCategory = "account" | "license" | "friends" | "planning" | "work" | "service" | "vehicle" | "gps" | "hud" | "apps" | "data" | "support" | "admin";
 type Category = SettingsCategory;
+
+/** Zasięg listy „Po drodze” do wyboru (km). */
+export const AHEAD_KM_OPTIONS = [20, 30, 50, 80];
 
 export function SettingsView({ initialCategory, navAccess, state, now, onSettings, onPlanTime, onReset, account, friends }: Props) {
   const { settings, driver } = state;
@@ -59,6 +68,7 @@ export function SettingsView({ initialCategory, navAccess, state, now, onSetting
 
   const categories: { id: Category; label: string; sub: string; icon: string }[] = [
     { id: "account", label: "Konto", sub: account.user ? `${account.user.email}${account.user.premium ? " · Premium" : ""}` : "Bez konta — dane tylko w tym telefonie", icon: "M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8ZM4 21a8 8 0 0 1 16 0" },
+    { id: "license", label: "Licencja", sub: licenseStatus(account.user), icon: "M8 15a4 4 0 1 0 0-8 4 4 0 0 0 0 8ZM12 11h9M18 11v3M21 11v2" },
     { id: "friends", label: "Znajomi", sub: friends.api ? (() => { const n = friends.api.friends.filter((f) => f.relation === "accepted").length; const p = friends.api.friends.filter((f) => f.relation === "pending").length; return `${n ? `${n} ${n === 1 ? "znajomy" : n < 5 ? "znajomych" : "znajomych"}` : "Nikogo jeszcze nie ma"}${p ? ` · ${p} do akceptacji` : ""}${settings.friendsShare ? "" : " · pozycja ukryta"}`; })() : "Kto gdzie jedzie — wymaga konta", icon: "M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8ZM2 21a7 7 0 0 1 14 0M16 3.5a4 4 0 0 1 0 7.5M22 21a7 7 0 0 0-5-6.7" },
     { id: "planning", label: "Planowanie", sub: "Wydłużenia, godzina planowania, prędkości", icon: "M4 12h4l3-8 4 16 3-8h2" },
     { id: "work", label: "Czas pracy", sub: `Limit ${fmtHm(settings.work.limitMin)} · przypomnienia ${settings.work.remind ? "włączone" : "wyłączone"}`, icon: "M12 7v5l3 2M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18Z" },
@@ -67,6 +77,7 @@ export function SettingsView({ initialCategory, navAccess, state, now, onSetting
     { id: "gps", label: "GPS", sub: settings.autoStop ? "Postój włącza się sam" : "Postój ręcznie", icon: "M12 21s-7-6.2-7-11a7 7 0 0 1 14 0c0 4.8-7 11-7 11ZM12 12.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Z" },
     { id: "hud", label: "HUD", sub: `Styl: ${HUD_STYLES.find((h) => h.id === settings.hudStyle)!.label.toLowerCase()} · elementy, okienko`, icon: "M3 5h18v14H3zM7 15h4M7 11h10" },
     { id: "apps", label: "Muzyka", sub: MUSIC_APPS.find((a) => a.id === settings.musicApp)!.label, icon: "M9 18V5l11-2v13M9 18a3 3 0 1 1-6 0 3 3 0 0 1 6 0ZM20 16a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z" },
+    { id: "support", label: "Wsparcie", sub: "Kto tworzy RoadPilot i jak pomóc", icon: "M12 20s-8-5-8-11a4.5 4.5 0 0 1 8-2.8A4.5 4.5 0 0 1 20 9c0 6-8 11-8 11Z" },
     { id: "data", label: "Dane i prywatność", sub: "Co wysyłamy, czyszczenie danych", icon: "M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6l8-3Z" },
     ...(account.user?.admin ? [{ id: "admin" as const, label: "Administracja", sub: "Premium, limity TomTom, dane do mapy", icon: "M12 2l3 6 6 .9-4.5 4.3 1 6.3L12 16.5 6.5 19.5l1-6.3L3 8.9 9 8l3-6Z" }] : []),
   ];
@@ -94,7 +105,7 @@ export function SettingsView({ initialCategory, navAccess, state, now, onSetting
 
       {cat === "account" && <AccountSection {...account} />}
 
-      {cat === "friends" && <FriendsSettings api={friends.api} share={settings.friendsShare} onShare={(friendsShare) => set({ friendsShare })} gpsOn={friends.gpsOn} onLogin={account.onLogin} me={friends.me} now={now} mapToken={navAccess === "premium" ? account.token : null} />}
+      {cat === "friends" && <FriendsSettings api={friends.api} share={settings.friendsShare} onShare={(friendsShare) => set({ friendsShare })} gpsOn={friends.gpsOn} onLogin={account.onLogin} me={friends.me} now={now} mapToken={navAccess === "premium" ? account.token : null} mapStyle={{ theme: settings.mapTheme === "auto" || settings.mapTheme === "glass" ? autoTheme(undefined, now) : settings.mapTheme, vehicle: settings.vehicle }} />}
 
       {cat === "planning" && (
         <>
@@ -175,13 +186,7 @@ export function SettingsView({ initialCategory, navAccess, state, now, onSetting
 
       {cat === "vehicle" && <VehicleSection settings={settings} navAccess={navAccess} onChange={set} />}
 
-      {cat === "admin" && account.user?.admin && account.token && (
-        <>
-          <AdminStatsCard token={account.token} />
-          <AdminMap token={account.token} />
-          <AdminSection token={account.token} me={account.user.id} />
-        </>
-      )}
+      {cat === "admin" && account.user?.admin && account.token && <AdminPanel token={account.token} me={account.user.id} />}
 
       {cat === "apps" && (
         <section className="card">
@@ -201,6 +206,9 @@ export function SettingsView({ initialCategory, navAccess, state, now, onSetting
         </section>
       )}
 
+      {cat === "support" && <section className="card"><SupportContent /></section>}
+      {cat === "license" && <section className="card"><LicensePanel token={account.token ?? null} user={account.user ?? null} onUser={account.onUser} /></section>}
+
       {cat === "data" && <MapDataSection token={account.token} consent={!!account.user?.dataConsent} onChange={account.onConsent} />}
 
       {cat === "data" && (
@@ -212,8 +220,10 @@ export function SettingsView({ initialCategory, navAccess, state, now, onSetting
             : "Bez konta wszystko jest zapisane tylko w tym urządzeniu."}{" "}
           W trybie HUD przybliżona pozycja (z dokładnością ~1 km) trafia do OpenStreetMap (Overpass) i Open-Meteo — po
           najbliższe MOP-y i parkingi, nazwy dróg i miejscowości oraz pogodę. Przy włączonej nawigacji wpisywany cel,
-          punkt startu (pozycja GPS) i dane pojazdu idą przez serwer RoadPilot do TomTom; trasa zostaje tylko w telefonie. Kafelki mapy w HUD pobiera serwer RoadPilot — TomTom nie widzi Twojego telefonu.
+          punkt startu (pozycja GPS) i dane pojazdu idą do serwera RoadPilot, który liczy trasę własnym silnikiem (OpenStreetMap); wpisywany cel idzie przez serwer RoadPilot do TomTom (wyszukiwanie), a trasa poza Polską — awaryjnie do TomTom. Trasa zostaje tylko w telefonie; dom, ulubione miejsca i ostatnie cele (z datą, długością i czasem trasy) są zapisane w telefonie, a z kontem — także na koncie RoadPilot (usuniesz je przyciskiem × przy wyszukiwarce celu). Kafelki mapy w HUD pobiera serwer RoadPilot — TomTom nie widzi Twojego telefonu.
           {account.user ? " Znajomi (Ustawienia → Znajomi): przy włączonym GPS i udostępnianiu serwer RoadPilot trzyma Twoją ostatnią pozycję, prędkość, postój, cel i stan tachografu — widzą je tylko zaakceptowani znajomi; wyłączenie udostępniania kasuje te dane." : ""}
+          {account.user ? " Po powrocie do aplikacji po przerwie w odczytach GPS ostatnia i obecna pozycja idą do serwera RoadPilot, który liczy drogę ciężarówki (do szacunku jazdy i postoju). Przy otwarciu przekroczenia w Historii serwer dostaje jego pozycję, żeby podać miejscowość, drogę i MOP. Serwer tych pozycji nie zapisuje." : ""}
+          {account.user ? " Opinie o parkingu przy celu (Trasa → nawigacja): serwer zapisuje miejsce celu, ocenę i komentarz z Twoim kontem; inni kierowcy widzą je bez Twojego imienia i e-maila. Swoją opinię usuniesz w każdej chwili, a usunięcie konta kasuje wszystkie." : ""}
         </p>
         {confirmReset ? (
           <div className="row-buttons">
@@ -233,7 +243,7 @@ export function SettingsView({ initialCategory, navAccess, state, now, onSetting
 
 const fmtT = (kg: number) => String(Math.round(kg / 100) / 10).replace(".", ",");
 
-const ADR_OPTIONS: { id: Vehicle["adr"]; label: string }[] = [
+export const ADR_OPTIONS: { id: Vehicle["adr"]; label: string }[] = [
   { id: "none", label: "Brak (bez ADR)" },
   { id: "B", label: "B" },
   { id: "C", label: "C" },
@@ -252,29 +262,12 @@ function VehicleSection({ settings, navAccess, onChange }: { settings: Settings;
         <h3>Nawigacja RoadPilot dla ciężarówek{navAccess === "premium" ? " — włączona" : ""}</h3>
         <p className="muted small">
           {navAccess === "premium"
-            ? "W zakładce Trasa wyszukasz cel, a trasa uwzględni wymiary, masę i ADR; w HUD zobaczysz manewry i pasy. Cel, punkt startu i dane pojazdu idą przez serwer RoadPilot do TomTom."
+            ? "W zakładce Trasa wyszukasz cel, a trasa uwzględni wymiary, masę i ADR; w HUD zobaczysz manewry i pasy. Trasy liczy własny silnik RoadPilot (OpenStreetMap, Polska); wyszukiwanie celu przez serwer RoadPilot w TomTom."
             : navAccess === "guest"
               ? "Dostępne w RoadPilot Premium — zaloguj się na konto."
               : "Dostępne w RoadPilot Premium — wkrótce do kupienia."}
         </p>
       </section>
-      {navAccess === "premium" && (
-        <section className="card">
-          <div className="eyebrow">Silnik tras</div>
-          <div className="hud-style-pick engines">
-            {([
-              ["tomtom", "TomTom", "Pełne dane w Europie, korki na żywo, pasy ruchu i ograniczenia prędkości."],
-              ["roadpilot", "RoadPilot (beta)", "Własny silnik na OpenStreetMap — tylko Polska, bez korków i pasów, bez limitów TomTom."],
-            ] as const).map(([id, label, hint]) => (
-              <button key={id} className={`hud-style-opt ${settings.navEngine === id ? "active" : ""}`} aria-pressed={settings.navEngine === id} onClick={() => onChange({ navEngine: id })}>
-                <strong>{label}</strong>
-                <small>{hint}</small>
-              </button>
-            ))}
-          </div>
-          <p className="muted small">Gdy limit TomTom się wyczerpie, trasy w Polsce liczy automatycznie silnik RoadPilot.</p>
-        </section>
-      )}
       {navAccess === "premium" && (
         <section className="card">
           <div className="eyebrow">Rodzaj trasy</div>
@@ -287,6 +280,36 @@ function VehicleSection({ settings, navAccess, onChange }: { settings: Settings;
             ))}
           </div>
           <p className="muted small">Działa od następnej wyznaczonej trasy. Alternatywy w porównaniu tras są zawsze liczone dla wybranego rodzaju.</p>
+          <Toggle checked={!!v.avoid?.tolls} onChange={(tolls) => setV({ avoid: { ...(v.avoid ?? NO_AVOID), tolls } })} label="Unikaj dróg płatnych" />
+          <Toggle checked={!!v.avoid?.motorways} onChange={(motorways) => setV({ avoid: { ...(v.avoid ?? NO_AVOID), motorways } })} label="Unikaj autostrad" />
+          <Toggle checked={!!v.avoid?.ferries} onChange={(ferries) => setV({ avoid: { ...(v.avoid ?? NO_AVOID), ferries } })} label="Unikaj promów" />
+          <Toggle checked={!!v.avoid?.unpaved} onChange={(unpaved) => setV({ avoid: { ...(v.avoid ?? NO_AVOID), unpaved } })} label="Unikaj dróg gruntowych" />
+        </section>
+      )}
+      {navAccess === "premium" && (
+        <section className="card">
+          <div className="eyebrow">Po drodze</div>
+          <p className="muted small">MOP-y, parkingi TIR i stacje przed Tobą — lista pod przyciskiem P w Nawigacji i najbliższe pod prędkością.</p>
+          <label className="field">
+            <span className="field-label">Zasięg listy</span>
+            <select value={settings.aheadKm} onChange={(e) => onChange({ aheadKm: Number(e.target.value) })}>
+              {AHEAD_KM_OPTIONS.map((km) => <option key={km} value={km}>{km} km</option>)}
+            </select>
+          </label>
+          <Toggle checked={settings.aheadStrip.mop} onChange={(mop) => onChange({ aheadStrip: { ...settings.aheadStrip, mop } })} label="Najbliższy MOP pod prędkością" />
+          <Toggle checked={settings.aheadStrip.parking} onChange={(parking) => onChange({ aheadStrip: { ...settings.aheadStrip, parking } })} label="Najbliższy parking TIR pod prędkością" />
+          <Toggle checked={settings.aheadStrip.fuel} onChange={(fuel) => onChange({ aheadStrip: { ...settings.aheadStrip, fuel } })} label="Najbliższa stacja pod prędkością" />
+          <Toggle checked={settings.aheadStrip.camera !== false} onChange={(camera) => onChange({ aheadStrip: { ...settings.aheadStrip, camera } })} label="Najbliższy fotoradar i odcinkowy pomiar pod prędkością" hint="W czerwonej ramce — tylko z trasą." />
+          <Toggle checked={settings.aheadStrip.toll !== false} onChange={(toll) => onChange({ aheadStrip: { ...settings.aheadStrip, toll } })} label="Najbliższe bramki pod prędkością" hint="W fioletowej ramce — tylko z trasą." />
+          <Toggle checked={settings.breakStop.on} onChange={(on) => onChange({ breakStop: { ...settings.breakStop, on } })} label="Proponuj MOP na przerwę" hint="Nawigacja zaproponuje dodanie do trasy MOP-u lub parkingu TIR, do którego dojedziesz przed końcem 4,5 h jazdy." />
+          {settings.breakStop.on && (
+            <label className="field">
+              <span className="field-label">Zapas przed limitem jazdy</span>
+              <select value={settings.breakStop.marginMin} onChange={(e) => onChange({ breakStop: { ...settings.breakStop, marginMin: Number(e.target.value) } })}>
+                {BREAK_STOP.margins.map((m) => <option key={m} value={m}>{m} min</option>)}
+              </select>
+            </label>
+          )}
         </section>
       )}
       <section className="card">
@@ -327,9 +350,9 @@ function HudSection({ settings, onChange }: { settings: Settings; onChange: (pat
   return (
     <>
       <section className="card">
-        <div className="eyebrow">Mapa w stylu „Nawigacja”</div>
+        <div className="eyebrow">Mapa w nawigacji</div>
         <div className="hud-style-pick engines">
-          {([["auto", "Automatycznie", "Dzień / noc z pogody, a bez niej z zegara (7–19)."], ["day", "Dzień", "Jasne tło, szare drogi."], ["night", "Noc", "Ciemne tło — jak dotąd."]] as const).map(([id, label, hint]) => (
+          {([["auto", "Automatycznie", "Dzień / noc z pogody, a bez niej z zegara (7–19)."], ["day", "Dzień", "Jasne tło, szare drogi."], ["night", "Noc", "Ciemne tło — jak dotąd."], ["glass", "Szkło", "Półprzezroczyste panele z rozmyciem; mapa dzień / noc jak w Auto."]] as const).map(([id, label, hint]) => (
             <button key={id} className={`hud-style-opt ${settings.mapTheme === id ? "active" : ""}`} aria-pressed={settings.mapTheme === id} onClick={() => onChange({ mapTheme: id })}>
               <strong>{label}</strong>
               <small>{hint}</small>
@@ -345,9 +368,7 @@ function HudSection({ settings, onChange }: { settings: Settings; onChange: (pat
             <button key={h.id} className={`hud-style-opt ${style === h.id ? "active" : ""}`} aria-pressed={style === h.id} onClick={() => onChange({ hudStyle: h.id })}>
               <span className={`hud-style-preview ${h.id}`} aria-hidden>
                 <b>78</b>
-                {h.id === "full" ? <><i /><i /><i /></> : h.id === "nav" ? (
-                  <svg viewBox="0 0 100 34" aria-hidden><path d="M50 34 Q52 18 70 4" stroke="#3d8bff" strokeWidth="6" fill="none" strokeLinecap="round" /><path d="M50 22 l6 12 l-6 -3 l-6 3 Z" fill="#44f07c" /></svg>
-                ) : <em>213 km · 15:12 · 1 h 52</em>}
+                {h.id === "full" ? <><i /><i /><i /></> : <em>213 km · 15:12 · 1 h 52</em>}
               </span>
               <strong>{h.label}</strong>
               <small>{h.hint}</small>
@@ -444,7 +465,7 @@ function WorkSection({ w, reducedRestsLeft, onChange }: { w: WorkSettings; reduc
   );
 }
 
-function AccountSection({ user, sync, onLogin, onLogout, onSyncNow, onDelete }: AccountProps) {
+function AccountSection({ user, token, sync, onLogin, onLogout, onSyncNow, onDelete, onUser }: AccountProps) {
   const [confirmOut, setConfirmOut] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [password, setPassword] = useState("");
@@ -478,6 +499,7 @@ function AccountSection({ user, sync, onLogin, onLogout, onSyncNow, onDelete }: 
       <p className={`premium-line ${user.premium ? "on" : ""}`}>
         {user.admin ? "Administrator · Premium" : user.premium ? `Premium ${premiumText(user.premiumUntil ?? null)}` : "Bez Premium — wkrótce do kupienia"}
       </p>
+      {!user.admin && token && <LicensePanel token={token} user={user} onUser={onUser} />}
       <p className={`sync-line ${sync.kind}`}>
         <span className="sync-dot" aria-hidden />
         {syncText(sync)}
@@ -512,11 +534,81 @@ function AccountSection({ user, sync, onLogin, onLogout, onSyncNow, onDelete }: 
   );
 }
 
-/** „bez terminu” (rok 9999) albo „do 30.10.2026”. */
-function premiumText(until: number | null) {
-  if (until === null || new Date(until).getFullYear() >= 9999) return "bez terminu";
-  return `do ${new Date(until).toLocaleDateString("pl-PL")}`;
+/** Klucz Premium od administratora: wpisanie (wielkość liter, spacje i myślniki bez znaczenia) → Premium od razu. */
+
+interface MapSuspect { osm_id: string; kind: string; value: number | null; users: number; lat: number; lon: number; name: string; hidden: boolean }
+interface BadTurnGroup { lat: number; lon: number; users: number; note: string; confirmed: boolean }
+
+const KIND_PL: Record<string, string> = { height: "wysokość", weight: "masa", hgv: "zakaz dla ciężarówek" };
+const osmLink = (id: string) => `https://www.openstreetmap.org/${({ n: "node", w: "way", r: "relation" } as Record<string, string>)[id[0]]}/${id.slice(1)}`;
+
+/**
+ * Administracja → Błędy mapy: ograniczenia, przez które przejechało kilku kierowców z pojazdem, którego one nie dopuszczają
+ * (zadanie co tydzień), ukryte ograniczenia i zgłoszenia „zły manewr” (od 2 kierowców silnik omija manewr).
+ */
+function MapCheckCard({ token }: { token: string }) {
+  const [data, setData] = useState<{ suspects: MapSuspect[]; hidden: (MapSuspect & { kind: string })[]; badTurns: BadTurnGroup[] } | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const load = () => api<{ suspects: MapSuspect[]; hidden: MapSuspect[]; badTurns: BadTurnGroup[] }>("GET", "/admin/mapcheck", undefined, token).then(setData).catch((e) => setError(e instanceof Error ? e.message : "Błąd"));
+  useEffect(() => {
+    load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token]);
+  const override = async (osmId: string, kind: string, hide: boolean) => {
+    await api("POST", "/admin/override", { osmId, kind, hide }, token).catch((e) => setError(e instanceof Error ? e.message : "Błąd"));
+    load();
+  };
+  return (
+    <section className="card">
+      <div className="eyebrow">Błędy mapy — z jazdy kierowców</div>
+      <p className="muted small">Ograniczenia, przez które przejechało co najmniej 3 kierowców z pojazdem, którego one nie dopuszczają (lista odświeżana co tydzień). Ukryte ograniczenie od razu przestaje zmieniać trasy i ostrzegać; poprawkę warto też zrobić w OpenStreetMap.</p>
+      {error && <p className="auth-error">{error}</p>}
+      {!data ? <p className="muted">Wczytuję…</p> : (
+        <>
+          {data.suspects.length ? (
+            <ul className="mapcheck-list">
+              {data.suspects.map((s) => (
+                <li key={s.osm_id + s.kind}>
+                  <span><b>{KIND_PL[s.kind] ?? s.kind}{s.value !== null ? ` ${String(s.value).replace(".", ",")}` : ""}</b> · {s.name || s.osm_id} · <i>{s.users} kierowców</i></span>
+                  <a href={osmLink(s.osm_id)} target="_blank" rel="noreferrer">OSM</a>
+                  <button className="ghost" onClick={() => override(s.osm_id, s.kind, !s.hidden)}>{s.hidden ? "Przywróć" : "Ukryj"}</button>
+                </li>
+              ))}
+            </ul>
+          ) : <p className="muted small">Brak podejrzanych ograniczeń.</p>}
+          {data.hidden.length > 0 && (
+            <>
+              <div className="eyebrow">Ukryte ograniczenia</div>
+              <ul className="mapcheck-list">
+                {data.hidden.map((s) => (
+                  <li key={s.osm_id + s.kind}>
+                    <span><b>{KIND_PL[s.kind] ?? s.kind}{s.value !== null ? ` ${String(s.value).replace(".", ",")}` : ""}</b> · {s.name || s.osm_id}</span>
+                    <a href={osmLink(s.osm_id)} target="_blank" rel="noreferrer">OSM</a>
+                    <button className="ghost" onClick={() => override(s.osm_id, s.kind, false)}>Przywróć</button>
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
+          <div className="eyebrow">Zgłoszone złe manewry</div>
+          {data.badTurns.length ? (
+            <ul className="mapcheck-list">
+              {data.badTurns.map((t, i) => (
+                <li key={i}>
+                  <span><b>{t.note || "Manewr"}</b> · <i>{t.users} {t.users === 1 ? "kierowca" : "kierowców"}{t.confirmed ? " — omijany" : ""}</i></span>
+                  <a href={`https://www.openstreetmap.org/?mlat=${t.lat}&mlon=${t.lon}#map=18/${t.lat}/${t.lon}`} target="_blank" rel="noreferrer">Mapa</a>
+                </li>
+              ))}
+            </ul>
+          ) : <p className="muted small">Brak zgłoszeń.</p>}
+        </>
+      )}
+    </section>
+  );
 }
+
+/** Administracja: klucze Premium do przekazania (SMS, komunikator) — jednorazowe, na wybraną liczbę dni. */
+
 
 /** Administracja: wyszukanie konta i nadanie / odebranie Premium. Zakup Premium jeszcze nie działa. */
 interface AdminStats {
@@ -532,9 +624,77 @@ interface AdminStats {
   recent: { kind: string; lat: number; lon: number; value: number | null; note: string; at: number; email: string }[];
 }
 
-const API_LABELS: Record<string, string> = { search: "TomTom — wyszukiwanie", route: "TomTom — trasy", tiles: "TomTom — mapa (kafelki)" };
+const API_LABELS: Record<string, string> = { search: "TomTom — wyszukiwanie", route: "TomTom — trasy", tiles: "TomTom — mapa (kafelki)", traffic: "TomTom — korki" };
 
 /** Zużycie limitów TomTom (próg 80%) i dane zebrane do mapy. */
+type AdminTab = "overview" | "users" | "licenses" | "map" | "app";
+const ADMIN_TABS: { id: AdminTab; label: string; icon: string }[] = [
+  { id: "overview", label: "Przegląd", icon: "M4 20V10M10 20V4M16 20v-7M22 20H2" },
+  { id: "users", label: "Użytkownicy", icon: "M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8ZM2 21a7 7 0 0 1 14 0M16 3.5a4 4 0 0 1 0 7.5M22 21a7 7 0 0 0-5-6.7" },
+  { id: "licenses", label: "Licencje", icon: "M8 15a4 4 0 1 0 0-8 4 4 0 0 0 0 8ZM12 11h9M18 11v3M21 11v2" },
+  { id: "map", label: "Mapa i dane", icon: "M9 4 3 6v14l6-2 6 2 6-2V4l-6 2-6-2ZM9 4v14M15 6v14" },
+  { id: "app", label: "Ustawienia", icon: "M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6ZM19 12l2-1-1-3-2 .3-1.5-1.5L17 5l-3-1-1 2h-2l-1-2-3 1 .5 1.8L6 8.3 4 8l-1 3 2 1v1l-2 1 1 3 2-.3 1.5 1.5L7 19l3 1 1-2h2l1 2 3-1-.5-1.8 1.5-1.5 2 .3 1-3-2-1z" },
+];
+
+/** Administracja: zakładki zamiast jednej długiej strony — przegląd, konta, licencje, mapa i dane, ustawienia aplikacji. */
+function AdminPanel({ token, me }: { token: string; me: number }) {
+  const [tab, setTab] = useState<AdminTab>("overview");
+  return (
+    <div className="admin-panel">
+      <div className="admin-tabs" role="tablist">
+        {ADMIN_TABS.map((t) => (
+          <button key={t.id} role="tab" aria-selected={tab === t.id} className={tab === t.id ? "on" : ""} onClick={() => setTab(t.id)}>
+            <svg viewBox="0 0 24 24" aria-hidden><path d={t.icon} /></svg>
+            <span>{t.label}</span>
+          </button>
+        ))}
+      </div>
+      {tab === "overview" && <AdminStatsCard token={token} />}
+      {tab === "users" && <AdminSection token={token} me={me} />}
+      {tab === "licenses" && <LicenseAdmin token={token} />}
+      {tab === "map" && <><AdminMap token={token} /><MapCheckCard token={token} /></>}
+      {tab === "app" && <AdminConfigCard token={token} />}
+    </div>
+  );
+}
+
+/** Ustawienia aplikacji widoczne dla wszystkich: link do wpłat (Revolut) na stronie „Wsparcie”. */
+function AdminConfigCard({ token }: { token: string }) {
+  const [url, setUrl] = useState("");
+  const [saved, setSaved] = useState<string | null>(null);
+  const [msg, setMsg] = useState<string | null>(null);
+  useEffect(() => {
+    api<{ supportUrl: string }>("GET", "/config").then((c) => { setUrl(c.supportUrl ?? ""); setSaved(c.supportUrl ?? ""); }).catch(() => setMsg("Nie udało się wczytać ustawień."));
+  }, []);
+  const save = async () => {
+    setMsg(null);
+    try {
+      const c = await api<{ supportUrl: string }>("PUT", "/admin/config", { supportUrl: url.trim() }, token);
+      setSaved(c.supportUrl);
+      setUrl(c.supportUrl);
+      setMsg("Zapisano — przycisk „Wesprzyj” prowadzi teraz pod ten adres.");
+    } catch (e) {
+      setMsg(e instanceof ApiError ? e.message : "Nie udało się zapisać.");
+    }
+  };
+  return (
+    <section className="card">
+      <div className="eyebrow">Wsparcie</div>
+      <h2>Link do wpłat</h2>
+      <p className="muted small">Np. link do Revolut (revolut.me/…). Pokazuje się jako przycisk „♥ Wesprzyj RoadPilot” na stronie Wsparcie — w menu Nawigacji, w Ustawieniach i w stopce. Puste pole = bez przycisku.</p>
+      <label className="field wide">
+        <span className="field-label">Adres (https://…)</span>
+        <input type="url" value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://revolut.me/twoja-nazwa" autoCapitalize="off" />
+      </label>
+      <div className="row-buttons">
+        <button className="primary" disabled={saved === null || url.trim() === saved} onClick={save}>Zapisz</button>
+        {saved && <a className="ghost" href={saved} target="_blank" rel="noopener noreferrer">Sprawdź link</a>}
+      </div>
+      {msg && <p className="muted small">{msg}</p>}
+    </section>
+  );
+}
+
 function AdminStatsCard({ token }: { token: string }) {
   const [stats, setStats] = useState<AdminStats | null>(null);
   useEffect(() => {

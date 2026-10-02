@@ -1,5 +1,5 @@
 import { ReactNode, useEffect, useMemo, useRef, useState } from "react";
-import { cachedTile, LatLon, loadTile, TILE, worldPx } from "./MapView";
+import { cachedTile, fromWorldPx, LatLon, loadTile, TILE, worldPx } from "./MapView";
 import { apiUrl } from "../api";
 import { decodeMvt } from "../core/mvt";
 import { MapPalette, MapTheme, PALETTES, ROAD_ORDER, roadWidth } from "../mapStyle";
@@ -27,6 +27,8 @@ export interface GlMarker {
   lon: number;
   /** Obrót w stopniach na ekranie — dostaje bieżący kierunek mapy (np. strzałka znajomego: heading − bearing). */
   rotate?: (bearing: number) => number;
+  /** Prostokąt etykiety (px) do unikania nachodzenia — etykieta nachodząca na wcześniejszą jest chowana. */
+  box?: [number, number];
   node: ReactNode;
 }
 
@@ -34,6 +36,8 @@ export interface GlVector {
   theme: MapTheme;
   /** Do zakazów: drogi, których pojazd nie spełnia, na czerwono. */
   vehicle: Vehicle;
+  /** Cicha mapa (porównanie tras): tylko duże miasta, przygaszone — na pierwszym planie trasy i ich znaczniki. */
+  quiet?: boolean;
 }
 
 export interface GlMapProps {
@@ -49,9 +53,15 @@ export interface GlMapProps {
   follow?: () => { lat: number; lon: number; bearing?: number } | undefined;
   /** Własny styl z kafelków wektorowych; brak = kafelki TomTom. */
   vector?: GlVector;
+  /** Zoom dochodzi do zadanego płynnie, klatka po klatce (prowadzenie: zmiana z prędkości, przybliżenie przed manewrem). */
+  smoothZoom?: boolean;
   children?: ReactNode;
+  /** Dostaje funkcję: punkt ekranu (px względem ramki) → miejsce na mapie, z bieżącej kamery (też przy pochyleniu). */
+  pickRef?: { current: ((x: number, y: number) => LatLon | undefined) | null };
 }
 
+/** Płynny zoom (smoothZoom): stała czasu dochodzenia do zadanego zoomu (ms). */
+const ZOOM_EASE_MS = 450;
 /** Tyle kafelków trzymamy na karcie graficznej (tekstur albo buforów). */
 const TEX_MAX = 160;
 /** Ekrany o dużej gęstości: 2× wystarcza, 3× to 2,25× więcej pikseli do wypełnienia. */
@@ -59,8 +69,10 @@ const MAX_DPR = 2;
 /** Najwyższy poziom własnych kafelków (tilemaker) — wyżej skalujemy je w górę. */
 const VT_MAX_Z = 14;
 const VT_MIN_Z = 6;
-/** Ile etykiet naraz (najbliższe środka, miasta przed wsiami). */
-const LABELS_MAX = 22;
+/** Ile etykiet naraz (najbliższe środka, miasta przed wsiami, ulice na końcu). */
+const LABELS_MAX = 34;
+/** Nazwy ulic dopiero od tego zoomu. */
+const STREETS_FROM_ZOOM = 15;
 
 const VS = `
 attribute vec2 a_pos;
@@ -142,6 +154,26 @@ function project(c: Cam, x: number, y: number): [number, number] | undefined {
   return [((cx / cw + 1) / 2) * c.w, ((1 - cy / cw) / 2) * c.h];
 }
 
+/**
+ * Piksele ekranu → punkt płaszczyzny mapy (px poziomu z względem odniesienia). Dla z = 0 kamera to przekształcenie
+ * rzutowe 3×3 (kolumny x, y, wyraz wolny; wiersze x, y, w) — odwracamy je. undefined = nad horyzontem.
+ */
+function unproject(c: Cam, sx: number, sy: number): [number, number] | undefined {
+  const m = c.m;
+  const [a, b, t, d, e, f, g, h, k] = [m[0], m[4], m[12], m[1], m[5], m[13], m[3], m[7], m[15]];
+  const u = (sx / c.w) * 2 - 1;
+  const v = 1 - (sy / c.h) * 2;
+  // Rozwiązanie (a − g·u)x + (b − h·u)y = k·u − t, (d − g·v)x + (e − h·v)y = k·v − f.
+  const a1 = a - g * u, b1 = b - h * u, c1 = k * u - t;
+  const a2 = d - g * v, b2 = e - h * v, c2 = k * v - f;
+  const det = a1 * b2 - a2 * b1;
+  if (Math.abs(det) < 1e-12) return undefined;
+  const x = (c1 * b2 - c2 * b1) / det;
+  const y = (a1 * c2 - a2 * c1) / det;
+  if (g * x + h * y + k <= 0.01) return undefined;
+  return [x, y];
+}
+
 /** Linie z aplikacji (trasa, korki) → trójkąty w formacie [x, y, nx, ny, d]; szerokość nadaje shader. */
 function buildLines(lines: GlLine[], z: number, cx: number, cy: number): { data: Float32Array; ranges: { start: number; count: number; color: GlLine["color"]; widthPx: number }[] } {
   const out: number[] = [];
@@ -172,9 +204,13 @@ interface TileRect { k: string; lz: number; x: number; y: number; size: number; 
 
 interface VTileGpu { buf: WebGLBuffer; batches: VTileGeometry["batches"]; labels: VLabel[] }
 
-const LABEL_RANK: Record<VLabel["kind"], number> = { city: 0, town: 1, ref: 2, village: 3, hamlet: 4 };
+const LABEL_RANK: Record<VLabel["kind"], number> = { city: 0, town: 1, ref: 2, limit: 2.5, village: 3, hamlet: 4, street: 5 };
+/** Znaki ograniczeń przy drogach pokazujemy od tego zoomu (dalej są nieczytelne i zasłaniają mapę). */
+const LIMITS_FROM_ZOOM = 12;
+/** Kąt etykiety wzdłuż drogi na ekranie: zawsze czytelny (nigdy do góry nogami). */
+const readable = (deg: number) => { let a = ((deg % 360) + 540) % 360 - 180; if (a > 90) a -= 180; if (a < -90) a += 180; return a; };
 
-export function GlMapView({ token, center, zoom, bearing = 0, pitch = 0, anchorY = 0.5, lines, markers, follow, vector, children }: GlMapProps) {
+export function GlMapView({ token, center, zoom, bearing = 0, pitch = 0, anchorY = 0.5, lines, markers, follow, vector, smoothZoom = false, children, pickRef }: GlMapProps) {
   const box = useRef<HTMLDivElement>(null);
   const canvas = useRef<HTMLCanvasElement>(null);
   const [size, setSize] = useState({ w: 800, h: 500 });
@@ -249,7 +285,10 @@ export function GlMapView({ token, center, zoom, bearing = 0, pitch = 0, anchorY
       const vt = vtiles.current.get(t.k);
       if (!vt || vt === "loading") continue;
       for (const l of vt.labels) {
-        const id = `${l.kind}:${l.text}`;
+        if (l.kind === "street" && zoom < STREETS_FROM_ZOOM) continue;
+        if (vector?.quiet && l.kind !== "city") continue;
+        if (l.kind === "limit" && zoom < LIMITS_FROM_ZOOM) continue;
+        const id = l.kind === "street" || l.kind === "limit" ? `${l.kind}:${l.text}:${t.k}:${Math.round(l.x)}:${Math.round(l.y)}` : `${l.kind}:${l.text}`;
         if (seen.has(id)) continue;
         seen.add(id);
         const x = t.x + l.x * f, y = t.y + l.y * f;
@@ -259,22 +298,31 @@ export function GlMapView({ token, center, zoom, bearing = 0, pitch = 0, anchorY
         const n = TILE * 2 ** z;
         const lon = ((x + cx) / n) * 360 - 180;
         const lat = (Math.atan(Math.sinh(Math.PI * (1 - (2 * (y + cy)) / n))) * 180) / Math.PI;
-        const w = l.text.length * (l.kind === "ref" ? 8 : 7.5) + 12;
-        const node = l.kind === "ref"
+        const w = l.text.length * (l.kind === "ref" ? 8 : l.kind === "street" ? 6.6 : 7.5) + 12;
+        const node = l.kind === "limit"
+          ? <g className="vl-limit">{l.text === "TIR"
+              ? <><circle r={12} /><path d="M-6 -3h7v6h-7zM1 -1h3l2 2v2H1z" className="ink" /><path d="M-8 8 8 -8" className="bar" /></>
+              : <><circle r={l.text.length > 4 ? 15 : 12.5} /><text y={3.5} fontSize={l.text.length > 5 ? 7.4 : l.text.length > 4 ? 8.5 : 10}>{l.text}</text></>}</g>
+          : l.kind === "ref"
           ? <g className="vl-ref"><rect x={-w / 2} y={-10} width={w} height={20} rx={4} /><text y={5}>{l.text}</text></g>
-          : <text className={`vl-place vl-${l.kind}`}>{l.text}</text>;
-        cand.push({ m: { key: `vl:${id}`, lat, lon, node }, rank: LABEL_RANK[l.kind], d });
+          : l.kind === "street"
+            ? <text className="vl-street" y={-4}>{l.text}</text>
+            : <text className={`vl-place vl-${l.kind}`}>{l.text}</text>;
+        const angle = l.angle;
+        const rotate = l.kind === "street" && angle !== undefined ? (b: number) => readable(angle - b) : undefined;
+        cand.push({ m: { key: `vl:${id}`, lat, lon, node, rotate, box: l.kind === "limit" ? [30, 30] : [w, l.kind === "ref" ? 22 : 18] }, rank: LABEL_RANK[l.kind], d });
       }
     }
     return cand.sort((a, b) => a.rank - b.rank || a.d - b.d).slice(0, LABELS_MAX).map((c) => c.m);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [vector?.theme, tileGen, tiles.map((t) => t.k).join(","), z, cx, cy]);
-  const allMarkers = vector ? [...vlabels, ...markers] : markers;
+  }, [vector?.theme, vector?.quiet, tileGen, tiles.map((t) => t.k).join(","), z, cx, cy, zoom >= STREETS_FROM_ZOOM]);
+  // Cicha mapa: nasze znaczniki (np. „A · 7 h 32”) wygrywają z etykietami miast przy nachodzeniu.
+  const allMarkers = vector ? (vector.quiet ? [...markers, ...vlabels] : [...vlabels, ...markers]) : markers;
   const markerPx = useMemo(() => allMarkers.map((m) => { const [x, y] = worldPx(m, z); return { m, x: x - cx, y: y - cy }; }), [allMarkers, z, cx, cy]);
 
   // Wszystko, czego pętla klatek potrzebuje, w jednym ref — render Reacta tylko go podmienia.
-  const frame = useRef({ token, size, z, vz, scale, cx, cy, pxX, pxY, pitch, bearing, anchorY, tiles, backdrop, geometry, markerPx, follow, vector, palette, half, zoom });
-  frame.current = { token, size, z, vz, scale, cx, cy, pxX, pxY, pitch, bearing, anchorY, tiles, backdrop, geometry, markerPx, follow, vector, palette, half, zoom };
+  const frame = useRef({ token, size, z, vz, scale, cx, cy, pxX, pxY, pitch, bearing, anchorY, tiles, backdrop, geometry, markerPx, follow, vector, palette, half, zoom, smoothZoom });
+  frame.current = { token, size, z, vz, scale, cx, cy, pxX, pxY, pitch, bearing, anchorY, tiles, backdrop, geometry, markerPx, follow, vector, palette, half, zoom, smoothZoom };
   const markerEls = useRef(new Map<string, SVGGElement>());
   const bump = useRef(() => setTileGen((g) => g + 1)).current;
 
@@ -385,9 +433,16 @@ export function GlMapView({ token, center, zoom, bearing = 0, pitch = 0, anchorY
     };
 
     let raf = 0;
+    // Zoom pokazywany: przy smoothZoom dochodzi do zadanego wykładniczo (stała czasu ZOOM_EASE_MS), inaczej od razu.
+    const shown = { zoom: NaN, t: 0 };
     const tick = () => {
       raf = requestAnimationFrame(tick);
-      const f = frame.current;
+      const f0 = frame.current;
+      const nowT = performance.now();
+      if (!f0.smoothZoom || Number.isNaN(shown.zoom) || Math.abs(f0.zoom - shown.zoom) > 3) shown.zoom = f0.zoom;
+      else shown.zoom += (f0.zoom - shown.zoom) * (1 - Math.exp(-(nowT - shown.t) / ZOOM_EASE_MS));
+      shown.t = nowT;
+      const f = { ...f0, zoom: shown.zoom, scale: 2 ** (shown.zoom - f0.z) };
       const dpr = Math.min(MAX_DPR, window.devicePixelRatio || 1);
       const W = Math.round(f.size.w * dpr), H = Math.round(f.size.h * dpr);
       if (cv.width !== W || cv.height !== H) { cv.width = W; cv.height = H; }
@@ -401,6 +456,13 @@ export function GlMapView({ token, center, zoom, bearing = 0, pitch = 0, anchorY
       const b = now?.bearing ?? f.bearing;
       const cam = camera(f.size.w, f.size.h, f.size.w / 2, f.size.h * f.anchorY, f.pitch, b, (nx - f.cx) * f.scale, (ny - f.cy) * f.scale, f.scale);
       gl.uniformMatrix4fv(uM, false, cam.m);
+      if (pickRef) {
+        const { z: pz, cx: pcx, cy: pcy } = f;
+        pickRef.current = (sx, sy) => {
+          const p = unproject(cam, sx, sy);
+          return p ? fromWorldPx(p[0] + pcx, p[1] + pcy, pz) : undefined;
+        };
+      }
       gl.uniform1f(uScale, f.scale);
       gl.uniform1f(uDash, 0);
       gl.uniform1f(uHw, 0);
@@ -416,11 +478,27 @@ export function GlMapView({ token, center, zoom, bearing = 0, pitch = 0, anchorY
       if (f.vector) {
         const p = f.palette;
         const fz = 2 ** (f.z - f.vz);
-        const ready: { t: TileRect; vt: VTileGpu }[] = [];
+        const ready: { t: TileRect; vt: VTileGpu; fz: number }[] = [];
+        // Kafelek jeszcze się wczytuje (zmiana zoomu, nowy obszar) — w jego miejscu rysujemy wczytany kafelek z poziomu wyżej,
+        // zamiast pustki (pod spodem, raz na rodzica).
+        const parents = new Map<string, { t: TileRect; vt: VTileGpu; fz: number }>();
         for (const t of f.tiles) {
           const vt = ensureVec(t.k, f.token, f.vector.vehicle);
-          if (vt) ready.push({ t, vt });
+          if (vt) { ready.push({ t, vt, fz }); continue; }
+          const [lz, x, y] = t.k.split("/").map(Number);
+          for (let d = 1; d <= 3 && lz - d >= VT_MIN_Z; d++) {
+            const pk = `${lz - d}/${x >> d}/${y >> d}`;
+            const pv = vtiles.current.get(pk);
+            if (!pv || pv === "loading") continue;
+            if (!parents.has(pk)) {
+              const size = t.size * 2 ** d;
+              const tx = Math.floor((t.x + f.cx) / size), ty = Math.floor((t.y + f.cy) / size);
+              parents.set(pk, { t: { ...t, k: pk, size, x: tx * size - f.cx, y: ty * size - f.cy }, vt: pv, fz: fz * 2 ** d });
+            }
+            break;
+          }
         }
+        ready.unshift(...parents.values());
         // Kolejność warstw: najpierw wszystkie kafelki jednej warstwy, potem następna — bez szwów na granicach kafelków.
         type Pass = { key: string; color: [number, number, number, number]; hw: number; color2?: [number, number, number, number]; dash?: number; dashOn?: number };
         const passes: Pass[] = [
@@ -442,7 +520,7 @@ export function GlMapView({ token, center, zoom, bearing = 0, pitch = 0, anchorY
           gl.uniform1f(uHw, pass.hw);
           if (pass.dash) { color(uColor2, pass.color2!); gl.uniform1f(uDash, pass.dash); gl.uniform1f(uDashOn, pass.dashOn!); } else gl.uniform1f(uDash, 0);
           const isFill = pass.hw === 0;
-          for (const { t, vt } of ready) {
+          for (const { t, vt, fz } of ready) {
             const batch = vt.batches.find((x) => x.key === pass.key);
             if (!batch) continue;
             bind(vt.buf);
@@ -495,14 +573,24 @@ export function GlMapView({ token, center, zoom, bearing = 0, pitch = 0, anchorY
         gl.drawArrays(gl.TRIANGLES, r.start, r.count);
       }
 
-      // Znaczniki: kilka elementów SVG w układzie ekranu.
+      // Znaczniki: kilka elementów SVG w układzie ekranu. Etykiety z prostokątem: nachodząca na wcześniejszą — chowana.
+      const placed: [number, number, number, number][] = [];
       for (const { m, x, y } of f.markerPx) {
         const el = markerEls.current.get(m.key);
         if (!el) continue;
         const pt = project(cam, x, y);
         if (!pt) { el.setAttribute("display", "none"); continue; }
+        const rot = m.rotate ? m.rotate(b) : 0;
+        if (m.box) {
+          // Obrócona etykieta: przybliżamy prostokąt osiowy (zamiana boków powyżej 45°).
+          const swap = Math.abs(rot) > 45;
+          const bw = swap ? m.box[1] : m.box[0], bh = swap ? m.box[0] : m.box[1];
+          const r: [number, number, number, number] = [pt[0] - bw / 2, pt[1] - bh, pt[0] + bw / 2, pt[1] + bh / 2];
+          if (r[2] < 0 || r[0] > f.size.w || r[3] < 0 || r[1] > f.size.h || placed.some((q) => r[0] < q[2] && r[2] > q[0] && r[1] < q[3] && r[3] > q[1])) { el.setAttribute("display", "none"); continue; }
+          placed.push(r);
+        }
         el.removeAttribute("display");
-        el.setAttribute("transform", `translate(${pt[0].toFixed(1)} ${pt[1].toFixed(1)})${m.rotate ? ` rotate(${m.rotate(b).toFixed(1)})` : ""}`);
+        el.setAttribute("transform", `translate(${pt[0].toFixed(1)} ${pt[1].toFixed(1)})${m.rotate ? ` rotate(${rot.toFixed(1)})` : ""}`);
       }
     };
     raf = requestAnimationFrame(tick);
@@ -518,7 +606,7 @@ export function GlMapView({ token, center, zoom, bearing = 0, pitch = 0, anchorY
   }, []);
 
   return (
-    <div ref={box} className={`gl-map ${vector ? `theme-${vector.theme}` : ""}`} style={{ "--label": palette.labelText, "--halo": palette.labelHalo } as React.CSSProperties}>
+    <div ref={box} className={`gl-map ${vector ? `theme-${vector.theme}` : ""} ${vector?.quiet ? "quiet" : ""}`} style={{ "--label": palette.labelText, "--halo": palette.labelHalo } as React.CSSProperties}>
       <canvas ref={canvas} className="gl-canvas" />
       <svg className="gl-markers" aria-hidden>
         {allMarkers.map((m) => (

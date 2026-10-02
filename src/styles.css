@@ -1873,3 +1873,9 @@ svg .rb-exit { fill: currentColor; stroke: none; font: 900 7.5px system-ui, sans
 .nm-side-btns > .nm-btn + .nm-btn::before { content: ""; position: absolute; left: 15%; right: 15%; top: calc(-.9 * var(--u) - 1px); height: 1px; background: var(--nm-edge); }
 @media (orientation: landscape) and (max-height: 599px) { .nm-side-btns > .nm-btn + .nm-btn::before { left: calc(-.7 * var(--u) - 1px); right: auto; top: 15%; bottom: 15%; width: 1px; height: auto; } }
 @media not ((orientation: landscape) and (max-height: 599px)) { .nm-side { margin-top: calc(14 * var(--u)); } }
+/* Szuflada: przyciski w kolorze tła szuflady (bez własnego tła i obramowania) — oddziela je tylko kreska. */
+.nm-side-col .nm-btn, .hud.navmode.day .nm-side-col .nm-btn, .hud.navmode.glass .nm-side-col .nm-btn { background: none; border-color: transparent; box-shadow: none !important; -webkit-backdrop-filter: none; backdrop-filter: none; }
+.nm-side-col .nm-btn.report .hud-ico { color: #ff6b5e; }
+.hud.navmode.day .nm-side-col .nm-btn.report .hud-ico { color: #c4302b; }
+.nm-side-col .nm-btn:active { background: rgba(255, 255, 255, .08); }
+.hud.navmode.day .nm-side-col .nm-btn:active { background: rgba(60, 50, 30, .08); }

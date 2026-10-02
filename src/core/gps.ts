@@ -128,6 +128,8 @@ export interface GapEstimate {
   km: number;
   driveMin: number;
   road: boolean;
+  /** Kierowca uzupełnił, co robił (core/gapfix) — jazda w luce z odpowiedzi, nie z oszacowania. */
+  answered?: boolean;
 }
 
 /** Ten odczyt kończy lukę z przesunięciem, przy którym warto znać prawdziwą drogę (GPS.gapLookupKm). */

@@ -21,6 +21,8 @@ import { HudPlanner, HudRoutePicker } from "./HudRoutePicker";
 import { arrivalInfo, fullscreenSupported, Icon, isStop, RouteLine, routeRefs, STALE_MS, toggleFullscreen, useFullscreen, useTick } from "./HudView";
 import { ReportKind, SnappedRoad } from "../collect";
 import { ReportSheet } from "./ReportSheet";
+import { GapSheet } from "./GapSheet";
+import { GapAnswer, GapReview } from "../core/gapfix";
 import { SectionLine, SectionPanel, sectionKey, sectionView, useSectionRun } from "./SectionControl";
 import { sectionLimit } from "../core/section";
 import { ActiveStopPanel, confirmStartDay, fmtTimer, StopControlsProps, StopPicker } from "./StopControls";
@@ -59,6 +61,9 @@ export interface NavViewProps {
   /** Mapa 3D (pochylona) / 2D (płaska, oddalona) — zapamiętywane w ustawieniach. */
   mapMode: "3d" | "2d";
   onMapMode: (m: "3d" | "2d") => void;
+  /** Luka do wyjaśnienia (aplikacja była zamknięta) i zapis odpowiedzi — przelicza tachograf. */
+  gapReview?: GapReview | null;
+  onGapAnswer?: (a: GapAnswer) => void;
 }
 
 function NavVoice({ nav, track, kmh, enabled, section }: { nav?: HudNavData; track: NavTrack; kmh: number | null; enabled: boolean; section: SectionVoice }) {
@@ -79,6 +84,12 @@ export function NavView(p: NavViewProps) {
   const [tilesOpen, setTilesOpen] = useState(false);
   /** Lista najbliższych manewrów (przycisk „›” na karcie). */
   const [maneuvers, setManeuvers] = useState(false);
+  /** Pytanie „co robiłeś, gdy aplikacja była zamknięta” — samo przy niewyjaśnionej luce (także nowej, po powrocie z tła). */
+  const [gapOpen, setGapOpen] = useState(false);
+  const gapKey = p.gapReview && !p.gapReview.answer ? p.gapReview.gap.start : null;
+  useEffect(() => {
+    if (gapKey !== null) setGapOpen(true);
+  }, [gapKey]);
   const [sheet, setSheet] = useState(false);
   const [reporting, setReporting] = useState(false);
   /** Zgłoszenie z mapy: droga przy przytrzymanym miejscu — null = zgłoszenie z naszej pozycji. */
@@ -314,6 +325,7 @@ export function NavView(p: NavViewProps) {
             <div className="stop-label">{refs ? `${refs} · ` : ""}{route ? fmtKm(route.lengthKm) : "Bez trasy"}{p.nav?.dest ? ` → ${p.nav.dest.label}` : ""}</div>
             <div className="nm-actions">
               <button className={sc.stop ? "active" : ""} onClick={openSheet}><Icon name="coffee" /><span>{sc.stop ? (sc.stop.dayEnd ? "Odpoczynek" : "Trwający postój") : "Zaczynam przerwę"}</span></button>
+              {p.gapReview && p.onGapAnswer && <button className={p.gapReview.answer ? "" : "warn"} onClick={() => { setGapOpen(true); setMenu(false); }}><Icon name="clock" /><span>Co robiłem bez aplikacji</span></button>}
               {sc.stop?.dayEnd ? (
                 <button onClick={() => { if (confirmStartDay(sc.stop, now)) sc.onStartDay(); setMenu(false); }}><Icon name="clock" /><span>Rozpocznij dzień</span></button>
               ) : (
@@ -323,6 +335,14 @@ export function NavView(p: NavViewProps) {
               {p.nav?.onEnd && (p.nav.route || p.nav.dest) && <button className="end" onClick={() => { setMenu(false); endNav(); }}><Icon name="close" /><span>Zakończ nawigację</span></button>}
               <button onClick={p.onExit}><Icon name="finish" /><span>Wyjdź z nawigacji</span></button>
             </div>
+          </div>
+        </div>
+      )}
+      {gapOpen && p.gapReview && p.onGapAnswer && (
+        <div className="hud-sheet" onClick={(e) => e.target === e.currentTarget && setGapOpen(false)}>
+          <div className="hud-sheet-body">
+            <button className="hud-sheet-close" aria-label="Później" onClick={() => setGapOpen(false)}>×</button>
+            <GapSheet review={p.gapReview} onAnswer={(a) => { p.onGapAnswer!(a); setGapOpen(false); }} onLater={() => setGapOpen(false)} />
           </div>
         </div>
       )}

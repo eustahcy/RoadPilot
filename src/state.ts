@@ -13,6 +13,7 @@ import { DEFAULT_HUD_ITEMS, HudItems, HudStyle } from "./hudConfig";
 import { DEFAULT_VEHICLE, NavPlace, NavRoute, Vehicle, RouteType } from "./nav";
 import { DEFAULT_WORK, WorkSettings } from "./core/workday";
 import { EMPTY_PLACES, normalizePlaces, SavedPlaces } from "./core/places";
+import type { GapReview } from "./core/gapfix";
 
 export interface Trip {
   /** Miejsce startu — tylko do opisu osi trasy w HUD. */
@@ -117,6 +118,8 @@ export interface AppState {
   tracker: { device: string; at: number } | null;
   /** Odczyt GPS po luce czekający na drogę ciężarówki z serwera (tracking.ts useGapRoad) — tylko w tym urządzeniu. */
   pendingGap?: { fix: Fix; from: { lat: number; lon: number }; asked: number } | null;
+  /** Ostatnia luka do wyjaśnienia przez kierowcę (co robił, gdy aplikacja była zamknięta) — tylko w tym urządzeniu. */
+  gapReview?: GapReview | null;
 }
 
 const KEY = "roadpilot:v1";

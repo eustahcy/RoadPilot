@@ -238,6 +238,9 @@ server/speeds.mjs  prędkości ciężarówek z gps_points: komórki ~250 m × ki
                    (Route: min(zmierzona, ustawiona)), travelMin, realSpeedShare. server/mapcheck.mjs: suspectPasses (map_suspects, suspects-build.mjs),
                    osm_overrides (admin ukrywa ograniczenie — findWarnings pomija), badTurnClusters (zgłoszenie „bad_turn” z NavView BadTurn; ≥ 2 kierowców
                    → exclude_locations w valhallaRoute); Ustawienia → Administracja → Błędy mapy (MapCheckCard, /api/admin/mapcheck, /api/admin/override)
+src/core/gapfix.ts  luka z przesunięciem (≥ 15 min, ≥ 1 km): AppState.gapReview (stan tachografu sprzed luki, suma jazdy po niej; tylko lokalnie,
+                   jak pendingGap) → GapSheet w Nawigacji (samo przy niewyjaśnionej, menu ⋯) i w Historii („Uzupełnij, co robiłem”): jazda / pauza (ile,
+                   na początku / końcu) / postój → applyGapAnswer przelicza tachograf od stanu sprzed luki + postoje i jazda z historii po niej
 scripts/weekly-update.sh  timer systemd roadpilot-weekly (niedziela 01:00 UTC): osm-update → Valhalla w /opt/roadpilot-valhalla.new (Metin2 zatrzymany
                    na czas budowy, zawsze wznawiany) → podmiana + test trasy (błąd = powrót) → kafelki → speed-build, suspects-build → restart API;
                    log /var/log/roadpilot-weekly.log. Plan i stan: upgrade.md

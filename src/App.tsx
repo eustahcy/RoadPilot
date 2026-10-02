@@ -1,3 +1,4 @@
+import { applyGapAnswer, GapAnswer } from "./core/gapfix";
 import { addRecent, SavedPlaces } from "./core/places";
 import { TRUCK_SPEED } from "./core/rules";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -130,6 +131,13 @@ function App() {
       setRerouting(false);
     }
   };
+  /** Odpowiedź „co robiłem bez aplikacji” — tachograf i historia przeliczone od stanu sprzed luki (core/gapfix). */
+  const answerGap = (a: GapAnswer) =>
+    setState((s) => {
+      if (!s.gapReview) return s;
+      const r = applyGapAnswer(s.gapReview, a, s.history, Date.now(), s.stop?.start ?? null);
+      return { ...s, driver: r.driver, history: r.history, gapReview: { ...s.gapReview, answer: a } };
+    });
   /** Wybrana trasa (z wyszukiwarki, ulubionych, ostatnich) — cel trafia na początek „Ostatnich tras”. */
   const chooseRoute = (r: NavRoute) =>
     setState((s) => ({ ...s, navRoute: r, trip: tripFromRoute(s.trip, r), settings: { ...s.settings, places: addRecent(s.settings.places, r.to, Date.now(), r) } }));
@@ -348,6 +356,8 @@ function App() {
   if (state.navOpen) {
     return (
       <NavView
+        gapReview={state.gapReview}
+        onGapAnswer={answerGap}
         mapMode={settings.navMap}
         onMapMode={(navMap) => setState((s) => ({ ...s, settings: { ...s.settings, navMap } }))}
         nav={navOn ? { route: state.navRoute, dest: navDest, rerouting, onReroute: reroute, onVia: setVia, onEnd: endNav } : undefined}
@@ -556,7 +566,7 @@ function App() {
           />
         )}
         {tab === "driver" && <DriverView driver={state.driver} planNow={viewNow} onChange={(d) => setState((s) => ({ ...s, driver: d }))} />}
-        {tab === "history" && <HistoryCard history={state.history} now={now} gpsOn={settings.gps} onClear={() => setState((s) => ({ ...s, history: [] }))} token={auth?.token ?? null} onWhere={(id, where) => setState((s) => ({ ...s, history: setWhere(s.history, id, where) }))} />}
+        {tab === "history" && <HistoryCard history={state.history} now={now} gpsOn={settings.gps} onClear={() => setState((s) => ({ ...s, history: [] }))} token={auth?.token ?? null} onWhere={(id, where) => setState((s) => ({ ...s, history: setWhere(s.history, id, where) }))} gapReview={state.gapReview} onGapAnswer={answerGap} />}
         {tab === "settings" && (
           <SettingsView
             initialCategory={settingsCat}

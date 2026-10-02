@@ -31,7 +31,7 @@ interface Meta {
 
 /** Pola tylko dla tego urządzenia — nie trafiają na konto. */
 export function syncable(s: AppState) {
-  const { track: _track, hud: _hud, navOpen: _navOpen, planTime: _planTime, navRoute: _navRoute, pendingGap: _pendingGap, ...rest } = s;
+  const { track: _track, hud: _hud, navOpen: _navOpen, planTime: _planTime, navRoute: _navRoute, pendingGap: _pendingGap, gapReview: _gapReview, ...rest } = s;
   delete (rest as { syncStamps?: unknown }).syncStamps;
   return rest;
 }

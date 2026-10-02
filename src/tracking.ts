@@ -4,6 +4,7 @@ import { Dispatch, SetStateAction, useEffect, useRef, useState } from "react";
 import { api } from "./api";
 import { addFix, AUTO_STOP_IDLE, creditDriving, creditStop, Fix, GapRoad, gapNeedsRoad, GPS, Live, nextAutoStop, nextLive, startTrack } from "./core/gps";
 import { recordDrive, recordGap, recordStop } from "./core/history";
+import { needsReview, totalDrive } from "./core/gapfix";
 import { restViolation, trackViolations } from "./core/violations";
 import { RULES } from "./core/rules";
 import { ActiveStop, endStop } from "./core/stop";
@@ -91,7 +92,9 @@ export function applyFix(s: AppState, fix: Fix, device = DEVICE_ID, opts: { look
   driver = creditDriving(driver, r.driveMin);
   history = recordDrive(history, r.driveEnd, r.driveMin, r.km);
   const doneKm = Math.min(tripTotalKm(s), s.trip.doneKm + r.km);
-  return { ...s, track: r.track, driver, stop, history, odoKm: s.odoKm + r.km, trip: doneKm === s.trip.doneKm ? s.trip : { ...s.trip, doneKm }, tracker: { device, at: fix.t } };
+  // Luka z przesunięciem — zapamiętujemy stan tachografu sprzed niej: kierowca powie, co robił (Nawigacja / Historia).
+  const gapReview = r.gap && needsReview(r.gap) ? { gap: r.gap, before: s.driver, driveTotal: totalDrive(history) } : s.gapReview ?? null;
+  return { ...s, track: r.track, driver, stop, history, odoKm: s.odoKm + r.km, trip: doneKm === s.trip.doneKm ? s.trip : { ...s.trip, doneKm }, tracker: { device, at: fix.t }, gapReview };
 }
 
 /** Kierowca zaczyna postój. */

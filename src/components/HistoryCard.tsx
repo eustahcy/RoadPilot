@@ -1,4 +1,6 @@
 import { useEffect, useState } from "react";
+import { GapSheet } from "./GapSheet";
+import { GapAnswer, GapReview } from "../core/gapfix";
 import { api } from "../api";
 import { DayLog, daySummary, dayKey } from "../core/history";
 import { Violation, VIOLATION_INFO, VIOLATION_REASONS, violationReport, Where, whereText } from "../core/violations";
@@ -17,10 +19,14 @@ interface Props {
   /** Token konta — do ustalenia miejsca przekroczenia (miejscowość, droga, MOP); bez konta tylko współrzędne. */
   token: string | null;
   onWhere: (id: string, where: Where | null) => void;
+  /** Ostatnia luka do wyjaśnienia i zapis odpowiedzi „co robiłem bez aplikacji” (przelicza tachograf). */
+  gapReview?: GapReview | null;
+  onGapAnswer?: (a: GapAnswer) => void;
 }
 
 /** Historia dzienna z GPS: podsumowanie tygodnia, pasek doby (jazda, postoje, luki, przekroczenia), szczegóły po rozwinięciu. */
-export function HistoryCard({ history, now, gpsOn, onClear, token, onWhere }: Props) {
+export function HistoryCard({ history, now, gpsOn, onClear, token, onWhere, gapReview, onGapAnswer }: Props) {
+  const [gapOpen, setGapOpen] = useState(false);
   const [open, setOpen] = useState<string | null>(() => dayKey(now));
   const [confirm, setConfirm] = useState(false);
   const [shown, setShown] = useState<string | null>(null);
@@ -44,7 +50,7 @@ export function HistoryCard({ history, now, gpsOn, onClear, token, onWhere }: Pr
           </div>
           <div className="history">
             {history.map((d) => (
-              <DayRow key={d.date} d={d} now={now} open={open === d.date} onToggle={() => setOpen(open === d.date ? null : d.date)} onViolation={setShown} />
+              <DayRow key={d.date} d={d} now={now} open={open === d.date} onToggle={() => setOpen(open === d.date ? null : d.date)} onViolation={setShown} gapStart={gapReview && onGapAnswer ? gapReview.gap.start : undefined} gapAnswered={!!gapReview?.answer} onGap={() => setGapOpen(true)} />
             ))}
           </div>
         </>
@@ -60,11 +66,19 @@ export function HistoryCard({ history, now, gpsOn, onClear, token, onWhere }: Pr
           <button className="text-btn" onClick={() => setConfirm(true)}>Wyczyść historię</button>
         ))}
       {shownV && <ViolationSheet v={shownV} token={token} onWhere={onWhere} onClose={() => setShown(null)} />}
+      {gapOpen && gapReview && onGapAnswer && (
+        <div className="hud-sheet sheet-fixed" onClick={(e) => e.target === e.currentTarget && setGapOpen(false)}>
+          <div className="hud-sheet-body">
+            <button className="hud-sheet-close" aria-label="Zamknij" onClick={() => setGapOpen(false)}>×</button>
+            <GapSheet review={gapReview} onAnswer={(a) => { onGapAnswer(a); setGapOpen(false); }} onLater={() => setGapOpen(false)} />
+          </div>
+        </div>
+      )}
     </section>
   );
 }
 
-function DayRow({ d, now, open, onToggle, onViolation }: { d: DayLog; now: number; open: boolean; onToggle: () => void; onViolation: (id: string) => void }) {
+function DayRow({ d, now, open, onToggle, onViolation, gapStart, gapAnswered, onGap }: { d: DayLog; now: number; open: boolean; onToggle: () => void; onViolation: (id: string) => void; gapStart?: number; gapAnswered?: boolean; onGap?: () => void }) {
   const { stopMin, avgKmh } = daySummary(d);
   const vs = (d.violations ?? []).slice().sort((a, b) => a.t - b.t);
   return (
@@ -116,11 +130,14 @@ function DayRow({ d, now, open, onToggle, onViolation }: { d: DayLog; now: numbe
             <p key={g.start} className="history-gap">
               <b>Aplikacja zamknięta {fmtTime(g.start)} – {fmtTime(g.end)}</b>
               <span>
-                {g.km > 0 ? `oszacowano ${fmtKm(g.km)} i ${fmtDuration(g.driveMin)} jazdy` : "bez ruchu"}
+                {g.km > 0 ? `${g.answered ? "wg Ciebie" : "oszacowano"} ${fmtKm(g.km)} i ${fmtDuration(g.driveMin)} jazdy` : "bez ruchu"}
                 {g.driveMin >= 1 ? ` (śr. ${Math.round((g.km / g.driveMin) * 60)} km/h)` : ""}
                 {(g.end - g.start) / 60_000 - g.driveMin >= 1 ? `, ${fmtDuration((g.end - g.start) / 60_000 - g.driveMin)} postoju` : ""}
-                {g.km > 0 ? ` — ${g.road ? "droga z mapy" : "z linii prostej"}` : ""}
+                {g.km > 0 && !g.answered ? ` — ${g.road ? "droga z mapy" : "z linii prostej"}` : ""}
               </span>
+              {gapStart === g.start && onGap && (
+                <button className="text-btn" onClick={onGap}>{gapAnswered ? "Zmień, co robiłem" : "Uzupełnij, co robiłem"}</button>
+              )}
             </p>
           ))}
         </div>

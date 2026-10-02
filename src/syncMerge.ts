@@ -49,7 +49,7 @@ export interface MergeResult {
  * dalej liczyłby lukę od swojego ostatniego odczytu i dodał jazdę drugi raz (resetTrack).
  */
 export function mergeStates(local: AppState, ls: Stamps, remote: AppState, rs: Stamps, device: string): MergeResult {
-  const state: AppState = { ...remote, track: local.track, hud: local.hud, navOpen: local.navOpen, planTime: local.planTime, navRoute: local.navRoute, pendingGap: local.pendingGap };
+  const state: AppState = { ...remote, track: local.track, hud: local.hud, navOpen: local.navOpen, planTime: local.planTime, navRoute: local.navRoute, pendingGap: local.pendingGap, gapReview: local.gapReview };
   const stamps: Stamps = {};
   const localWon: SyncGroup[] = [];
   let resetTrack = false;

@@ -796,6 +796,14 @@ svg .rb-exit { fill: currentColor; stroke: none; font: 900 7.5px system-ui, sans
 .mapcheck-list li > span { flex: 1; min-width: 0; }
 .mapcheck-list i { color: var(--dim); font-style: normal; }
 .mapcheck-list a { color: var(--green); font-weight: 700; font-size: 12.5px; }
+/* „Co robiłeś, gdy aplikacja była zamknięta” — Nawigacja i Historia. */
+.sheet-fixed { position: fixed; }
+.gap-sheet p { margin: 8px 0 12px; line-height: 1.45; }
+.gap-choices { display: grid; gap: 8px; margin-bottom: 8px; }
+.gap-both { display: grid; gap: 8px; margin-bottom: 8px; }
+.gap-at { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.gap-at button { min-height: 42px; border-radius: 12px; border: 1px solid var(--line-2); background: var(--field); color: inherit; font: inherit; font-weight: 700; }
+.gap-at button.on { border-color: var(--green); color: var(--green); }
 .gate-note { margin: 6px 0; padding: 8px 10px; border-radius: 10px; background: rgba(42, 138, 74, .18); border: 1px solid rgba(66, 211, 146, .45); color: #bff0cf; font-size: 13px; font-weight: 650; }
 .report-places-label { margin: 12px 0 6px; color: #9fb0bc; font-size: 12.5px; font-weight: 750; }
 .report-places { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-bottom: 12px; }
@@ -1123,7 +1131,7 @@ svg .rb-exit { fill: currentColor; stroke: none; font: 900 7.5px system-ui, sans
   /* Tablet (lżej): mapa na cały ekran, zwarta karta manewru w lewym górnym rogu, przyciski pod nią, prędkość w lewym dole,
      „po drodze” i mapa w prawym; na dole jeden smukły pasek: do celu · przyjazd · przerwa · trasa + oś trasy. */
   .hud.navmode { --u: min(.74vh, .58vw); grid-template-columns: minmax(0, 40%) 1fr auto; grid-template-rows: auto 1fr auto auto;
-    grid-template-areas: "top . ." "side . ctl" "speed . ahead" "progress progress progress"; gap: calc(1.4 * var(--u)); }
+    grid-template-areas: "top top top" "side . ctl" "speed . ahead" "progress progress progress"; gap: calc(1.4 * var(--u)); }
   .nm-tiles { display: none; }
   .nm-side { align-self: start; justify-self: start; }
   .nm-ctl { justify-self: end; }
@@ -1135,19 +1143,32 @@ svg .rb-exit { fill: currentColor; stroke: none; font: 900 7.5px system-ui, sans
   .nm-speed-bar { display: block; }
   .nm-speed strong { font-size: calc(11 * var(--u)); }
   .nm-limit { width: calc(9.5 * var(--u)); height: calc(9.5 * var(--u)); font-size: calc(3.8 * var(--u)); }
-  /* Karta manewru zwarta i półprzezroczysta — nie zasłania drogi przed nami. */
-  .nm-top .hud-nav.card { background: linear-gradient(180deg, rgba(30, 46, 60, .86), rgba(12, 22, 32, .86)); padding: calc(1.4 * var(--u)) calc(2 * var(--u)); padding-right: calc(7 * var(--u)); }
-  .nm-top .hud-nav.card .hud-man svg { width: calc(8.5 * var(--u)); height: calc(8.5 * var(--u)); }
-  .nm-top .hud-nav.card .hud-man b { font-size: calc(5.6 * var(--u)); }
-  .nm-top .hud-nav.card .hud-man small { font-size: calc(2.8 * var(--u)); }
-  .nm-top .hud-nav.card .hud-lanes-guide { justify-items: start; }
-  /* Przyciski mniejsze niż na telefonie. */
-  .nm-btn, .nm-zoom { width: calc(7.4 * var(--u)); }
-  .nm-btn { height: calc(7.4 * var(--u)); }
-  .nm-zoom button { height: calc(7.4 * var(--u)); }
-  .nm-btn .hud-ico { width: calc(3.6 * var(--u)); height: calc(3.6 * var(--u)); }
-  .nm-side, .nm-ctl { gap: calc(.9 * var(--u)); }
-  .nm-mode { font-size: calc(2.6 * var(--u)); }
+  /* Manewr nie jako blok, a napisy z symbolami na „niebie” nad linią horyzontu: strzałka, odległość, droga, pasy, podpowiedź. */
+  .nm-top { justify-self: stretch; }
+  .nm-top .hud-nav.card { flex-wrap: nowrap; justify-content: center; gap: calc(4 * var(--u)); padding: calc(.4 * var(--u)) calc(9 * var(--u)) 0; background: none; border: 0; box-shadow: none; text-shadow: 0 2px 10px rgba(0, 0, 0, .65); }
+  .nm-top .hud-nav.card > * { flex: 0 1 auto; }
+  .nm-top .hud-nav.card .hud-man { flex: 0 1 auto; }
+  .nm-top .hud-nav.card .hud-man svg { width: calc(9 * var(--u)); height: calc(9 * var(--u)); filter: drop-shadow(0 2px 6px rgba(0, 0, 0, .55)); }
+  .nm-top .hud-nav.card .hud-man b { font-size: calc(6 * var(--u)); }
+  .nm-top .hud-nav.card .hud-man small { font-size: calc(3 * var(--u)); color: #fff; }
+  .nm-top .hud-nav.card .hud-lanes-guide { flex-basis: auto; justify-items: center; }
+  .nm-top .hud-nav.card .hud-lanes-guide small { font-size: calc(2.4 * var(--u)); color: #fff; }
+  .nm-top .hud-nav.card .hud-warn, .nm-top .hud-nav.card .hud-toll { flex: 0 1 auto; text-shadow: none; }
+  .nm-top .hud-nav.card.off, .nm-top .hud-nav.card.waiting { flex-direction: row; align-items: center; min-height: 0; }
+  /* Motyw dzienny: jasne niebo — ciemne napisy z jasną poświatą. */
+  .hud.navmode.day .nm-top .hud-nav.card { text-shadow: 0 1px 8px rgba(255, 255, 255, .9); }
+  .hud.navmode.day .nm-top .hud-nav.card .hud-man small, .hud.navmode.day .nm-top .hud-nav.card .hud-lanes-guide small { color: #13202b; }
+  .hud.navmode.day .nm-top .hud-nav.card .hud-man b, .hud.navmode.day .nm-top .hud-nav.card .hud-lanes-guide small b, .hud.navmode.day .nm-top .hud-nav.card .hud-man svg { color: #0d8a43; }
+  .hud.navmode.day .nm-top .hud-nav.card .hud-man b { color: #0d8a43; }
+  .nm-card-more { top: calc(.6 * var(--u)); right: 0; }
+  .hud.navmode.day .nm-card-more { background: rgba(13, 32, 43, .78); border-color: rgba(13, 32, 43, .4); color: #fff; }
+  /* Przyciski duże — łatwo trafić palcem w jeździe. */
+  .nm-btn, .nm-zoom { width: calc(9.6 * var(--u)); }
+  .nm-btn { height: calc(9.6 * var(--u)); }
+  .nm-zoom button { height: calc(9.6 * var(--u)); font-size: calc(5.4 * var(--u)); }
+  .nm-btn .hud-ico { width: calc(4.8 * var(--u)); height: calc(4.8 * var(--u)); }
+  .nm-side, .nm-ctl { gap: calc(1.1 * var(--u)); }
+  .nm-mode { font-size: calc(3.2 * var(--u)); }
   /* Dolny pasek: smukły, cztery informacje + oś; na wąskim (iPad pionowo) oś przechodzi do drugiego wiersza. */
   .nm-progress { grid-area: progress; display: flex; flex-wrap: wrap; align-items: center; row-gap: calc(.6 * var(--u)); position: relative; z-index: 2; padding: calc(.8 * var(--u)) calc(2.2 * var(--u)); border-radius: calc(2.4 * var(--u)); background: var(--nm-glass); border: 1px solid var(--nm-edge); box-shadow: 0 10px 28px rgba(0, 0, 0, .38), inset 0 1px 0 rgba(255, 255, 255, .07); color: #eef3f6; }
   .nm-progress-item { display: flex; align-items: center; gap: calc(1.2 * var(--u)); padding-right: calc(2.2 * var(--u)); margin-right: calc(2.2 * var(--u)); border-right: 1px solid rgba(140, 175, 195, .2); }

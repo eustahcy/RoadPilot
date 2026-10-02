@@ -293,7 +293,8 @@ Propozycja przerwy: core/breakstop breakStopFor (najdalszy MOP / parking TIR prz
 Motywy Nawigacji (Settings.mapTheme): auto / day / night / glass — day: jasne panele (ciepła biel, --nm-glass beż, ciemny tekst), glass:
                    półprzezroczyste panele z backdrop-filter (mapa dzień / noc jak auto). Pasek „po drodze”: MOP ze stacją na zmianę co STRIP_SWAP_MS
                    „[dystrybutor] Orlen” ↔ „[P] MOP Morawica” (PoiIcons.tsx mergeStations łączy stację ≤ 0,6 km po tej samej stronie z MOP-em);
-                   MOP i parking = „P”. Słupek kilometrowy: biały z dwoma czerwonymi paskami. Uchwyt panelu .nm-fold = trapez (szufladka).
+                   MOP i parking = „P”. Słupek kilometrowy: biały z dwoma czerwonymi paskami. Panel przycisków = szuflada (.nm-side-col tło przy lewej krawędzi, przyciski z odstępami, trapezowy uchwyt .nm-fold na środku; otwarta i zamknięta na tej samej wysokości).
+                   Pasy: zalecany pas wypełnia się na zielono od dołu i miga 3× (CSS lane-fill). Długie nazwy na pasku „po drodze”: NavView ScrollName (przedrostek MOP / Parking stoi, reszta przewija się tam i z powrotem).
                    valhallaOnce: przy błędzie 442 ponowienie z szerszym dopasowaniem punktów (SNAP_RETRIES) zanim TomTom.
 Menu ⋯ w Nawigacji to prostokąt .nm-menu-btn przy pasku na dole (grid area „more”).
 scripts/weekly-update.sh  timer systemd roadpilot-weekly (niedziela 01:00 UTC): osm-update → Valhalla w /opt/roadpilot-valhalla.new (Metin2 — jeśli

@@ -1,4 +1,4 @@
-import { ReactNode, useEffect, useState } from "react";
+import { ReactNode, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { DeadlinePlan } from "../core/deadline";
 import { Friend } from "../core/friends";
 import { Live } from "../core/gps";
@@ -479,7 +479,7 @@ export function NavView(p: NavViewProps) {
           {strip.map((r) => (
             <span key={r.key} className={r.alert ? "alert" : r.tone ?? ""}>
               {r.icon}
-              <b>{r.label}</b>
+              <b><ScrollName text={r.label} /></b>
               <strong>{fmtAheadKm(r.km)}</strong>
               <Icon name="chevron" className="nm-ahead-go" />
             </span>
@@ -683,6 +683,40 @@ const BREAK_VIA = "Przerwa";
 function clockOnly(clock: string): { time: string; day: string } {
   const m = /^(.*?)\s*(\d{1,2}:\d{2})$/.exec(clock);
   return m && m[1] ? { time: m[2], day: m[1] } : { time: clock, day: "" };
+}
+
+/** Przedrostek, który zostaje na miejscu, gdy reszta nazwy się przewija („MOP” + „Skoszewy Zachód”). */
+const NAME_PREFIX = /^(MOP|Parking(?: TIR)?|Stacja(?: paliw)?|PPO|Bramki)\s+/i;
+
+/**
+ * Nazwa za długa na pasek: przedrostek (MOP, Parking…) stoi, a reszta przewija się do końca, chwilę stoi i wraca.
+ * Przesunięcie mierzymy po wyrenderowaniu (--shift); krótkie nazwy się nie ruszają.
+ */
+function ScrollName({ text }: { text: string }) {
+  const m = NAME_PREFIX.exec(text);
+  const prefix = m ? m[1] : "";
+  const rest = m ? text.slice(m[0].length) : text;
+  const box = useRef<HTMLSpanElement>(null);
+  const inner = useRef<HTMLSpanElement>(null);
+  const [shift, setShift] = useState(0);
+  useLayoutEffect(() => {
+    const measure = () => {
+      const b = box.current, i = inner.current;
+      if (b && i) setShift(Math.max(0, Math.ceil(i.scrollWidth - b.clientWidth)));
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    if (box.current) ro.observe(box.current);
+    return () => ro.disconnect();
+  }, [text]);
+  return (
+    <span className="scroll-name">
+      {prefix && <span className="sn-prefix">{prefix}</span>}
+      <span className="sn-box" ref={box}>
+        <span ref={inner} className={shift > 2 ? "sn-move" : ""} style={shift > 2 ? ({ "--shift": `-${shift}px`, "--sn-dur": `${Math.max(5, 3 + shift / 18)}s` } as React.CSSProperties) : undefined}>{rest}</span>
+      </span>
+    </span>
+  );
 }
 
 /** Zwinięty panel przycisków — wygoda jednego urządzenia (localStorage), nie stan synchronizowany. */

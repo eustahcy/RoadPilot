@@ -48,6 +48,10 @@ export function valhallaRequest(from, to, v, exclude = [], alternates = 0, route
         // (np. A1 Piątek → 703/702/708 → Stryków zamiast A1/A2), choć czas wychodzi prawie ten sam.
         use_truck_route: true,
         ...(routeType === "shortest" ? { shortest: true } : {}),
+        // Unikanie dróg (Nawigacja → Ustawienia): 0 = omijaj, o ile da się dojechać inaczej.
+        ...(v.avoid?.tolls ? { use_tolls: 0 } : {}),
+        ...(v.avoid?.motorways ? { use_highways: 0 } : {}),
+        ...(v.avoid?.ferries ? { use_ferry: 0 } : {}),
       },
     },
     directions_options: { units: "kilometers", language: "pl-PL" },

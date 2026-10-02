@@ -1,0 +1,127 @@
+import { useState } from "react";
+import { DEFAULT_VEHICLE, NO_AVOID, ROUTE_TYPES, RouteAvoid, Vehicle } from "../nav";
+import { Settings } from "../state";
+import { NumberField, Toggle } from "./fields";
+import { Icon, IconName } from "./HudView";
+import { ADR_OPTIONS, AHEAD_KM_OPTIONS } from "./SettingsView";
+
+// Ustawienia prosto z Nawigacji (⋯ → Ustawienia): pojazd, jakimi drogami jechać, mapa i dźwięk, „po drodze”.
+// Te same pola co w Ustawieniach aplikacji — zapis od razu (synchronizowane z kontem jak reszta ustawień).
+
+type Tab = "route" | "vehicle" | "map" | "ahead";
+const TABS: { id: Tab; label: string; icon: IconName }[] = [
+  { id: "route", label: "Trasa", icon: "route" },
+  { id: "vehicle", label: "Pojazd", icon: "truck" },
+  { id: "map", label: "Mapa", icon: "nav" },
+  { id: "ahead", label: "Miejsca", icon: "parking" },
+];
+
+const AVOID: { id: keyof RouteAvoid; label: string; hint: string }[] = [
+  { id: "tolls", label: "Unikaj dróg płatnych", hint: "Bez bramek i odcinków płatnych (A1, A2, A4…), jeśli da się dojechać inaczej." },
+  { id: "motorways", label: "Unikaj autostrad", hint: "Drogi krajowe i ekspresowe zamiast autostrad — zwykle dłużej." },
+  { id: "ferries", label: "Unikaj promów", hint: "Bez przepraw promowych." },
+];
+
+export interface NavSettingsProps {
+  settings: Settings;
+  onChange: (patch: Partial<Settings>) => void;
+  voice: { supported: boolean; on: boolean; toggle: () => void };
+  /** Przelicz trasę z nowymi ustawieniami (gdy jest cel). */
+  onReroute?: () => void;
+}
+
+export function NavSettings({ settings, onChange, voice, onReroute }: NavSettingsProps) {
+  const [tab, setTab] = useState<Tab>("route");
+  const [changed, setChanged] = useState(false);
+  const v = settings.vehicle;
+  const avoid = v.avoid ?? NO_AVOID;
+  // Zmiana pojazdu albo dróg dotyczy trasy — proponujemy przeliczenie.
+  const setV = (patch: Partial<Vehicle>) => { onChange({ vehicle: { ...v, ...patch } }); setChanged(true); };
+  return (
+    <div className="nav-settings">
+      <div className="stop-label">Ustawienia nawigacji</div>
+      <div className="nset-tabs" role="tablist">
+        {TABS.map((t) => (
+          <button key={t.id} role="tab" aria-selected={tab === t.id} className={tab === t.id ? "on" : ""} onClick={() => setTab(t.id)}>
+            <Icon name={t.icon} /><span>{t.label}</span>
+          </button>
+        ))}
+      </div>
+
+      {tab === "route" && (
+        <div className="nset-body">
+          <span className="field-label">Rodzaj trasy</span>
+          <div className="nset-pick">
+            {ROUTE_TYPES.map((t) => (
+              <button key={t.id} className={settings.routeType === t.id ? "on" : ""} aria-pressed={settings.routeType === t.id} onClick={() => { onChange({ routeType: t.id }); setChanged(true); }}>
+                <strong>{t.label}</strong><small>{t.hint}</small>
+              </button>
+            ))}
+          </div>
+          <span className="field-label">Jakimi drogami</span>
+          {AVOID.map((a) => (
+            <Toggle key={a.id} checked={avoid[a.id]} onChange={(on) => setV({ avoid: { ...avoid, [a.id]: on } })} label={a.label} hint={a.hint} />
+          ))}
+        </div>
+      )}
+
+      {tab === "vehicle" && (
+        <div className="nset-body">
+          <p className="muted small">Cały zestaw — trasa omija za niskie wiadukty, za słabe mosty i zakazy dla takiego pojazdu.</p>
+          <div className="form nset-form">
+            <NumberField label="Wysokość" value={v.heightM} unit="m" min={1} max={5} step={0.05} onChange={(heightM) => setV({ heightM })} />
+            <NumberField label="Szerokość" value={v.widthM} unit="m" min={1} max={3.5} step={0.05} onChange={(widthM) => setV({ widthM })} />
+            <NumberField label="Długość" value={v.lengthM} unit="m" min={2} max={30} step={0.1} onChange={(lengthM) => setV({ lengthM })} />
+            <NumberField label="Masa całkowita" value={v.weightKg / 1000} unit="t" min={1} max={80} step={0.5} onChange={(t) => setV({ weightKg: Math.round(t * 1000) })} />
+            <NumberField label="Nacisk na oś" value={v.axleWeightKg / 1000} unit="t" min={1} max={20} step={0.5} onChange={(t) => setV({ axleWeightKg: Math.round(t * 1000) })} />
+            <NumberField label="Liczba osi" value={v.axles} min={2} max={12} onChange={(axles) => setV({ axles: Math.round(axles) })} />
+            <NumberField label="Prędkość maks." value={v.maxKmh} unit="km/h" min={30} max={130} onChange={(maxKmh) => setV({ maxKmh: Math.round(maxKmh) })} />
+            <label className="field">
+              <span className="field-label">ADR — kategoria tunelowa</span>
+              <select value={v.adr} onChange={(e) => setV({ adr: e.target.value as Vehicle["adr"] })}>
+                {ADR_OPTIONS.map((o) => <option key={o.id} value={o.id}>{o.label}</option>)}
+              </select>
+            </label>
+          </div>
+          <button className="text-btn" onClick={() => setV({ ...DEFAULT_VEHICLE, avoid })}>Przywróć typowy zestaw 40 t</button>
+        </div>
+      )}
+
+      {tab === "map" && (
+        <div className="nset-body">
+          <span className="field-label">Wygląd mapy</span>
+          <div className="nset-seg">
+            {([["auto", "Auto"], ["day", "Dzień"], ["night", "Noc"]] as const).map(([id, label]) => (
+              <button key={id} className={settings.mapTheme === id ? "on" : ""} aria-pressed={settings.mapTheme === id} onClick={() => onChange({ mapTheme: id })}>{label}</button>
+            ))}
+          </div>
+          <span className="field-label">Widok</span>
+          <div className="nset-seg">
+            {([["3d", "3D — pochylona"], ["2d", "2D — z góry"]] as const).map(([id, label]) => (
+              <button key={id} className={settings.navMap === id ? "on" : ""} aria-pressed={settings.navMap === id} onClick={() => onChange({ navMap: id })}>{label}</button>
+            ))}
+          </div>
+          {voice.supported && <Toggle checked={voice.on} onChange={() => voice.toggle()} label="Komunikaty głosowe" hint="Manewry, pasy, ostrzeżenia i bramki." />}
+        </div>
+      )}
+
+      {tab === "ahead" && (
+        <div className="nset-body">
+          <label className="field">
+            <span className="field-label">Zasięg listy „Po drodze”</span>
+            <select value={settings.aheadKm} onChange={(e) => onChange({ aheadKm: Number(e.target.value) })}>
+              {AHEAD_KM_OPTIONS.map((km) => <option key={km} value={km}>{km} km</option>)}
+            </select>
+          </label>
+          <Toggle checked={settings.aheadStrip.mop} onChange={(mop) => onChange({ aheadStrip: { ...settings.aheadStrip, mop } })} label="Najbliższy MOP pod prędkością" />
+          <Toggle checked={settings.aheadStrip.parking} onChange={(parking) => onChange({ aheadStrip: { ...settings.aheadStrip, parking } })} label="Najbliższy parking TIR pod prędkością" />
+          <Toggle checked={settings.aheadStrip.fuel} onChange={(fuel) => onChange({ aheadStrip: { ...settings.aheadStrip, fuel } })} label="Najbliższa stacja pod prędkością" />
+        </div>
+      )}
+
+      {changed && onReroute && (
+        <button className="primary full nset-apply" onClick={() => { onReroute(); setChanged(false); }}>Przelicz trasę z nowymi ustawieniami</button>
+      )}
+    </div>
+  );
+}

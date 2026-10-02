@@ -65,6 +65,8 @@ export const GPS = {
   /** Okno średniej prędkości (min) i minimalna długość danych w oknie, żeby jej użyć. */
   windowMin: 10,
   minWindowMin: 5,
+  /** Przyjazd z aktualnego tempa: średnia z GPS obejmuje tyle minut jazdy przed nami, dalej zwykłe prędkości. */
+  liveEtaMin: 15,
   /** Poniżej tej średniej (km/h) nie liczymy przyjazdu z prędkości — to postój lub korek. */
   minLiveKmh: 10,
   sampleEveryMs: 15_000,
@@ -258,11 +260,6 @@ export function recentSpeed(track: GpsTrack | null, now: number): number | undef
   const span = (end.t - start.t) / MIN;
   if (span < GPS.minWindowMin) return undefined;
   return ((end.km - start.km) / span) * 60;
-}
-
-/** Ta sama prędkość dla każdego typu drogi — przyjazd liczony z aktualnej średniej. */
-export function uniformSpeeds(kmh: number): Speeds {
-  return Object.fromEntries(ROAD_TYPES.map((t) => [t, kmh])) as Record<RoadType, number>;
 }
 
 /** Dolicza jazdę do liczników kierowcy. */

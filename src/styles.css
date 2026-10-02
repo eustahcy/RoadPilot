@@ -649,17 +649,23 @@ input[type="number"]::-webkit-inner-spin-button, input[type="number"]::-webkit-o
 .nav-results button { display: grid; gap: 2px; width: 100%; padding: 10px 12px; border-radius: 11px; background: var(--field); border: 1px solid var(--line-2); text-align: left; }
 .nav-results button:hover, .nav-results button:focus-visible { border-color: var(--green); }
 /* Dom, ulubione, ostatnie trasy — pod pustą wyszukiwarką celu. */
-.places { display: grid; gap: 6px; margin-top: 10px; }
-.places-head { margin-top: 6px; color: var(--dim); font-size: 11.5px; font-weight: 750; text-transform: uppercase; letter-spacing: .04em; }
-.places-list { margin-top: 0; }
-.places-list li { display: flex; gap: 4px; }
-.places-list li > button:first-child { flex: 1; min-width: 0; }
+.places { display: grid; gap: 8px; margin-top: 10px; }
+.places-tabs { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; padding: 4px; border-radius: 13px; background: var(--field); border: 1px solid var(--line-2); }
+.places-tabs button { display: flex; align-items: center; justify-content: center; gap: 6px; min-height: 42px; padding: 6px 8px; border: 0; border-radius: 10px; background: none; color: var(--dim); font: inherit; font-size: 14.5px; font-weight: 750; }
+.places-tabs button i { font-style: normal; font-size: 17px; }
+.places-tabs button em { min-width: 20px; padding: 1px 6px; border-radius: 99px; background: rgba(140, 175, 195, .18); font-style: normal; font-size: 12px; }
+.places-tabs button.on { background: rgba(66, 211, 146, .16); color: var(--text); box-shadow: inset 0 0 0 1px rgba(66, 211, 146, .5); }
+.places-tabs button.on i { color: var(--green); }
+.places-list { list-style: none; display: grid; gap: 6px; margin: 0; padding: 0; }
+.places-list li { display: flex; gap: 6px; min-width: 0; }
+.places-list .place-go { display: flex; flex: 1; align-items: center; gap: 12px; min-width: 0; width: auto; min-height: 54px; padding: 8px 12px; border-radius: 12px; background: var(--field); border: 1px solid var(--line-2); color: var(--text); font: inherit; text-align: left; }
+.places-list .place-go:hover, .places-list .place-go:focus-visible { border-color: var(--green); }
+.places-list .place-go i { flex: none; width: 24px; font-style: normal; font-size: 20px; text-align: center; color: var(--green); }
+.places-list .place-go span { display: grid; gap: 2px; min-width: 0; }
 .places-list strong, .places-list small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.place-x { flex: none; width: 44px; border-radius: 11px; background: var(--field); border: 1px solid var(--line-2); color: var(--dim); font-size: 20px; line-height: 1; }
-.place-home { display: flex; align-items: center; gap: 12px; width: 100%; padding: 10px 12px; border-radius: 11px; background: var(--field); border: 1px solid rgba(66, 211, 146, .4); text-align: left; }
-.place-home i { font-style: normal; font-size: 22px; color: var(--green); }
-.place-home span { display: grid; gap: 2px; min-width: 0; }
-.place-home small { color: var(--dim); font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.places-list small { color: var(--dim); font-size: 12.5px; }
+.places-list .place-x { flex: none; width: 48px; padding: 0; border-radius: 12px; background: var(--field); border: 1px solid var(--line-2); color: var(--dim); font-size: 22px; line-height: 1; }
+.places-empty { margin: 4px 2px; color: var(--dim); font-size: 13.5px; line-height: 1.45; }
 .place-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
 .place-chip { min-height: 36px; padding: 6px 12px; border-radius: 999px; background: var(--field); border: 1px solid var(--line-2); color: inherit; font-size: 13px; font-weight: 650; }
 .place-chip.on { border-color: var(--green); color: var(--green); }
@@ -988,14 +994,46 @@ svg .rb-exit { fill: currentColor; stroke: none; font: 900 7.5px system-ui, sans
 .nm-warn-list li { display: grid; padding: 10px 12px; border-radius: 12px; background: rgba(232, 180, 76, .1); border: 1px solid rgba(232, 180, 76, .35); }
 .nm-warn-list b { color: var(--amber); }
 .nm-warn-list span { color: #cfdae2; font-size: 13px; }
-.nm-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: calc(1.2 * var(--u)); }
-.nm-actions button { display: flex; align-items: center; gap: calc(1.4 * var(--u)); min-height: calc(9.5 * var(--u)); padding: calc(1.2 * var(--u)) calc(1.8 * var(--u)); border-radius: calc(2 * var(--u)); background: rgba(30, 44, 58, .9); border: 1px solid rgba(140, 175, 195, .22); color: #eef3f6; font: inherit; font-size: calc(2.8 * var(--u)); font-weight: 750; text-align: left; }
-.nm-actions button span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.nm-actions .hud-ico { flex: none; width: calc(4.2 * var(--u)); height: calc(4.2 * var(--u)); color: #cfdae2; }
-.nm-actions .warn, .nm-actions .warn .hud-ico { color: var(--amber); }
-.nm-actions .active, .nm-actions .active .hud-ico { color: var(--hud-green); }
-.nm-actions .end { background: rgba(120, 24, 30, .85); border-color: rgba(239, 106, 91, .55); color: #ffd7d1; }
-.nm-actions .end .hud-ico { color: #ff8a7a; }
+/* Menu ⋯ — kafelki jak w Windows: kolorowe pola z dużą ikoną i podpisem, łatwe do trafienia w jeździe. */
+.nm-tiles-menu { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-top: 22px; }
+.nm-mtile { --t: #3b4f61; position: relative; display: flex; flex-direction: column; justify-content: space-between; gap: 10px; min-height: 96px; padding: 12px; border: 0; border-radius: 12px;
+  background: linear-gradient(160deg, color-mix(in srgb, var(--t) 92%, #fff 8%), var(--t)); color: #fff; font: inherit; font-size: 14px; font-weight: 750; line-height: 1.2; text-align: left;
+  box-shadow: 0 6px 16px rgba(0, 0, 0, .3), inset 0 1px 0 rgba(255, 255, 255, .12); transition: transform .12s ease, filter .12s ease; }
+.nm-mtile:active { transform: scale(.96); }
+.nm-mtile:hover, .nm-mtile:focus-visible { filter: brightness(1.12); }
+.nm-mtile .hud-ico { width: 30px; height: 30px; color: #fff; stroke-width: 2; }
+.nm-mtile.green { --t: #1d8a4e; }
+.nm-mtile.blue { --t: #2a5fa8; }
+.nm-mtile.teal { --t: #11808a; }
+.nm-mtile.orange { --t: #c4621d; }
+.nm-mtile.amber { --t: #a8781a; }
+.nm-mtile.slate { --t: #3b4f61; }
+.nm-mtile.on::after { content: ""; position: absolute; top: 10px; right: 10px; width: 10px; height: 10px; border-radius: 50%; background: #fff; box-shadow: 0 0 0 3px rgba(255, 255, 255, .3); }
+.nm-menu-end { display: flex; align-items: center; justify-content: center; gap: 10px; width: 100%; min-height: 52px; margin-top: 10px; border-radius: 12px; background: rgba(120, 24, 30, .85); border: 1px solid rgba(239, 106, 91, .55); color: #ffd7d1; font: inherit; font-size: 15px; font-weight: 800; }
+.nm-menu-end .hud-ico { width: 22px; height: 22px; color: #ff8a7a; }
+@media (orientation: landscape) and (max-height: 599px) {
+  .nm-tiles-menu { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .nm-mtile { min-height: 78px; }
+}
+
+/* Ustawienia z menu ⋯ */
+.nav-settings { display: grid; gap: 12px; }
+.nset-tabs { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 4px; padding: 4px; border-radius: 13px; background: var(--field); border: 1px solid var(--line-2); }
+.nset-tabs button { display: grid; justify-items: center; gap: 4px; padding: 8px 4px; border: 0; border-radius: 10px; background: none; color: var(--dim); font: inherit; font-size: 12.5px; font-weight: 750; }
+.nset-tabs button .hud-ico { width: 22px; height: 22px; }
+.nset-tabs button span { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.nset-tabs button.on { background: rgba(66, 211, 146, .16); color: var(--text); box-shadow: inset 0 0 0 1px rgba(66, 211, 146, .5); }
+.nset-tabs button.on .hud-ico { color: var(--green); }
+.nset-body { display: grid; gap: 10px; }
+.nset-pick { display: grid; gap: 6px; }
+.nset-pick button, .nset-seg button { padding: 10px 12px; border-radius: 12px; background: var(--field); border: 1px solid var(--line-2); color: var(--text); font: inherit; text-align: left; }
+.nset-pick button { display: grid; gap: 2px; }
+.nset-pick small { color: var(--dim); font-size: 12.5px; }
+.nset-pick button.on, .nset-seg button.on { border-color: var(--green); background: rgba(66, 211, 146, .12); box-shadow: inset 0 0 0 1px var(--green); }
+.nset-seg { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 6px; }
+.nset-seg button { text-align: center; font-weight: 750; }
+.nset-form { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.nset-apply { position: sticky; bottom: 0; }
 /* Poziomo: lewa kolumna = karta manewru u góry i panel na dole; prędkość w lewym dolnym rogu mapy, przyciski po prawej u góry. */
 /* ── Nawigacja: układ wg makiet — jedna siatka, trzy warianty (telefon pionowo, telefon poziomo, tablet ≥ 744×744) ──
    Elementy: karta manewru (top), kafelki (tiles), przyciski (side: głos, cel, ostrzeżenia, po drodze, więcej),

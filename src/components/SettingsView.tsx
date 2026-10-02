@@ -12,7 +12,7 @@ import { EXTENDED_WORK_MIN, WorkSettings } from "../core/workday";
 import { MUSIC_APPS, MusicApp } from "../core/apps";
 import { DEFAULT_HUD_ITEMS, HUD_ITEMS, HUD_STYLES, HudItems } from "../hudConfig";
 import { floatingSupported } from "../floating";
-import { DEFAULT_VEHICLE, NavAccess, ROUTE_TYPES, Vehicle } from "../nav";
+import { DEFAULT_VEHICLE, NavAccess, NO_AVOID, ROUTE_TYPES, Vehicle } from "../nav";
 import { MapDataSection } from "./MapConsent";
 import { AdminMap } from "./AdminMap";
 import { REPORT_KINDS } from "../collect";
@@ -50,7 +50,7 @@ export type SettingsCategory = "account" | "friends" | "planning" | "work" | "se
 type Category = SettingsCategory;
 
 /** Zasięg listy „Po drodze” do wyboru (km). */
-const AHEAD_KM_OPTIONS = [20, 30, 50, 80];
+export const AHEAD_KM_OPTIONS = [20, 30, 50, 80];
 
 export function SettingsView({ initialCategory, navAccess, state, now, onSettings, onPlanTime, onReset, account, friends }: Props) {
   const { settings, driver } = state;
@@ -243,7 +243,7 @@ export function SettingsView({ initialCategory, navAccess, state, now, onSetting
 
 const fmtT = (kg: number) => String(Math.round(kg / 100) / 10).replace(".", ",");
 
-const ADR_OPTIONS: { id: Vehicle["adr"]; label: string }[] = [
+export const ADR_OPTIONS: { id: Vehicle["adr"]; label: string }[] = [
   { id: "none", label: "Brak (bez ADR)" },
   { id: "B", label: "B" },
   { id: "C", label: "C" },
@@ -280,6 +280,9 @@ function VehicleSection({ settings, navAccess, onChange }: { settings: Settings;
             ))}
           </div>
           <p className="muted small">Działa od następnej wyznaczonej trasy. Alternatywy w porównaniu tras są zawsze liczone dla wybranego rodzaju.</p>
+          <Toggle checked={!!v.avoid?.tolls} onChange={(tolls) => setV({ avoid: { ...(v.avoid ?? NO_AVOID), tolls } })} label="Unikaj dróg płatnych" />
+          <Toggle checked={!!v.avoid?.motorways} onChange={(motorways) => setV({ avoid: { ...(v.avoid ?? NO_AVOID), motorways } })} label="Unikaj autostrad" />
+          <Toggle checked={!!v.avoid?.ferries} onChange={(ferries) => setV({ avoid: { ...(v.avoid ?? NO_AVOID), ferries } })} label="Unikaj promów" />
         </section>
       )}
       {navAccess === "premium" && (

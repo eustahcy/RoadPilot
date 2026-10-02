@@ -20,8 +20,8 @@ import { SettingsCategory, SettingsView } from "./components/SettingsView";
 import { ALERTS_REFRESH, fetchRoute, refreshTraffic, TRAFFIC_ON, TRAFFIC_REFRESH, NavAccess, NavPlace, NavRoute, refreshWarnings, viaAhead, voteAlert, withWarnings } from "./nav";
 import { locate } from "./core/navmatch";
 import { planForDeadline } from "./core/deadline";
-import { GPS, recentSpeed, uniformSpeeds } from "./core/gps";
-import { remainingSegments, Route, segmentsFromProfile } from "./core/route";
+import { GPS, recentSpeed } from "./core/gps";
+import { remainingSegments, Route, segmentsFromProfile, withLiveSpeed } from "./core/route";
 import { Better, betterOption, compareScenarios, driverStatus, ScenarioId, whatIfs } from "./core/scenarios";
 import { serviceStatus } from "./core/service";
 import { planAfterStop } from "./core/stop";
@@ -227,7 +227,7 @@ function App() {
   const route = useMemo(() => {
     const full = trip.profile === "custom" ? trip.segments : segmentsFromProfile(trip.distance, trip.profile);
     const segments = remainingSegments(full, trip.doneKm);
-    return liveKmh ? new Route(segments, uniformSpeeds(liveKmh)) : new Route(segments, settings.speeds, trip.trafficPct);
+    return new Route(liveKmh ? withLiveSpeed(segments, liveKmh, GPS.liveEtaMin) : segments, settings.speeds, trip.trafficPct);
   }, [trip, settings.speeds, liveKmh]);
 
   const options = { allowExtension: settings.allowExtension, allowReducedRest: settings.allowReducedRest };
@@ -358,6 +358,7 @@ function App() {
       <NavView
         gapReview={state.gapReview}
         onGapAnswer={answerGap}
+        settings={{ value: settings, onChange: (patch) => setState((s) => ({ ...s, settings: { ...s.settings, ...patch } })) }}
         mapMode={settings.navMap}
         onMapMode={(navMap) => setState((s) => ({ ...s, settings: { ...s.settings, navMap } }))}
         nav={navOn ? { route: state.navRoute, dest: navDest, rerouting, onReroute: reroute, onVia: setVia, onEnd: endNav } : undefined}

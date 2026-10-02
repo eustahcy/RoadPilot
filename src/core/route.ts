@@ -70,7 +70,26 @@ export function remainingSegments(segments: Segment[], doneKm: number): Segment[
   for (const s of segments) {
     const km = Math.max(0, s.km - skip);
     skip = Math.max(0, skip - s.km);
-    if (km > 0) out.push({ type: s.type, km: round1(km) });
+    if (km > 0) out.push({ type: s.type, km: round1(km), ...(s.kmh !== undefined ? { kmh: s.kmh } : {}) });
+  }
+  return out;
+}
+
+/**
+ * Przyjazd z aktualnego tempa: średnia z GPS dotyczy tylko najbliższych `minutes` jazdy (korek, roboty), dalej zwykłe prędkości
+ * dróg. Dawniej obejmowała całą trasę — 10 min po 88 km/h na A4 albo 40 km/h w mieście przesuwało przyjazd na 600 km o godziny.
+ * Route bierze min(kmh, prędkość rodzaju drogi), więc szybsza jazda niż ustawiona nie skraca przyjazdu.
+ */
+export function withLiveSpeed(segments: Segment[], kmh: number, minutes: number): Segment[] {
+  let left = (kmh * minutes) / 60;
+  const out: Segment[] = [];
+  for (const s of segments) {
+    if (left <= 0) { out.push(s); continue; }
+    const km = Math.min(s.km, left);
+    const live = s.kmh !== undefined ? Math.min(s.kmh, kmh) : kmh;
+    out.push({ ...s, km: round1(km), kmh: live });
+    if (s.km - km > 0.05) out.push({ ...s, km: round1(s.km - km) });
+    left -= km;
   }
   return out;
 }

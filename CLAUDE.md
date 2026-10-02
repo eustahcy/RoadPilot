@@ -116,7 +116,7 @@ src/collect.ts     zgłoszenia REPORT_KINDS: quick (fotoradar, odcinek, policja,
 src/voice.ts       komunikaty głosowe (Web Speech, pl-PL): useNavVoice — manewry (progi zależne od prędkości) i ostrzeżenia ≤ 1 km; spokenDist
 src/nav.ts         nawigacja (beta): Vehicle, NavPlace, NavRoute, RouteType (fastest/shortest/eco → Settings.routeType, POST /api/nav/route);
                    searchPlaces / fetchRoute przez API → TomTom; AppState.navRoute tylko lokalnie (nie w sync)
-src/core/places.ts  dom, ulubione, ostatnie cele (Settings.places — synchronizowane z grupą settings): addRecent (App.chooseRoute przy każdym wyborze trasy,
+src/core/places.ts  dom, ulubione, ostatnie cele (UI: zakładki Dom / Ulubione / Historia — SavedPlaces PlaceShortcuts; uwaga: `.nav-results button` ma width 100% — przyciski w listach miejsc mają własne klasy .place-go/.place-x) (Settings.places — synchronizowane z grupą settings): addRecent (App.chooseRoute przy każdym wyborze trasy,
                    ten sam cel ≤ PLACES.sameM 100 m przenoszony na górę, max recentMax 12), toggleFavorite, setHome, normalizePlaces (normalize w state.ts);
                    UI: components/SavedPlaces.tsx — PlaceShortcuts pod pustą wyszukiwarką (HudRoutePicker w Nawigacji i NavCard), PlaceActions przy wybranym celu
 src/components/NavCard.tsx  Trasa: wyszukiwanie celu, „Wyznacz trasę dla ciężarówki”; trasa → trip.segments (profil custom) → silnik przerw
@@ -126,7 +126,8 @@ src/floating.ts    pływające okienko: canvas → captureStream → <video> →
 src/install.ts     useInstall: beforeinstallprompt łapane przy wczytaniu modułu, isStandalone; InstallButton.tsx = przycisk + instrukcja iOS
 src/launch.ts      platform() z userAgent, launch(): otwiera link z apps.ts (iOS: po 1,5 s bez przejścia → strona)
 src/nearby.ts      HUD: useStations, useParkings, useRoads (Overpass, z serwerem zapasowym) i useWeather (Open-Meteo)
-src/App.tsx        jedyne miejsce łączące stan z silnikiem (useMemo); activePlan = wybór kierowcy (AppState.choice) → plan pod rozładunek → zalecany; zakładki na pasku: Plan/Trasa/Nawigacja (zielona bańka na środku)/Historia/Ustawienia — Tachograf (tab "driver") jest w Trasie (przełącznik .subtabs);
+src/App.tsx        jedyne miejsce łączące stan z silnikiem (useMemo); przyjazd z aktualnego tempa (settings.liveEta): core/route withLiveSpeed — średnia z GPS tylko na GPS.liveEtaMin 15 min jazdy
+                   (min z prędkością drogi), dalej prędkości typów dróg — dawniej uniformSpeeds na całą trasę dawało skoki przyjazdu o godziny; activePlan = wybór kierowcy (AppState.choice) → plan pod rozładunek → zalecany; zakładki na pasku: Plan/Trasa/Nawigacja (zielona bańka na środku)/Historia/Ustawienia — Tachograf (tab "driver") jest w Trasie (przełącznik .subtabs);
                    gdy state.hud — renderuje tylko HudView; gdy state.navOpen — tylko NavView (zakładka „Nawigacja” = osobny ekran na cały ekran)
 src/components/NavView.tsx  nawigacja jako osobny system (nie HUD): HudRouteMap + HudNav (karta manewru), głos, ostrzeżenia, wyszukiwanie celu, zgłoszenia, postój;
                    układ wg makiet (2026-10-01, tylko VPS): jedna siatka CSS (.hud.navmode grid-template-areas: top / tiles / side / ctl / speed / ahead),
@@ -135,7 +136,9 @@ src/components/NavView.tsx  nawigacja jako osobny system (nie HUD): HudRouteMap 
                    przyciski przy prawej krawędzi, „więcej” jako strzałka w dół), tablet (min 744×744 px: kafelki 2×2 obok karty, przyciski pod kartą,
                    pasek prędkości względem limitu i pasek 4,5 h jazdy na kafelku przerwy, przycisk powrotu do pozycji zawsze). Karta manewru: tabliczka
                    z numerem drogi (HudNav roadBadge: A/S/krajowe czerwone, wojewódzkie żółte, E zielone), „›” = lista najbliższych manewrów;
-                   „⋯” = menu (zgłoszenie, postój, dzień, pełny ekran, zakończ nawigację, wyjdź).
+                   „⋯” = menu kafelkowe (NavView MenuTile .nm-mtile: przerwa, dzień, cel, zgłoś, ustawienia, pełny ekran, wyjdź; „Zakończ nawigację” pod spodem);
+                   „Ustawienia” → NavSettings.tsx (zakładki Trasa / Pojazd / Mapa / Miejsca: rodzaj trasy, Vehicle.avoid {tolls, motorways, ferries} → valhalla.mjs
+                   use_tolls / use_highways / use_ferry = 0, TomTom avoid=…; wymiary, ADR, motyw, 2D/3D, głos, „po drodze”; „Przelicz trasę” = nav.onReroute).
                    Przycisk 2D/3D nad zoomem (Settings.navMap): 2D = HudRouteMap flat (pitch 0, FLAT_ZOOM −2, trasa na 25 km, bez horyzontu .nm-map.flat). Karty „szklane” gradientem, bez backdrop-filter;
                    Manewr na każdym urządzeniu i w każdej orientacji (2026-10-02) jako „napisy na horyzoncie” (.nm-top .hud-nav.card bez tła, z cieniem
                    pod tekstem; w dzień ciemne napisy z jasną poświatą) — telefon pionowo: pasy w drugim wierszu, poziomo i tablet: w jednym wierszu;

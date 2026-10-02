@@ -21,7 +21,12 @@ export interface Vehicle {
   adr: "none" | "B" | "C" | "D" | "E";
   /** Prędkość maksymalna pojazdu (ogranicznik) — TomTom liczy z nią czas przejazdu. */
   maxKmh: number;
+  /** Jakich dróg unikać (Nawigacja → ⋯ → Ustawienia) — silnik omija, o ile da się dojechać inaczej. */
+  avoid?: RouteAvoid;
 }
+
+export interface RouteAvoid { tolls: boolean; motorways: boolean; ferries: boolean }
+export const NO_AVOID: RouteAvoid = { tolls: false, motorways: false, ferries: false };
 
 /** Typowy ciągnik siodłowy z naczepą (UE). */
 export const DEFAULT_VEHICLE: Vehicle = { heightM: 4, widthM: 2.55, lengthM: 16.5, weightKg: 40000, axleWeightKg: 11500, axles: 5, adr: "none", maxKmh: 90 };

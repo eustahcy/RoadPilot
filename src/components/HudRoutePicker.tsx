@@ -105,6 +105,8 @@ export function HudRoutePicker({ planner, dest: current, onClose }: { planner: H
         </div>
       ) : null}
       {dest && !editing && <PlaceActions place={dest} places={planner.places} onPlaces={planner.onPlaces} />}
+      {/* W trakcie jazdy (cel już jest, tras jeszcze nie liczymy) — zakładki Dom / Ulubione / Historia od razu, bez „Zmień”. */}
+      {dest && !editing && !busy && routes.length === 0 && <PlaceShortcuts places={planner.places} onPlaces={planner.onPlaces} onPick={pick} />}
       {(!dest || editing) && (
         <div className="nav-search">
           <input type="search" value={query} placeholder="Adres lub nazwa firmy, np. BCT Gdańsk" autoFocus onChange={(e) => { setQuery(e.target.value); setError(null); }} />

@@ -50,6 +50,13 @@ describe("silnik RoadPilot (Valhalla)", () => {
     expect(valhallaRequest({ lat: 52, lon: 19 }, { lat: 54, lon: 18 }, v, [], 0, "shortest").costing_options.truck.shortest).toBe(true);
     expect(valhallaRequest({ lat: 52, lon: 19 }, { lat: 54, lon: 18 }, v, [], 0, "eco").costing_options.truck.shortest).toBeUndefined();
   });
+  it("unikanie płatnych, autostrad i promów", () => {
+    const v = { heightM: 4, widthM: 2.55, lengthM: 16.5, weightKg: 40000, axleWeightKg: 11500, axles: 5, adr: "none", maxKmh: 90 };
+    const t = valhallaRequest({ lat: 52, lon: 19 }, { lat: 54, lon: 18 }, { ...v, avoid: { tolls: true, motorways: false, ferries: true } }).costing_options.truck;
+    expect(t).toMatchObject({ use_tolls: 0, use_ferry: 0 });
+    expect(t.use_highways).toBeUndefined();
+    expect(valhallaRequest({ lat: 52, lon: 19 }, { lat: 54, lon: 18 }, v).costing_options.truck.use_tolls).toBeUndefined();
+  });
   it("punkty pośrednie jako „through” — bez alternatyw", () => {
     const v = { heightM: 4, widthM: 2.55, lengthM: 16.5, weightKg: 40000, axleWeightKg: 11500, axles: 5, adr: "none", maxKmh: 90 };
     const q = valhallaRequest({ lat: 52, lon: 19 }, { lat: 54, lon: 18 }, v, [], 2, "fastest", [{ lat: 53, lon: 18.5 }]);

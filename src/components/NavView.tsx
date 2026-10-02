@@ -26,6 +26,8 @@ import { GapAnswer, GapReview } from "../core/gapfix";
 import { SectionLine, SectionPanel, sectionKey, sectionView, useSectionRun } from "./SectionControl";
 import { sectionLimit } from "../core/section";
 import { ActiveStopPanel, confirmStartDay, fmtTimer, StopControlsProps, StopPicker } from "./StopControls";
+import { NavSettings } from "./NavSettings";
+import { Settings } from "../state";
 
 // Nawigacja — osobny ekran (zakładka „Nawigacja”), niezależny od HUD: mapa w perspektywie, manewr i pasy,
 // ostrzeżenia, komunikaty głosowe, wyszukiwanie celu i porównanie tras, znajomi na mapie, zgłoszenia.
@@ -64,6 +66,8 @@ export interface NavViewProps {
   /** Luka do wyjaśnienia (aplikacja była zamknięta) i zapis odpowiedzi — przelicza tachograf. */
   gapReview?: GapReview | null;
   onGapAnswer?: (a: GapAnswer) => void;
+  /** Ustawienia prosto z menu ⋯ (pojazd, drogi, mapa, „po drodze”). */
+  settings?: { value: Settings; onChange: (patch: Partial<Settings>) => void };
 }
 
 function NavVoice({ nav, track, kmh, enabled, section }: { nav?: HudNavData; track: NavTrack; kmh: number | null; enabled: boolean; section: SectionVoice }) {
@@ -97,6 +101,7 @@ export function NavView(p: NavViewProps) {
   const [warnList, setWarnList] = useState(false);
   const [aheadList, setAheadList] = useState(false);
   const [planning, setPlanning] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [zoomOffset, setZoomOffset] = useState(0);
   /** Mapa przesunięta palcem — null = prowadzenie (mapa jedzie za nami). */
   const [browse, setBrowse] = useState<MapBrowse | null>(null);
@@ -323,18 +328,21 @@ export function NavView(p: NavViewProps) {
           <div className="hud-sheet-body">
             <button className="hud-sheet-close" aria-label="Zamknij" onClick={() => setMenu(false)}>×</button>
             <div className="stop-label">{refs ? `${refs} · ` : ""}{route ? fmtKm(route.lengthKm) : "Bez trasy"}{p.nav?.dest ? ` → ${p.nav.dest.label}` : ""}</div>
-            <div className="nm-actions">
-              <button className={sc.stop ? "active" : ""} onClick={openSheet}><Icon name="coffee" /><span>{sc.stop ? (sc.stop.dayEnd ? "Odpoczynek" : "Trwający postój") : "Zaczynam przerwę"}</span></button>
-              {p.gapReview && p.onGapAnswer && <button className={p.gapReview.answer ? "" : "warn"} onClick={() => { setGapOpen(true); setMenu(false); }}><Icon name="clock" /><span>Co robiłem bez aplikacji</span></button>}
+            <div className="nm-tiles-menu">
+              <MenuTile icon="coffee" tone={sc.stop ? "green on" : "green"} label={sc.stop ? (sc.stop.dayEnd ? "Odpoczynek" : "Trwający postój") : "Przerwa"} onClick={openSheet} />
               {sc.stop?.dayEnd ? (
-                <button onClick={() => { if (confirmStartDay(sc.stop, now)) sc.onStartDay(); setMenu(false); }}><Icon name="clock" /><span>Rozpocznij dzień</span></button>
+                <MenuTile icon="sun" tone="blue" label="Rozpocznij dzień" onClick={() => { if (confirmStartDay(sc.stop, now)) sc.onStartDay(); setMenu(false); }} />
               ) : (
-                <button onClick={() => { if (endDay()) setMenu(false); }}><Icon name="clock" /><span>Zakończ dzień</span></button>
+                <MenuTile icon="moon" tone="blue" label="Zakończ dzień" onClick={() => { if (endDay()) setMenu(false); }} />
               )}
-              {fullscreenSupported() && <button aria-pressed={fullscreen} onClick={() => { toggleFullscreen(); setMenu(false); }}><Icon name="nav" /><span>{fullscreen ? "Zamknij pełny ekran" : "Pełny ekran"}</span></button>}
-              {p.nav?.onEnd && (p.nav.route || p.nav.dest) && <button className="end" onClick={() => { setMenu(false); endNav(); }}><Icon name="close" /><span>Zakończ nawigację</span></button>}
-              <button onClick={p.onExit}><Icon name="finish" /><span>Wyjdź z nawigacji</span></button>
+              {p.planner && <MenuTile icon="search" tone="teal" label="Cel i trasy" onClick={() => { setPlanning(true); setMenu(false); }} />}
+              {p.report && <MenuTile icon="flag" tone="orange" label="Zgłoś" onClick={() => { setReportAt(null); setReporting(true); setMenu(false); }} />}
+              {p.settings && <MenuTile icon="gear" tone="slate" label="Ustawienia" onClick={() => { setSettingsOpen(true); setMenu(false); }} />}
+              {p.gapReview && p.onGapAnswer && <MenuTile icon="clock" tone={p.gapReview.answer ? "amber" : "amber on"} label="Co robiłem bez aplikacji" onClick={() => { setGapOpen(true); setMenu(false); }} />}
+              {fullscreenSupported() && <MenuTile icon="expand" tone="slate" label={fullscreen ? "Zamknij pełny ekran" : "Pełny ekran"} onClick={() => { toggleFullscreen(); setMenu(false); }} />}
+              <MenuTile icon="exit" tone="slate" label="Wyjdź z nawigacji" onClick={p.onExit} />
             </div>
+            {p.nav?.onEnd && (p.nav.route || p.nav.dest) && <button className="nm-menu-end" onClick={() => { setMenu(false); endNav(); }}><Icon name="close" />Zakończ nawigację</button>}
           </div>
         </div>
       )}
@@ -425,6 +433,14 @@ export function NavView(p: NavViewProps) {
           </div>
         </div>
       )}
+      {settingsOpen && p.settings && (
+        <div className="hud-sheet" onClick={(e) => e.target === e.currentTarget && setSettingsOpen(false)}>
+          <div className="hud-sheet-body">
+            <button className="hud-sheet-close" aria-label="Zamknij" onClick={() => setSettingsOpen(false)}>×</button>
+            <NavSettings settings={p.settings.value} onChange={p.settings.onChange} voice={p.voice} onReroute={p.nav?.dest ? () => { p.nav!.onReroute(); setSettingsOpen(false); } : undefined} />
+          </div>
+        </div>
+      )}
       {planning && p.planner && (
         <div className="hud-sheet" onClick={(e) => e.target === e.currentTarget && setPlanning(false)}>
           <div className="hud-sheet-body wide">
@@ -434,6 +450,16 @@ export function NavView(p: NavViewProps) {
         </div>
       )}
     </div>
+  );
+}
+
+/** Kafelek menu ⋯ (styl kafelków Windows): duża ikona na kolorowym polu i podpis. */
+function MenuTile({ icon, label, tone, onClick }: { icon: Parameters<typeof Icon>[0]["name"]; label: string; tone: string; onClick: () => void }) {
+  return (
+    <button className={`nm-mtile ${tone}`} onClick={onClick}>
+      <Icon name={icon} />
+      <span>{label}</span>
+    </button>
   );
 }
 

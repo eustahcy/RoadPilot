@@ -20,6 +20,8 @@ export interface MenuItem {
   disabled?: boolean;
   /** Drugi wiersz pod podpisem (np. „włączone”). */
   sub?: string;
+  /** Nagłówek grupy — przy pierwszej pozycji grupy (menu główne). */
+  group?: string;
 }
 
 export interface MenuPage {
@@ -48,12 +50,13 @@ export function NavMenu({ page, voice, onBack, onRecenter }: { page: MenuPage; v
         <div className="nmm-content">{page.content}</div>
       ) : (
         <div className="nmm-items">
-          {page.items?.map((it) => (
+          {page.items?.flatMap((it) => [
+            ...(it.group ? [<div key={`g-${it.id}`} className="nmm-group">{it.group}</div>] : []),
             <button key={it.id} className={`nmm-item ${it.tone ?? ""} ${it.disabled ? "disabled" : ""}`} onClick={it.disabled ? undefined : it.onClick} aria-disabled={it.disabled}>
               <span className="nmm-label">{it.label}{it.sub && <small>{it.sub}</small>}</span>
               <span className="nmm-ico">{ICONS[it.icon]}{it.dot && <i className="nmm-dot" />}</span>
-            </button>
-          ))}
+            </button>,
+          ])}
         </div>
       )}
       {voice.supported && !page.content && (

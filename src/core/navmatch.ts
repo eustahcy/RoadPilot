@@ -24,6 +24,8 @@ export interface Milestone {
   km: number;
   v: number;
   ref: string;
+  /** Odległość słupka od osi trasy (m) — przy dwóch drogach obok siebie bliższe słupki są „nasze”. */
+  off?: number;
 }
 
 const REF_RE = /^(?:[AS]\s?\d{1,2}[a-z]?|DK\s?\d{1,3}|DW\s?\d{3}|\d{1,3})$/i;
@@ -34,8 +36,8 @@ const normRef = (r: string) => r.toUpperCase().replace(/\s/g, "").replace(/^D[KW
  * Droga, którą jedziemy (z ostatniego manewru przed nami): numer (A1, S19, 91) i nazwa (patron / ulica), np.
  * { ref: "A1", name: "Autostrada Bursztynowa" }. E-numery pomijamy, gdy jest krajowy.
  */
-export function roadAt(instructions: NavInstruction[], km: number): { ref?: string; name?: string } | undefined {
-  // Nazwy z manewru; bez nich (trasy TomTom) — numery dróg z treści („Podążaj A1/E75 w kierunku Gdańsk”).
+export function roadAt(instructions: NavInstruction[], km: number): { ref?: string; e?: string; name?: string } | undefined {
+  // Nazwy z manewru; bez nich (trasy TomTom, starsze trasy) — numery dróg z treści („Podążaj A1/E75 w kierunku Gdańsk”).
   const namesOf = (i: NavInstruction) => i.names ?? (i.street ? [i.street] : [...i.text.matchAll(/\b((?:[AS]|DK|DW)\s?\d{1,3}|E\s?\d{2,3})\b/g)].map((m) => m[1]));
   let names: string[] = [];
   for (const i of instructions) {
@@ -44,10 +46,11 @@ export function roadAt(instructions: NavInstruction[], km: number): { ref?: stri
     if (n.length) names = n;
   }
   if (!names.length) return undefined;
+  const isE = (n: string) => /^E\s?\d{2,3}$/i.test(n.trim());
   const ref = names.find((n) => REF_RE.test(n.trim()));
-  const name = names.find((n) => !REF_RE.test(n.trim()) && !/^E\s?\d{2,3}$/i.test(n.trim()));
-  const e = names.find((n) => /^E\s?\d{2,3}$/i.test(n.trim()));
-  return { ref: ref?.replace(/\s/g, "") ?? e?.replace(/\s/g, ""), name };
+  const name = names.find((n) => !REF_RE.test(n.trim()) && !isE(n));
+  const e = names.find(isE)?.replace(/\s/g, "");
+  return ref ? { ref: ref.replace(/\s/g, ""), e, name } : { ref: e, name };
 }
 
 /**

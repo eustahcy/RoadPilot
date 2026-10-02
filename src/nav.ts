@@ -125,7 +125,8 @@ export interface RouteWarning {
   km: number;
   /** Koniec odcinka (odcinkowy pomiar prędkości). */
   toKm?: number;
-  source: "osm" | "report";
+  /** gddkia = utrudnienia GDDKiA (drogi krajowe, plik XML odświeżany co 10 min). */
+  source: "osm" | "report" | "gddkia";
   id: string;
   kind: string;
   value: number | null;
@@ -166,7 +167,8 @@ export const isAhead = (w: RouteWarning, km: number) => w.km >= km - 0.05 || (w.
 
 /** Opis ostrzeżenia dla kierowcy: „Wiadukt 3,5 m”, „Nacisk osi 10 t”, „Zakaz dla ciężarówek”, „Fotoradar 70 km/h”. */
 export function warningText(w: RouteWarning): string {
-  return w.note ? `${baseWarningText(w)} · ${w.note}` : baseWarningText(w);
+  // Opis GDDKiA (objazd) jest długi — pokazujemy go osobno pod tytułem, nie w nim.
+  return w.note && w.source !== "gddkia" ? `${baseWarningText(w)} · ${w.note}` : baseWarningText(w);
 }
 
 function baseWarningText(w: RouteWarning): string {
@@ -187,8 +189,8 @@ function baseWarningText(w: RouteWarning): string {
     case "truck_ban": return "Zakaz dla ciężarówek (zgłoszenie)";
     case "incline": return `Stromy odcinek${n}%`;
     case "curve": return `Ciasny zakręt${w.value !== null ? ` (promień ${w.value} m)` : ""}`;
-    case "closed": return "Droga zamknięta (zgłoszenie)";
-    case "roadworks": return `${w.raw === "narrow" ? "Zwężenie pasa — roboty" : w.raw === "contraflow" ? "Ruch po drugiej jezdni — roboty" : "Roboty drogowe"}${w.toKm !== undefined ? ` · ${fmtLen(w.toKm - w.km)}` : ""}`;
+    case "closed": return w.source === "gddkia" ? "Droga zamknięta (GDDKiA) — sprawdź objazd" : "Droga zamknięta (zgłoszenie)";
+    case "roadworks": return `${w.raw === "narrow" ? "Zwężenie pasa — roboty" : w.raw === "contraflow" ? "Ruch po drugiej jezdni — roboty" : w.raw === "alternating" ? "Ruch wahadłowy — roboty" : "Roboty drogowe"}${w.toKm !== undefined ? ` · ${fmtLen(w.toKm - w.km)}` : ""}${w.source === "gddkia" && w.value ? ` · ${w.value} km/h` : ""}`;
     default: return w.kind;
   }
 }
@@ -210,15 +212,15 @@ function curveWarnings(route: NavRoute, vehicle: Vehicle, from = -Infinity, to =
 /** Ostrzeżenia dla trasy z naszej bazy — błąd nie blokuje nawigacji (trasa zostaje bez ostrzeżeń). */
 export async function withWarnings(token: string, route: NavRoute, vehicle: Vehicle): Promise<NavRoute> {
   try {
-    const r = await api<{ warnings: RouteWarning[]; pois?: RoutePoi[] }>("POST", "/nav/warnings", { points: route.points, vehicle, tolls: true, lengthKm: route.lengthKm, travelMin: route.travelMin }, token);
-    return { ...route, warnings: [...r.warnings, ...curveWarnings(route, vehicle)].sort((a, b) => a.km - b.km), pois: mergeStations(r.pois ?? []), poisV: POIS_VERSION };
+    const r = await api<{ warnings: RouteWarning[]; pois?: RoutePoi[]; milestones?: Milestone[] }>("POST", "/nav/warnings", { points: route.points, vehicle, tolls: true, lengthKm: route.lengthKm, travelMin: route.travelMin }, token);
+    return { ...route, warnings: [...r.warnings, ...curveWarnings(route, vehicle)].sort((a, b) => a.km - b.km), pois: mergeStations(r.pois ?? []), poisV: POIS_VERSION, ...(r.milestones ? { milestones: r.milestones } : {}) };
   } catch {
     return route;
   }
 }
 
 /** Wersja danych miejsc przy trasie — starsza (np. bez marek stacji w MOP-ach) jest pobierana od nowa. */
-export const POIS_VERSION = 2;
+export const POIS_VERSION = 3;
 
 /** Po minięciu fotoradaru / kontroli: „nadal jest” (+1) / „nie ma” (-1). */
 export function voteAlert(token: string, w: RouteWarning, vote: 1 | -1) {

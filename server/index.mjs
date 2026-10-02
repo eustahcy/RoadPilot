@@ -11,6 +11,7 @@ import { badTurnClusters } from "./mapcheck.mjs";
 import { HERE_MAX_POINTS, limitHere, osrmLanes, parseValhalla, parseValhallaAlternates, roadInfo, traceChunks, tracePoints, traceRequest, valhallaRequest } from "./valhalla.mjs";
 import { LIVE, liveSections } from "./livetraffic.mjs";
 import { routeMilestones } from "./milestones.mjs";
+import { gddkiaItems, gddkiaWarnings } from "./gddkia.mjs";
 import { ALERT_KINDS, ALERT_TTL_H, applyConditions, applyVotes, blockingPoints, dropCopiedBridgeHeights, routeAlerts, routeBoxes, routeWarnings } from "./warnings.mjs";
 import { compareReports, REPORT_TO_OSM } from "./compare.mjs";
 import { parseRoutes, parseSearch, ROUTE_TYPES, routeError, routeUrl, searchUrl, validPoint } from "./nav.mjs";
@@ -711,6 +712,26 @@ routes["POST /api/password/reset"] = async (req) => {
  * `timing` — do ograniczeń warunkowych: { kmh } średnia prędkość trasy (czas przejazdu każdego miejsca = teraz + km / kmh),
  * { destKm } km celu (dojazd w strefie). Domyślnie 60 km/h i koniec wysłanego kawałka.
  */
+/** Utrudnienia GDDKiA przy trasie; kierunek odcinka z naszych słupków kilometrowych. Błąd — bez nich (trasa i tak się liczy). */
+async function gddkiaFor(pts, vehicle) {
+  try {
+    const items = await gddkiaItems();
+    if (!items.length) return [];
+    const near = [];
+    for (const box of routeBoxes(pts, 25, 0.003)) near.push(...items.filter((u) => u.lat >= box.minLat && u.lat <= box.maxLat && u.lon >= box.minLon && u.lon <= box.maxLon));
+    if (!near.length) return [];
+    const rows = [];
+    for (const box of routeBoxes(pts, 25, 0.002)) {
+      const [r] = await db.query("SELECT lat, lon, km, ref FROM osm_milestones WHERE lat BETWEEN ? AND ? AND lon BETWEEN ? AND ?", [box.minLat, box.maxLat, box.minLon, box.maxLon]);
+      rows.push(...r);
+    }
+    return gddkiaWarnings(pts, [...new Set(near)], vehicle, routeMilestones(pts, rows));
+  } catch (e) {
+    console.error("gddkia", e);
+    return [];
+  }
+}
+
 async function findWarnings(pts, vehicle, alerts = true, timing = {}) {
   const warnings = [];
   for (const box of routeBoxes(pts)) {
@@ -754,6 +775,9 @@ async function findWarnings(pts, vehicle, alerts = true, timing = {}) {
     warnings.push(...(found.length ? applyVotes(found, await alertVotes(found)) : []));
   }
   warnings.sort((a, b) => a.km - b.km);
+  // Utrudnienia GDDKiA (drogi krajowe): roboty, ruch po drugiej jezdni, wahadło, zamknięcia, ograniczenia masy / szerokości.
+  warnings.push(...(await gddkiaFor(pts, vehicle)));
+  warnings.sort((a, b) => a.km - b.km);
   const unique = warnings.filter((w, i) => !warnings.slice(0, i).some((p) => p.kind === w.kind && w.km - p.km < 0.15));
   // Zakazy w godzinach i „nie dotyczy dojazdu” — w chwili, w której tam będziemy.
   const startKm = pts[0][2];
@@ -793,7 +817,9 @@ routes["POST /api/nav/warnings"] = async (req, user) => {
   // Aplikacja podaje długość i czas całej trasy (kawałek przy odświeżaniu nie kończy się na celu).
   const lengthKm = Number(body.lengthKm), travelMin = Number(body.travelMin);
   const timing = lengthKm > 0 && travelMin > 0 ? { kmh: (lengthKm / travelMin) * 60, destKm: lengthKm, startKm: 0 } : {};
-  return [200, { warnings: await findWarnings(pts, vehicle, true, timing), pois: body.pois === false ? undefined : await findPois(pts, body.tolls === true) }];
+  // Z pinezkami (pełna trasa) także słupki kilometrowe — trasy zapisane w telefonie przed ich dodaniem dostają je tu.
+  const full = body.pois !== false;
+  return [200, { warnings: await findWarnings(pts, vehicle, true, timing), pois: full ? await findPois(pts, body.tolls === true) : undefined, milestones: full ? (await withMilestones({ points: pts })).milestones : undefined }];
 };
 
 /** Najwięcej prostokątów TomTom na jedno odświeżenie (trasa przed nami ~150 km to zwykle 1–3). */

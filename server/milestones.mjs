@@ -33,7 +33,7 @@ export function routeMilestones(route, rows) {
   const out = [];
   for (const r of rows) {
     const p = locate(r.lat, r.lon);
-    if (p && p.offM <= NEAR_M) out.push({ km: Math.round(p.km * 1000) / 1000, v: Number(r.km), ref: r.ref ?? "" });
+    if (p && p.offM <= NEAR_M) out.push({ km: Math.round(p.km * 1000) / 1000, v: Number(r.km), ref: r.ref ?? "", off: Math.round(p.offM) });
   }
   return out.sort((a, b) => a.km - b.km);
 }

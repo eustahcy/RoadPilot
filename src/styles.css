@@ -1879,3 +1879,27 @@ svg .rb-exit { fill: currentColor; stroke: none; font: 900 7.5px system-ui, sans
 .hud.navmode.day .nm-side-col .nm-btn.report .hud-ico { color: #c4302b; }
 .nm-side-col .nm-btn:active { background: rgba(255, 255, 255, .08); }
 .hud.navmode.day .nm-side-col .nm-btn:active { background: rgba(60, 50, 30, .08); }
+.nm-warn-list .nwl-note { white-space: normal; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+
+/* Prędkość: < 10 km/h neutralna (biała / czarna w dzień), przepisowo zielona, do +5 km/h pomarańczowa, wyżej czerwona. Napis km/h neutralny. */
+.nm-speed strong.slow { color: #fff; text-shadow: none; }
+.nm-speed strong.ok { color: var(--hud-green); }
+.nm-speed-val span { color: #c9d5de; }
+.hud.navmode.day .nm-speed strong.slow { color: #1f2a33; }
+.hud.navmode.day .nm-speed strong.ok { color: #0d8a43; }
+.hud.navmode.day .nm-speed strong.warn { color: #d9820b; text-shadow: none; }
+.hud.navmode.day .nm-speed strong.over { color: #d42b25; text-shadow: none; }
+.hud.navmode.day .nm-speed-val span { color: #1f2a33; }
+
+/* Menu ⋯ w grupach: nagłówek grupy (pionowo — wiersz nad pozycjami, poziomo — pionowy podpis między kolumnami). Pozycje mniejsze, by grupy mieściły się bez długiego przewijania. */
+.nmm-group { flex: none; margin: 14px 10px 2px; padding-top: 10px; border-top: 1px solid rgba(255, 255, 255, .14); color: var(--acc); font-size: 13px; font-weight: 850; letter-spacing: .08em; text-transform: uppercase; }
+.nmm-items > .nmm-group:first-child { margin-top: 0; padding-top: 0; border-top: 0; }
+.nmm-items .nmm-item { min-height: 84px; }
+.nmm-items .nmm-ico { width: 64px; height: 64px; }
+@media (orientation: landscape) {
+  .nmm-group { align-self: stretch; display: flex; align-items: center; margin: 0 4px; padding: 0 0 0 10px; border-top: 0; border-left: 1px solid rgba(255, 255, 255, .16); writing-mode: vertical-rl; transform: rotate(180deg); }
+  .nmm-items > .nmm-group:first-child { padding-left: 0; border-left: 0; margin-left: 0; }
+  .nmm-items .nmm-ico { width: 84px; height: 84px; }
+}
+@media (min-width: 744px) and (min-height: 744px) and (orientation: portrait) { .nmm-group { grid-column: 1 / -1; } }
+@media (orientation: landscape) { .nmm-items > .nmm-group:first-child { display: flex; } }

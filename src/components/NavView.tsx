@@ -212,12 +212,14 @@ export function NavView(p: NavViewProps) {
   // Nad paskiem: droga, którą jedziemy, i kilometr drogi (słupki z OSM), np. „S19 · Droga ekspresowa im. Lecha Kaczyńskiego · km 432”.
   // Droga z manewrów; gdy słupki przy trasie mówią o innej drodze (wjazd na A1 bez nazwy w manewrze) — numer ze słupków.
   const insRoad = onRoute ? roadAt(route.instructions, pos.km) : undefined;
-  const msRef = onRoute ? route.milestones?.filter((m) => m.ref && Math.abs(m.km - pos.km) <= 2).sort((a, b) => Math.abs(a.km - pos.km) - Math.abs(b.km - pos.km))[0]?.ref : undefined;
-  const road = msRef && insRoad?.ref?.replace(/^D[KW]\s?/, "") !== msRef.replace(/^([AS]\d{1,2})[a-z]$/i, "$1") ? { ref: msRef.replace(/^([AS]\d{1,2})[a-z]$/i, "$1") } as { ref?: string; name?: string } : insRoad;
+  // Słupki w pobliżu: numer drogi z najbliższych osi trasy (A1 obok DK 91 — liczą się słupki A1).
+  const msRef = onRoute ? route.milestones?.filter((m) => m.ref && Math.abs(m.km - pos.km) <= 2).sort((a, b) => (a.off ?? 99) - (b.off ?? 99) || Math.abs(a.km - pos.km) - Math.abs(b.km - pos.km))[0]?.ref : undefined;
+  const road = msRef && insRoad?.ref?.replace(/^D[KW]\s?/, "") !== msRef.replace(/^([AS]\d{1,2})[a-z]$/i, "$1") ? { ref: msRef.replace(/^([AS]\d{1,2})[a-z]$/i, "$1") } as { ref?: string; e?: string; name?: string } : insRoad;
   const roadKm = onRoute ? milestoneAt(route.milestones, pos.km, road?.ref) : undefined;
   const roadLine = road && (road.ref || road.name) ? (
     <div className="nm-roadline">
       {road.ref && <b className={`nm-roadref ${/^\d{3}$/.test(road.ref) ? "yellow" : /^E/.test(road.ref) ? "green" : ""}`}>{road.ref}</b>}
+      {road.e && road.e !== road.ref && <b className="nm-roadref green">{road.e}</b>}
       {road.name && <span>{road.name}</span>}
       {roadKm !== undefined && (
         <em>
@@ -290,25 +292,26 @@ export function NavView(p: NavViewProps) {
   };
   const go = (f: () => void) => () => { setMenu(false); f(); };
   const home = p.planner?.places.home;
+  // Menu w grupach (nagłówek przy pierwszej pozycji grupy): cel → trasa → czas pracy → na drodze → aplikacja.
   const menuItems: MenuItem[] = [
     ...(p.planner ? [
-      { id: "search", icon: "search" as const, label: "Szukaj", onClick: go(() => setPlanning({ search: true })) },
+      { id: "search", group: "Dokąd jedziemy", icon: "search" as const, label: "Szukaj", onClick: go(() => setPlanning({ search: true })) },
       { id: "home", icon: "home" as const, label: "Jedź do domu", onClick: go(() => setPlanning(home ? { go: home } : { tab: "home" })) },
+      { id: "places", icon: "places" as const, label: "Moje miejsca", onClick: go(() => setPlanning({ tab: "fav" })) },
       { id: "recent", icon: "recent" as const, label: "Ostatnie cele", onClick: go(() => setPlanning({ tab: "recent" })) },
     ] : []),
-    ...(route ? [{ id: "route", icon: "route" as const, label: "Aktualna trasa", onClick: () => setMenuPage("route") }] : []),
-    ...(p.planner ? [{ id: "places", icon: "places" as const, label: "Moje miejsca", onClick: go(() => setPlanning({ tab: "fav" })) }] : []),
-    { id: "break", icon: "break", label: sc.stop ? (sc.stop.dayEnd ? "Odpoczynek" : "Trwający postój") : "Przerwa", dot: !!sc.stop, onClick: go(() => setSheet(true)) },
+    ...(route ? [{ id: "route", group: "Trasa", icon: "route" as const, label: "Aktualna trasa", onClick: () => setMenuPage("route") }] : []),
+    ...(p.nav?.onEnd && (p.nav.route || p.nav.dest) ? [{ id: "end", ...(route ? {} : { group: "Trasa" }), icon: "endNav" as const, label: "Zakończ nawigację", tone: "danger" as const, onClick: go(endNav) }] : []),
+    { id: "break", group: "Czas pracy", icon: "break", label: sc.stop ? (sc.stop.dayEnd ? "Odpoczynek" : "Trwający postój") : "Przerwa", dot: !!sc.stop, onClick: go(() => setSheet(true)) },
     sc.stop?.dayEnd
       ? { id: "day", icon: "dayStart", label: "Rozpocznij dzień", onClick: go(() => { if (confirmStartDay(sc.stop, now)) sc.onStartDay(); }) }
       : { id: "day", icon: "dayEnd", label: "Zakończ dzień", onClick: go(() => { endDay(); }) },
-    ...(p.report ? [{ id: "report", icon: "report" as const, label: "Zgłoś", onClick: go(() => { setReportAt(null); setReporting(true); }) }] : []),
     ...(p.gapReview && p.onGapAnswer ? [{ id: "gap", icon: "gap" as const, label: "Co robiłem bez aplikacji", dot: !p.gapReview.answer, onClick: go(() => setGapOpen(true)) }] : []),
-    ...(p.settings ? [{ id: "settings", icon: "settings" as const, label: "Ustawienia", onClick: () => setMenuPage("settings") }] : []),
+    ...(p.report ? [{ id: "report", group: "Na drodze", icon: "report" as const, label: "Zgłoś", onClick: go(() => { setReportAt(null); setReporting(true); }) }] : []),
+    ...(p.settings ? [{ id: "settings", group: "Aplikacja", icon: "settings" as const, label: "Ustawienia", onClick: () => setMenuPage("settings") }] : []),
+    ...(p.license ? [{ id: "license", ...(p.settings ? {} : { group: "Aplikacja" }), icon: "license" as const, label: "Licencja", sub: p.license.status, onClick: () => setMenuPage("license") }] : []),
+    { id: "support", ...(p.settings || p.license ? {} : { group: "Aplikacja" }), icon: "support", label: "Wsparcie", onClick: () => setMenuPage("support") },
     ...(fullscreenSupported() ? [{ id: "fs", icon: "fullscreen" as const, label: fullscreen ? "Zamknij pełny ekran" : "Pełny ekran", onClick: go(toggleFullscreen) }] : []),
-    ...(p.nav?.onEnd && (p.nav.route || p.nav.dest) ? [{ id: "end", icon: "endNav" as const, label: "Zakończ nawigację", tone: "danger" as const, onClick: go(endNav) }] : []),
-    ...(p.license ? [{ id: "license", icon: "license" as const, label: "Licencja", sub: p.license.status, onClick: () => setMenuPage("license") }] : []),
-    { id: "support", icon: "support", label: "Wsparcie", onClick: () => setMenuPage("support") },
     { id: "exit", icon: "exit", label: "Wyjdź z nawigacji", onClick: p.onExit },
   ];
   // Aktualna trasa (jak w TomTom): pomiń postój, inna trasa, omiń blokadę, płatne, ulubione, wskazówki.
@@ -468,7 +471,7 @@ export function NavView(p: NavViewProps) {
       {/* Nasza prędkość i obok ograniczenie — jedno spojrzenie, jak w nawigacjach. */}
       <div className="nm-speed">
         <div className="nm-speed-val">
-          <strong className={speed === null ? "none" : tone ?? ""}>{speed ?? "—"}</strong>
+          <strong className={speed === null ? "none" : speed < SLOW_KMH ? "slow" : tone ?? "ok"}>{speed ?? "—"}</strong>
           <span>{weakGps ? "GPS słaby" : "km/h"}</span>
         </div>
         {limit !== undefined && <span className="hud-limit nm-limit" aria-label={`Ograniczenie ${limit} km/h`}>{limit}</span>}
@@ -579,7 +582,8 @@ export function NavView(p: NavViewProps) {
                 {upcoming.map((w) => (
                   <li key={w.source + w.id + w.kind} className={w.soft ? "soft" : ""}>
                     <i><ReportIcon kind={WARN_ICON[w.kind] ?? w.kind} /></i>
-                    <span className="nwl-text"><b>{warningText(w)}</b>{(w.name || w.source === "report") && <small>{[w.name, w.source === "report" ? "zgłoszenie kierowcy" : ""].filter(Boolean).join(" · ")}</small>}</span>
+                    <span className="nwl-text"><b>{warningText(w)}</b>{(w.name || w.source !== "osm") && <small>{[w.name, w.source === "report" ? "zgłoszenie kierowcy" : w.source === "gddkia" ? "źródło: GDDKiA" : ""].filter(Boolean).join(" · ")}</small>}
+                    {w.source === "gddkia" && w.note && <small className="nwl-note">{w.note}</small>}</span>
                     <strong>{pos ? (w.toKm !== undefined && pos.km >= w.km ? `trwa · ${fmtKm(w.toKm - pos.km)}` : fmtKm(Math.max(0, w.km - pos.km))) : `km ${Math.round(w.km)}`}</strong>
                   </li>
                 ))}
@@ -675,6 +679,8 @@ const MENU_PARENT: Record<MenuKey, MenuKey | null> = { main: null, route: "main"
 const WARN_ICON: Record<string, string> = { axle: "weight", hgv: "truck_ban", red_light: "camera", width: "height", length: "height", incline: "other", curve: "other" };
 
 const WORKS_KEY = "roadpilot:worksOpen";
+/** Prędkość: do tylu km/h kolor neutralny (manewrowanie, korek), wyżej zielona / pomarańczowa / czerwona względem limitu. */
+const SLOW_KMH = 10;
 /** MOP ze stacją na pasku: co tyle ms zmiana „stacja (marka)” ↔ „parking (nazwa MOP-u)”. */
 const STRIP_SWAP_MS = 3500;
 /** Podpis punktu pośredniego dodanego z propozycji przerwy — po nim rozpoznajemy „nasz” postój do ponownego sprawdzenia. */

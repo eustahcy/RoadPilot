@@ -12,6 +12,6 @@ describe("słupki kilometrowe", () => {
     const row = milestoneRow({ geometry: { coordinates: [19, 52.009] }, properties: { distance: "358", ref: "A1" } });
     expect(row).toMatchObject({ km: 358, ref: "A1" });
     const route = Array.from({ length: 21 }, (_, i) => [52 + i * 0.0009, 19, i * 0.1]);
-    expect(routeMilestones(route, [row, { ...row, lon: 19.01 }])).toEqual([{ km: 1, v: 358, ref: "A1" }]);
+    expect(routeMilestones(route, [row, { ...row, lon: 19.01 }])).toEqual([{ km: 1, v: 358, ref: "A1", off: 0 }]);
   });
 });

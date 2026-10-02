@@ -297,6 +297,11 @@ Motywy Nawigacji (Settings.mapTheme): auto / day / night / glass — day: jasne 
                    Pasy od NAV.lanesAheadKm 5 km przed miejscem wyboru; strzałka do jazdy wypełnia się na zielono od dołu (.go-fill clip-path) i pulsuje 3× do 2,2× (.go-pulse).
                    Kafelek „do celu”: podpis, km, pod nim flaga i czas jazdy bez postojów (.nm-dest). Szuflada: kwadratowe przyciski z kreskami między nimi, niżej (margin-top 14u). Długie nazwy na pasku „po drodze”: NavView ScrollName (przedrostek MOP / Parking stoi, reszta przewija się tam i z powrotem).
                    valhallaOnce: przy błędzie 442 ponowienie z szerszym dopasowaniem punktów (SNAP_RETRIES) zanim TomTom.
+server/gddkia.mjs  utrudnienia GDDKiA (plik XML utrdane.xml, CC BY-SA 4.0, cache 10 min): parseGddkia, gddkiaWarnings — odcinek po pikietażu
+                   z naszych słupków (routeKmAt), bez nich ze współrzędnych ≤ 80 m (pomijane, gdy obok słupki innej drogi bliżej osi); source „gddkia”,
+                   kind roadworks (raw contraflow / alternating / narrow / works, value = limit km/h) / closed (soft) / weight / axle / height / width.
+                   /api/nav/warnings zwraca też milestones (trasy zapisane przed słupkami). Nad paskiem także numer E (roadAt e).
+                   Prędkość: < 10 km/h neutralna, przepisowo zielona, do +5 pomarańczowa, wyżej czerwona. Menu ⋯ w grupach (MenuItem.group).
 Menu ⋯ w Nawigacji to prostokąt .nm-menu-btn przy pasku na dole (grid area „more”).
 scripts/weekly-update.sh  timer systemd roadpilot-weekly (niedziela 01:00 UTC): osm-update → Valhalla w /opt/roadpilot-valhalla.new (Metin2 — jeśli
                    ktoś go uruchomi — zatrzymany na czas budowy i wznawiany) → podmiana + test trasy (błąd = powrót) → kafelki → speed-build, suspects-build → restart API;

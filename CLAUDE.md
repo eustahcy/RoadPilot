@@ -149,6 +149,12 @@ src/components/NavView.tsx  nawigacja jako osobny system (nie HUD): HudRouteMap 
                    use_tolls / use_highways / use_ferry = 0, TomTom avoid=…; wymiary, ADR, motyw, 2D/3D, głos, „po drodze”; „Przelicz trasę” = nav.onReroute).
                    Panel przycisków (.nm-side) po lewej na każdym urządzeniu (poziomo rzędem pod manewrem), zwijany do lewej (.nm-fold, localStorage
                    „roadpilot:navSide”), „⋯” zostaje; po prawej tylko 2D/3D, +/−, „namierz” (zawsze widoczny).
+                   Przycisk „namierz” w prowadzeniu = podgląd całej pozostałej trasy (NavView showOverview → MapBrowse.overview: z góry, nie wraca sam,
+                   bez paska „po drodze”); drugie dotknięcie = prowadzenie. Pinezki (HudNav routePins): ograniczenia jako znaki (restrictionPin: wysokość,
+                   masa, oś, szerokość, długość, zakaz TIR, droga zamknięta, stromo, zakręt, POL/ITD; soft przygaszone), zgłoszenia kierowców i dodane
+                   przez nich miejsca (poi id „r…”) z pomarańczową chorągiewką REPORT_BADGE. Okienka Nawigacji (zgłoś, ostrzeżenia, po drodze, postój,
+                   wskazówki, luka) to strony NavPage (NavMenu.tsx) w stylu menu; ReportSheet = sekcje kafelków z podpisami.
+                   Panel przycisków: języczek .nm-fold z prawej obok kolumny, po zwinięciu na środku między „⋯” a prędkością.
                    Pasek „po drodze”: też najbliższy fotoradar i początek odcinkowego pomiaru z route.warnings (AheadStrip.camera, czerwona ramka .alert).
                    Porównanie tras (RouteCompare): GlVector.quiet (tylko duże miasta, bez zakazów — QUIET_VEHICLE), dymki „A · 7 h 32” przy trasach
                    (callout: punkt najdalej od innych tras, dymek na zewnątrz; wąska mapa < 420 px = sama litera), start i meta; poziomo

@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "react";
 import { Live } from "../core/gps";
 import { alongRoute, bearingAtKm, isOffRoute, laneHint, lanesAhead, locate, NAV, NavInstruction, nextInstruction, pointAtKm, RoutePos, routeSlice, speedLimitAt, nextOffRoute, OFF_ROUTE_IDLE, OffRouteState, locateTrace, TrackFix, travelHeading, junctionZoom } from "../core/navmatch";
-import { isAhead, jamMatters, jamTone, NavPlace, NavRoute, RoutePoi, TRAFFIC_ON, TrafficSection, warningText } from "../nav";
+import { isAhead, jamMatters, jamTone, NavPlace, NavRoute, RoutePoi, RouteWarning, TRAFFIC_ON, TrafficSection, warningText } from "../nav";
 import { GlLine, GlMapView, GlMarker, GlVector } from "./GlMap";
 import { LatLon, moveView, useMapGestures } from "./MapView";
 import { fmtAgo, Friend, STATUS_LABEL } from "../core/friends";
@@ -464,6 +464,27 @@ const PIN_CAMERA = <><rect x="-9" y="-5" width="14" height="10" rx="2" fill="#1b
 /** Odcinkowy pomiar: dwie kreski z odcinkiem między nimi i „km/h” ukryte w prostym symbolu |—|. */
 const PIN_SECTION = <><path d="M-9 -7v14M9 -7v14M-9 0h18" stroke="#1b2229" strokeWidth="3" strokeLinecap="round" /><circle cx="0" cy="0" r="3.2" fill="#e8322c" /></>;
 
+/** Znaczek „zgłoszenie kierowcy” w rogu pinezki: pomarańczowe kółko z chorągiewką — widać, co zaznaczyli kierowcy. */
+const REPORT_BADGE = <g transform="translate(12 -38)"><circle r="7.5" fill="#f08c2e" stroke="#fff" strokeWidth="2" /><path d="M-2.5 4V-4.2M-2.5-4h5.5l-1.5 2 1.5 2h-5.5" fill="none" stroke="#fff" strokeWidth="1.6" strokeLinejoin="round" /></g>;
+const signText = (t: string, size = 11) => <text x="0" y={size * 0.36} textAnchor="middle" fontSize={size} fontWeight="900" fill="#1b2229" fontFamily="Inter, system-ui, sans-serif">{t}</text>;
+const PIN_TRUCK = <><path d="M-9 -4h10v8h-10zM1 -1h4l3 3v2H1z" fill="#1b2229" /><circle cx="-6" cy="5" r="1.8" fill="#1b2229" /><circle cx="5" cy="5" r="1.8" fill="#1b2229" /></>;
+/** Ograniczenie / zakaz jako znak drogowy na pinezce (biała tarcza w czerwonej obwódce, w środku wartość). */
+function restrictionPin(w: RouteWarning, key: string): React.ReactNode | null {
+  const v = w.value !== null ? String(w.value).replace(".", ",") : "";
+  const sign = (inner: React.ReactNode, fill = "#fff", stroke = "#e8322c") => <Pin id={key} fill={fill} stroke={stroke}>{inner}</Pin>;
+  switch (w.kind) {
+    case "height": return sign(signText(`${v}m`, v.length > 3 ? 9.5 : 11));
+    case "width": case "length": return sign(<>{signText(`${v}m`, v.length > 3 ? 9.5 : 11)}<path d={w.kind === "width" ? "M-10 9h20M-10 9l3-2M-10 9l3 2M10 9l-3-2M10 9l-3 2" : "M-10 -10h20"} stroke="#1b2229" strokeWidth="1.4" fill="none" /></>);
+    case "weight": case "axle": return sign(signText(`${v}t`, v.length > 3 ? 9.5 : 11));
+    case "hgv": case "truck_ban": return sign(<>{PIN_TRUCK}<path d="M-10 10 10 -10" stroke="#e8322c" strokeWidth="2.6" /></>);
+    case "closed": return <Pin id={key} fill="#e8322c"><rect x="-9" y="-2.6" width="18" height="5.2" rx="1" fill="#fff" /></Pin>;
+    case "incline": return <Pin id={key} fill="#f2c230" stroke="#1b2229">{signText(`${v}%`, 10.5)}</Pin>;
+    case "curve": return <Pin id={key} fill="#f2c230" stroke="#1b2229"><path d="M-5 9V2c0-6 10-6 10-12M1-9l4-1.5 1 4" fill="none" stroke="#1b2229" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" /></Pin>;
+    case "police": case "itd": return <Pin id={key} fill={w.kind === "police" ? "#2f6fd6" : "#1f8a5b"}><text x="0" y="4" textAnchor="middle" fontSize="10.5" fontWeight="900" fill="#fff" fontFamily="Inter, system-ui, sans-serif">{w.kind === "police" ? "POL" : "ITD"}</text></Pin>;
+    default: return null;
+  }
+}
+
 /** Co n-ty punkt długiej łamanej — przy podglądzie całej trasy wystarczy kilka tysięcy. */
 const thinPts = <T,>(pts: T[]) => {
   const step = Math.max(1, Math.floor(pts.length / 3000));
@@ -479,7 +500,7 @@ function pinGapKm(v: MapBrowse) {
 /** Co to za pinezka — do karty po dotknięciu. `km` — km trasy (od jej startu). */
 export interface PinInfo {
   key: string;
-  kind: RoutePoi["kind"] | "camera" | "red_light" | "section" | "section_end" | "via";
+  kind: RoutePoi["kind"] | "camera" | "red_light" | "section" | "section_end" | "via" | "restriction";
   title: string;
   name: string;
   details: string[];
@@ -512,8 +533,14 @@ function routePins(route: NavRoute, fromKm: number, toKm: number, gapKm = 0): { 
     const base = { name: w.name, details: w.source === "report" ? ["Zgłoszenie kierowcy"] : [], lat: w.lat, lon: w.lon };
     if (w.kind === "camera" || w.kind === "red_light") {
       const key = `w${w.source}${w.id}`;
-      if (inRange(w.km)) add({ ...base, key, kind: w.kind, title: warningText(w), km: w.km }, 0, <Pin id={key} fill="#fff" stroke="#e8322c">{PIN_CAMERA}</Pin>);
-    } else if (w.kind === "section") {
+      if (inRange(w.km)) add({ ...base, key, kind: w.kind, title: warningText(w), km: w.km }, 0, <g><Pin id={key} fill="#fff" stroke="#e8322c">{PIN_CAMERA}</Pin>{w.source === "report" && REPORT_BADGE}</g>);
+    } else if (w.kind !== "section") {
+      // Ograniczenia, zakazy, zamknięcia, kontrole — znak na trasie; nieobowiązujące teraz (soft) przygaszone; zgłoszenia z chorągiewką.
+      const key = `r${w.source}${w.id}${w.kind}`;
+      const node = inRange(w.km) ? restrictionPin(w, key) : null;
+      if (node) add({ ...base, key, kind: "restriction", title: warningText(w), km: w.km }, 0, <g opacity={w.soft ? 0.55 : 1}>{node}{w.source === "report" && REPORT_BADGE}</g>);
+    }
+    if (w.kind === "section") {
       const len = w.toKm !== undefined ? ` · ${(w.toKm - w.km).toFixed(1).replace(".", ",")} km` : "";
       const start = pointAtKm(route.points, w.km);
       const key = `ss${w.id}`;
@@ -539,7 +566,10 @@ function routePins(route: NavRoute, fromKm: number, toKm: number, gapKm = 0): { 
       : p.kind === "fuel"
       ? <Pin id={key} fill="#e07a1f">{PIN_FUEL}</Pin>
       : <Pin id={key} fill="#2f6fd6">{PIN_P}{p.kind === "services" && <circle cx="11" cy="-11" r="5" fill="#e07a1f" stroke="#fff" strokeWidth="1.5" />}</Pin>;
-    add({ key, kind: p.kind, title: POI_TITLE[p.kind], name: p.name, details, km: p.km, lat: p.lat, lon: p.lon }, 1, node);
+    // Miejsce zgłoszone przez kierowców (id „r…”) — z chorągiewką, żeby było widać, co sami dodaliśmy.
+    const reported = p.id.startsWith("r");
+    if (reported) details.push("Dodane przez kierowców RoadPilot");
+    add({ key, kind: p.kind, title: POI_TITLE[p.kind], name: p.name, details, km: p.km, lat: p.lat, lon: p.lon }, 1, reported ? <g>{node}{REPORT_BADGE}</g> : node);
   }
   // Punkty pośrednie zawsze (bez rozrzedzania) — to Twój wybór.
   const vias: typeof pins = [];
@@ -575,6 +605,8 @@ export interface MapBrowse {
   center: LatLon;
   zoom: number;
   bearing: number;
+  /** Podgląd całej trasy (przycisk „namierz” w trakcie prowadzenia) — nie wraca sam do prowadzenia. */
+  overview?: boolean;
 }
 
 export function HudRouteMap({ nav, track, live, token, anchorY = 0.8, zoomOffset = 0, flat = false, friends, vector, browse = null, onBrowse, onPin, onHold }: { nav: HudNavData; track: NavTrack; live: Live | null; token: string; anchorY?: number; zoomOffset?: number; /** Mapa 2D: bez pochylenia, bardziej oddalona. */ flat?: boolean; friends?: Friend[]; /** Własny styl mapy (kafelki wektorowe); brak = TomTom. */ vector?: GlVector; browse?: MapBrowse | null; /** Przesunięcie / szczypanie mapy — brak = mapa bez gestów. */ onBrowse?: (b: MapBrowse) => void; /** Dotknięcie pinezki (null = dotknięcie mapy obok). */ onPin?: (p: PinInfo | null) => void; /** Przytrzymanie palca na mapie — miejsce pod palcem. */ onHold?: (p: LatLon) => void }) {

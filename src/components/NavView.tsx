@@ -16,12 +16,13 @@ import { AlertVote } from "./AlertVote";
 import { GlVector } from "./GlMap";
 import { fmtDist, HudNav, HudNavData, HudRouteMap, ManeuverIcon, MapBrowse, NavTrack, PinInfo, POI_TITLE, poiVisible, useNavTrack } from "./HudNav";
 import { RULES } from "../core/rules";
-import { LatLon, MAX_VIEW_ZOOM, MIN_VIEW_ZOOM } from "./MapView";
+import { LatLon, MAX_VIEW_ZOOM, MIN_VIEW_ZOOM, worldPx } from "./MapView";
 import { HudPlanner, HudRoutePicker, PickerCategory, PickerStart } from "./HudRoutePicker";
-import { MenuItem, MenuPage, NavMenu } from "./NavMenu";
+import { MenuItem, MenuPage, NavMenu, NavPage } from "./NavMenu";
 import { arrivalInfo, fullscreenSupported, Icon, isStop, RouteLine, routeRefs, STALE_MS, toggleFullscreen, useFullscreen, useTick } from "./HudView";
 import { ReportKind, SnappedRoad } from "../collect";
 import { ReportSheet } from "./ReportSheet";
+import { ReportIcon } from "./ReportIcon";
 import { GapSheet } from "./GapSheet";
 import { GapAnswer, GapReview } from "../core/gapfix";
 import { SectionLine, SectionPanel, sectionKey, sectionView, useSectionRun } from "./SectionControl";
@@ -130,7 +131,7 @@ export function NavView(p: NavViewProps) {
   // W trakcie jazdy przeglądanie samo wraca do prowadzenia po 20 s bez dotykania mapy (jak w nawigacjach).
   const moving = (speed ?? 0) >= 10;
   useEffect(() => {
-    if (!browse || !moving) return;
+    if (!browse || !moving || browse.overview) return;
     const id = setTimeout(() => setBrowse(null), 20_000);
     return () => clearTimeout(id);
   }, [browse, moving]);
@@ -184,6 +185,25 @@ export function NavView(p: NavViewProps) {
     setPin(null);
     setHold(null);
     setBrowse(null);
+  };
+  /** Cała pozostała trasa z góry (jak w TomTom) — od nas do celu, z marginesem na przyciski i paski. */
+  const showOverview = () => {
+    if (!route) return;
+    const pts = route.points.filter((x) => x[2] >= (pos?.km ?? 0));
+    if (pts.length < 2) return;
+    const w = window.innerWidth, h = window.innerHeight;
+    const xs = pts.map((x) => worldPx({ lat: x[0], lon: x[1] }, 0));
+    const [x0, x1] = [Math.min(...xs.map((q) => q[0])), Math.max(...xs.map((q) => q[0]))];
+    const [y0, y1] = [Math.min(...xs.map((q) => q[1])), Math.max(...xs.map((q) => q[1]))];
+    const zoom = Math.log2(Math.min((w * 0.62) / Math.max(1e-9, x1 - x0), (h * 0.5) / Math.max(1e-9, y1 - y0)));
+    const lat = pts.reduce((a, x) => a + x[0], 0) / pts.length;
+    // Środek prostokąta (nie średnia punktów): z worldPx odwrotnie przez szerokości skrajne.
+    const lats = pts.map((x) => x[0]), lons = pts.map((x) => x[1]);
+    setPin(null);
+    const z = Math.max(MIN_VIEW_ZOOM, Math.min(15, zoom));
+    // Panel przycisków po lewej zasłania ok. 70 px — środek widoku przesuwamy o połowę tego w lewo (trasa trochę w prawo).
+    const shiftLon = (35 / (512 * 2 ** z)) * 360;
+    setBrowse({ center: { lat: (Math.min(...lats) + Math.max(...lats)) / 2 || lat, lon: (Math.min(...lons) + Math.max(...lons)) / 2 - shiftLon }, zoom: z, bearing: 0, overview: true });
   };
   const go = (f: () => void) => () => { setMenu(false); f(); };
   const home = p.planner?.places.home;
@@ -300,6 +320,7 @@ export function NavView(p: NavViewProps) {
 
       {/* Panel przycisków po lewej — zwijany do lewej krawędzi (stan zapamiętany w tym urządzeniu); „⋯” zostaje zawsze. */}
       <div className={`nm-side ${sideOpen ? "" : "folded"}`}>
+        <div className="nm-side-col">
         <div className="nm-side-btns">
         {p.voice.supported && (
           <button className={`nm-btn ${p.voice.on ? "" : "off"}`} onClick={p.voice.toggle} aria-label={p.voice.on ? "Wycisz komunikaty" : "Włącz komunikaty głosowe"} aria-pressed={p.voice.on}>
@@ -328,6 +349,7 @@ export function NavView(p: NavViewProps) {
           <Icon name="dots" className="more-dots" />
           <Icon name="chevron" className="more-chevron" />
         </button>
+        </div>
         <button className="nm-fold" onClick={() => setSide(!sideOpen)} aria-expanded={sideOpen} aria-label={sideOpen ? "Zwiń przyciski" : "Rozwiń przyciski"}>
           <Icon name="chevron" />
         </button>
@@ -341,8 +363,8 @@ export function NavView(p: NavViewProps) {
           <button onClick={() => (browse ? zoomBrowse(1) : setZoomOffset((z) => Math.min(2, z + 0.5)))} aria-label="Przybliż">+</button>
           <button onClick={() => (browse ? zoomBrowse(-1) : setZoomOffset((z) => Math.max(-5, z - 0.5)))} aria-label="Oddal">−</button>
         </div>
-        <button className={`nm-btn nm-recenter ${browse ? "on" : ""}`} onClick={() => setBrowse(null)} aria-label="Wróć do mojej pozycji">
-          <Icon name="nav" />
+        <button className={`nm-btn nm-recenter ${browse ? "on" : ""}`} onClick={() => (browse ? setBrowse(null) : showOverview())} aria-label={browse ? "Wróć do prowadzenia" : "Pokaż całą trasę"}>
+          <Icon name={browse ? "nav" : "route"} />
         </button>
       </div>
 
@@ -356,7 +378,7 @@ export function NavView(p: NavViewProps) {
         {legal !== undefined && speed !== null && <em className={`nm-speed-bar ${tone ?? ""}`} aria-hidden><i style={{ width: `${Math.min(100, Math.round((speed / legal) * 100))}%` }} /></em>}
       </div>
 
-      {strip.length > 0 && (
+      {strip.length > 0 && !browse?.overview && (
         <button className="nm-ahead" onClick={() => setAheadList(true)} aria-label="Po drodze — pokaż listę">
           {strip.map((r) => (
             <span key={r.key} className={r.alert ? "alert" : ""}>
@@ -404,18 +426,12 @@ export function NavView(p: NavViewProps) {
 
       {menuPage && <NavMenu page={menuPages(menuPage)} voice={p.voice} onBack={() => setMenuPage(MENU_PARENT[menuPage])} onRecenter={() => { setMenu(false); setBrowse(null); }} />}
       {gapOpen && p.gapReview && p.onGapAnswer && (
-        <div className="hud-sheet" onClick={(e) => e.target === e.currentTarget && setGapOpen(false)}>
-          <div className="hud-sheet-body">
-            <button className="hud-sheet-close" aria-label="Później" onClick={() => setGapOpen(false)}>×</button>
+        <NavPage heading="Co robiłeś?" onBack={() => setGapOpen(false)} onRecenter={() => { setGapOpen(false); setBrowse(null); }}>
             <GapSheet review={p.gapReview} onAnswer={(a) => { p.onGapAnswer!(a); setGapOpen(false); }} onLater={() => setGapOpen(false)} />
-          </div>
-        </div>
+        </NavPage>
       )}
       {maneuvers && route && (
-        <div className="hud-sheet" onClick={(e) => e.target === e.currentTarget && setManeuvers(false)}>
-          <div className="hud-sheet-body">
-            <button className="hud-sheet-close" aria-label="Zamknij" onClick={() => setManeuvers(false)}>×</button>
-            <div className="stop-label">Najbliższe manewry</div>
+        <NavPage heading="Wskazówki" onBack={() => setManeuvers(false)} onRecenter={() => { setManeuvers(false); setBrowse(null); }}>
             <ul className="nm-man-list">
               {route.instructions.filter((i) => i.km > (pos?.km ?? 0) + 0.01).slice(0, 20).map((i) => (
                 <li key={i.km + i.maneuver}>
@@ -425,29 +441,25 @@ export function NavView(p: NavViewProps) {
                 </li>
               ))}
             </ul>
-          </div>
-        </div>
+        </NavPage>
       )}
 
       {warnList && (
-        <div className="hud-sheet" onClick={(e) => e.target === e.currentTarget && setWarnList(false)}>
-          <div className="hud-sheet-body">
-            <button className="hud-sheet-close" aria-label="Zamknij" onClick={() => setWarnList(false)}>×</button>
-            <div className="stop-label">Ostrzeżenia na trasie: ograniczenia dla pojazdu, fotoradary, kontrole</div>
+        <NavPage heading="Ostrzeżenia na trasie" onBack={() => setWarnList(false)} onRecenter={() => { setWarnList(false); setBrowse(null); }}>
             {upcoming.length ? (
               <ul className="nm-warn-list">
                 {upcoming.map((w) => (
-                  <li key={w.source + w.id + w.kind}>
-                    <b>{warningText(w)}</b>
-                    <span>{pos ? (w.toKm !== undefined && pos.km >= w.km ? `trwa — do końca ${fmtKm(w.toKm - pos.km)}` : `za ${fmtKm(Math.max(0, w.km - pos.km))}`) : `km ${Math.round(w.km)}`}{w.name ? ` · ${w.name}` : ""}</span>
+                  <li key={w.source + w.id + w.kind} className={w.soft ? "soft" : ""}>
+                    <i><ReportIcon kind={WARN_ICON[w.kind] ?? w.kind} /></i>
+                    <span className="nwl-text"><b>{warningText(w)}</b>{(w.name || w.source === "report") && <small>{[w.name, w.source === "report" ? "zgłoszenie kierowcy" : ""].filter(Boolean).join(" · ")}</small>}</span>
+                    <strong>{pos ? (w.toKm !== undefined && pos.km >= w.km ? `trwa · ${fmtKm(w.toKm - pos.km)}` : fmtKm(Math.max(0, w.km - pos.km))) : `km ${Math.round(w.km)}`}</strong>
                   </li>
                 ))}
               </ul>
             ) : (
               <p className="muted">Brak znanych ograniczeń, fotoradarów i kontroli (dane OpenStreetMap i zgłoszenia kierowców, Polska).</p>
             )}
-          </div>
-        </div>
+        </NavPage>
       )}
       {aheadList && (
         <AheadSheet
@@ -468,9 +480,7 @@ export function NavView(p: NavViewProps) {
       )}
       {p.report && route && !track.off && <AlertVote warnings={route.warnings} km={pos?.km} onVote={p.report.onVote} />}
       {sheet && (
-        <div className="hud-sheet" onClick={(e) => e.target === e.currentTarget && setSheet(false)}>
-          <div className="hud-sheet-body">
-            <button className="hud-sheet-close" aria-label="Zwiń" onClick={() => setSheet(false)}>×</button>
+        <NavPage heading={sc.stop ? (sc.stop.dayEnd ? "Odpoczynek" : "Postój") : "Przerwa"} onBack={() => setSheet(false)} onRecenter={() => { setSheet(false); setBrowse(null); }}>
             {sc.stop ? (
               <ActiveStopPanel stop={sc.stop} driver={sc.driver} onEnd={(t) => { sc.onEnd(t); setSheet(false); }} onCancel={() => { sc.onCancel(); setSheet(false); }} onTarget={sc.onTarget} onStartDay={() => { sc.onStartDay(); setSheet(false); }} />
             ) : (
@@ -479,17 +489,13 @@ export function NavView(p: NavViewProps) {
                 <button className="ghost day-btn" onClick={() => { if (endDay()) setSheet(false); }}>Zakończ dzień</button>
               </>
             )}
-          </div>
-        </div>
+        </NavPage>
       )}
       {reporting && p.report && (
-        <div className="hud-sheet" onClick={(e) => e.target === e.currentTarget && setReporting(false)}>
-          <div className="hud-sheet-body">
-            <button className="hud-sheet-close" aria-label="Zamknij" onClick={() => setReporting(false)}>×</button>
+        <NavPage heading="Zgłoś" onBack={() => setReporting(false)} onRecenter={() => { setReporting(false); setBrowse(null); }}>
             {!reportAt && route && pos && p.report.onBadTurn && <BadTurn route={route} km={pos.km} onSend={p.report.onBadTurn} onDone={() => setReporting(false)} />}
             <ReportSheet onSend={(kind, value) => p.report!.onSend(kind, value, reportAt ?? undefined)} onClose={() => setReporting(false)} located={reportAt !== null || p.live !== null} place={reportAt ? reportAt.name : undefined} />
-          </div>
-        </div>
+        </NavPage>
       )}
       {planning && p.planner && (
         <div className="nmp">
@@ -536,6 +542,9 @@ const SETTINGS_PAGES: { id: SettingsSection; label: string; icon: MenuItem["icon
 ];
 /** Strona wyżej w menu (powrót); z głównej — mapa. */
 const MENU_PARENT: Record<MenuKey, MenuKey | null> = { main: null, route: "main", settings: "main", look: "settings", voice: "settings", planning: "settings", vehicle: "settings", ahead: "settings" };
+
+/** Rodzaj ostrzeżenia → piktogram ze zgłoszeń (ReportIcon). */
+const WARN_ICON: Record<string, string> = { axle: "weight", hgv: "truck_ban", red_light: "camera", width: "height", length: "height", incline: "other", curve: "other" };
 
 /** Zwinięty panel przycisków — wygoda jednego urządzenia (localStorage), nie stan synchronizowany. */
 const SIDE_KEY = "roadpilot:navSide";
@@ -602,10 +611,8 @@ function AheadSheet({ items, km, premium, gps, onShow, onClose, initialFilter = 
   const shown = items?.filter((x) => kinds.includes(x.poi.kind)).slice(0, AHEAD_MAX);
   const straight = items?.some((x) => !x.onRoute);
   return (
-    <div className="hud-sheet" onClick={(e) => e.target === e.currentTarget && onClose()}>
-      <div className="hud-sheet-body">
-        <button className="hud-sheet-close" aria-label="Zamknij" onClick={onClose}>×</button>
-        <div className="stop-label">Po drodze — {km} km przed Tobą{straight ? " (w linii prostej, bez trasy)" : ""}</div>
+    <NavPage heading="Po drodze" onBack={onClose}>
+        <p className="nmm-sub">{km} km przed Tobą{straight ? " — w linii prostej, bez trasy" : " — po trasie"}</p>
         <div className="nm-ahead-filters" role="radiogroup" aria-label="Rodzaj miejsc">
           {AHEAD_FILTERS.map((f) => (
             <button key={f.id} role="radio" aria-checked={filter === f.id} className={filter === f.id ? "active" : ""} onClick={() => setFilter(f.id)}>{f.label}</button>
@@ -635,8 +642,7 @@ function AheadSheet({ items, km, premium, gps, onShow, onClose, initialFilter = 
         ) : (
           <p className="muted">Brak takich miejsc w ciągu {km} km (dane OpenStreetMap, Polska).</p>
         )}
-      </div>
-    </div>
+    </NavPage>
   );
 }
 
@@ -723,7 +729,7 @@ function HoldCard({ hold, route, myKm, live, onVia, onSnap, onReport, onClose }:
       {route && onVia && ahead.length >= MAX_VIA && <span className="warn-text">Najwyżej {MAX_VIA} punktów pośrednich.</span>}
       {error && <span className="bad-text">{error}</span>}
       <div className="row-buttons">
-        {onSnap && <button className="primary" disabled={!road} onClick={() => road && onReport(road)}>Zgłoś ograniczenie</button>}
+        {onSnap && <button className="primary" disabled={!road} onClick={() => road && onReport(road)}>Zgłoś tutaj</button>}
         {route && onVia && <button className={onSnap ? "ghost" : "primary"} disabled={busy || ahead.length >= MAX_VIA} onClick={addVia}>{busy ? "Wyznaczam…" : "Jedź przez ten punkt"}</button>}
       </div>
     </div>

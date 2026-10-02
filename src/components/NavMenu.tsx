@@ -166,3 +166,26 @@ const ICONS: Record<MenuIcon, ReactNode> = {
     <svg viewBox="0 0 64 64"><path d="M34 6h20v52H34" className="w" fill="none" strokeWidth="6" strokeLinejoin="round" /><path d="M40 32H8" className="a" strokeWidth="6" strokeLinecap="round" /><path d="M20 18 6 32l14 14" className="a" fill="none" strokeWidth="6" strokeLinecap="round" strokeLinejoin="round" /></svg>
   ),
 };
+
+/**
+ * Strona Nawigacji w stylu menu (zgłoszenia, ostrzeżenia, po drodze, postój, wskazówki): pełny ekran nad przyciemnioną mapą,
+ * „wstecz” i duży tytuł u góry, „namierz” w prawym rogu (zamyka stronę i wraca do mapy na pozycję).
+ */
+export function NavPage({ heading, onBack, onRecenter, children, wide }: { heading: string; onBack: () => void; onRecenter?: () => void; children: ReactNode; wide?: boolean }) {
+  return (
+    <div className="nmm sub page" role="dialog" aria-label={heading}>
+      <div className="nmm-head">
+        <button className="nmm-back" onClick={onBack} aria-label="Wstecz">
+          <svg viewBox="0 0 24 24" aria-hidden><path d="M16 4 6 12l10 8-3-8z" /></svg>
+        </button>
+        <h2 className="nmm-heading">{heading}</h2>
+        {onRecenter ? (
+          <button className="nmm-back nmm-locate" onClick={onRecenter} aria-label="Wróć do mapy na moją pozycję">
+            <svg viewBox="0 0 24 24" aria-hidden><path d="M3 11l18-8-8 18-2-8z" /></svg>
+          </button>
+        ) : <span />}
+      </div>
+      <div className={`nmm-content ${wide ? "wide" : ""}`}>{children}</div>
+    </div>
+  );
+}

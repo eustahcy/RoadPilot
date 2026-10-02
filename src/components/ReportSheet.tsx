@@ -30,35 +30,32 @@ export function ReportSheet({ onSend, onClose, located, place }: { onSend: (kind
   };
   const step = (d: number) => setValue((v) => Math.round(Math.min(def!.max!, Math.max(def!.min!, v + d * def!.step!)) * 10) / 10);
 
+  const busy = state === "sending" || state === "sent";
+  const tile = (k: (typeof REPORT_KINDS)[number], onClick: () => void, active: boolean) => (
+    <button key={k.id} className={`report-tile ${k.id} ${active ? "active" : ""}`} disabled={!located || (busy && !active)} onClick={onClick} aria-label={k.label}>
+      <i><ReportIcon kind={k.id} />{active && state !== "idle" && state !== "error" && <em>{state === "sending" ? "…" : "✓"}</em>}</i>
+      <span>{k.label}</span>
+    </button>
+  );
+
   return (
     <div className="report">
-      <div className="stop-label">{place !== undefined ? `Zgłoś na drodze${place ? ` ${place}` : ""}` : "Zgłoś w tym miejscu"}{def ? `: ${def.label.toLowerCase()}` : ""}</div>
+      <p className="report-where">{place !== undefined ? `Miejsce: ${place || "przytrzymane na mapie"}` : "Miejsce: Twoja pozycja"}</p>
       {!located && <p className="warn-text small">Brak pozycji GPS — zgłoszenie wymaga lokalizacji.</p>}
+      {state === "sent" && <p className="report-done">Dziękujemy — zgłoszenie wysłane ✓</p>}
       {/* Fotoradar, odcinkowy, kontrole — jedno dotknięcie wysyła od razu (w czasie jazdy). */}
-      <div className="report-quick">
-        {REPORT_KINDS.filter((k) => k.quick).map((k) => (
-          <button key={k.id} className={`report-quick-btn ${k.id} ${kind === k.id && state !== "idle" ? "active" : ""}`} disabled={!located || state === "sending" || state === "sent"} onClick={() => send(k.id)} aria-label={k.label} title={k.label}>
-            <ReportIcon kind={k.id} />
-            {kind === k.id && state !== "idle" && state !== "error" && <em>{state === "sending" ? "…" : "✓"}</em>}
-          </button>
-        ))}
+      <div className="report-section">Na drodze teraz — jedno dotknięcie</div>
+      <div className="report-grid">
+        {REPORT_KINDS.filter((k) => k.quick).map((k) => tile(k, () => send(k.id), kind === k.id && state !== "idle"))}
       </div>
-      {/* Parking / MOP / stacja, których nie ma w nawigacji — jedno dotknięcie, miejsce = nasza pozycja (albo przytrzymane na mapie). */}
-      <div className="report-places-label">Brakuje na mapie:</div>
-      <div className="report-places">
-        {REPORT_KINDS.filter((k) => k.place).map((k) => (
-          <button key={k.id} className={`report-place ${kind === k.id && state !== "idle" ? "active" : ""}`} disabled={!located || state === "sending" || state === "sent"} onClick={() => send(k.id)} aria-label={`Tu jest: ${k.label}`}>
-            <ReportIcon kind={k.id} />
-            <span>{kind === k.id && state === "sending" ? "Wysyłam…" : kind === k.id && state === "sent" ? "Dziękujemy ✓" : k.label}</span>
-          </button>
-        ))}
+      {/* Parking / MOP / stacja, których nie ma w nawigacji — miejsce = nasza pozycja (albo przytrzymane na mapie). */}
+      <div className="report-section">Brakuje na mapie</div>
+      <div className="report-grid">
+        {REPORT_KINDS.filter((k) => k.place).map((k) => tile(k, () => send(k.id), kind === k.id && state !== "idle"))}
       </div>
-      <div className="report-kinds">
-        {REPORT_KINDS.filter((k) => !k.quick && !k.place).map((k) => (
-          <button key={k.id} className={`report-kind ${kind === k.id ? "active" : ""}`} onClick={() => pick(k.id)} aria-label={k.label} title={k.label}>
-            <ReportIcon kind={k.id} />
-          </button>
-        ))}
+      <div className="report-section">Ograniczenie lub utrudnienie</div>
+      <div className="report-grid">
+        {REPORT_KINDS.filter((k) => !k.quick && !k.place).map((k) => tile(k, () => pick(k.id), kind === k.id))}
       </div>
       {def?.unit && (
         <div className="report-value">
@@ -68,9 +65,9 @@ export function ReportSheet({ onSend, onClose, located, place }: { onSend: (kind
         </div>
       )}
       {state === "error" && <p className="auth-error">{error}</p>}
-      {!def?.quick && !def?.place && (
-        <button className="primary full" disabled={!kind || !located || state === "sending" || state === "sent"} onClick={() => send()}>
-          {state === "sent" ? "Dziękujemy — wysłane" : state === "sending" ? "Wysyłam…" : "Wyślij zgłoszenie"}
+      {def && !def.quick && !def.place && (
+        <button className="primary full" disabled={!located || busy} onClick={() => send()}>
+          {state === "sent" ? "Dziękujemy — wysłane" : state === "sending" ? "Wysyłam…" : `Wyślij: ${def.label.toLowerCase()}`}
         </button>
       )}
     </div>

@@ -138,7 +138,13 @@ src/components/NavView.tsx  nawigacja jako osobny system (nie HUD): HudRouteMap 
                    z numerem drogi (HudNav roadBadge: A/S/krajowe czerwone, wojewódzkie żółte, E zielone), „›” = lista najbliższych manewrów;
                    „⋯” = menu jak w TomTom GO (NavMenu.tsx: pełny ekran nad przyciemnioną mapą, duże ikony białe + akcent; pionowo lista, poziomo
                    przewijany rząd; Szukaj / Jedź do domu / Ostatnie cele / Aktualna trasa / Moje miejsca → HudRoutePicker start {go | tab}, przerwa, dzień,
-                   zgłoś, ustawienia, pełny ekran, zakończ nawigację, wyjdź; przełącznik głosu na dole);
+                   zgłoś, ustawienia, pełny ekran, zakończ nawigację, wyjdź; przełącznik głosu na dole; strony jak w TomTom: MenuPage {heading, items | content},
+                   MENU_PARENT = powrót; „Aktualna trasa”: pomiń następny postój (onVia bez pierwszego), znajdź inną trasę (picker {go: cel}),
+                   omiń blokadę drogi (nav.onAvoid: punkty 0,4–2 km przed nami → /api/nav/route {avoid} → valhallaRoute exclude, NavRoute.avoid
+                   zostaje przy reroute, MAX_AVOID 12), omijaj płatne (Vehicle.avoid.tolls + reroute), cel do ulubionych, wskazówki;
+                   „Ustawienia” → lista Wygląd / Głos / Planowanie trasy / Profil pojazdu / Po drodze → NavSettingsPage section);
+                   wyszukiwarka na pełnym ekranie (.nmp, HudRoutePicker full): pole z podkreśleniem, kółka kategorii (Parking TIR / MOP / Stacja / Po drodze →
+                   AheadSheet initialFilter), wiersze Dom / Ulubione / Ostatnie (SavedPlaces rows), wyniki z odległością w linii prostej;
                    „Ustawienia” → NavSettings.tsx (zakładki Trasa / Pojazd / Mapa / Miejsca: rodzaj trasy, Vehicle.avoid {tolls, motorways, ferries} → valhalla.mjs
                    use_tolls / use_highways / use_ferry = 0, TomTom avoid=…; wymiary, ADR, motyw, 2D/3D, głos, „po drodze”; „Przelicz trasę” = nav.onReroute).
                    Panel przycisków (.nm-side) po lewej na każdym urządzeniu (poziomo rzędem pod manewrem), zwijany do lewej (.nm-fold, localStorage

@@ -117,13 +117,15 @@ function App() {
   // Poza trasą (albo gdy w tym urządzeniu nie ma trasy, a konto ma cel) HUD prosi o trasę od bieżącej pozycji.
   const [rerouting, setRerouting] = useState(false);
   const navDest = state.navRoute?.to ?? trip.dest;
-  const reroute = async () => {
+  /** Nowa trasa od pozycji; `addAvoid` — „Omiń blokadę drogi” (punkty dopisane do omijanych na tej trasie). */
+  const reroute = async (addAvoid: { lat: number; lon: number }[] = []) => {
     if (!auth || !navDest || !live || rerouting) return;
     setRerouting(true);
     try {
-      // Punkty pośrednie, których jeszcze nie minęliśmy, zostają na nowej trasie.
+      // Punkty pośrednie, których jeszcze nie minęliśmy, i omijane blokady zostają na nowej trasie.
       const via = state.navRoute ? viaAhead(state.navRoute, live) : [];
-      const next = await fetchRoute(auth.token, { lat: live.lat, lon: live.lon }, navDest, settings.vehicle, Date.now(), settings.routeType, via);
+      const avoid = [...(state.navRoute?.avoid ?? []), ...addAvoid].slice(-12);
+      const next = await fetchRoute(auth.token, { lat: live.lat, lon: live.lon }, navDest, settings.vehicle, Date.now(), settings.routeType, via, avoid);
       setState((s) => ({ ...s, navRoute: next, trip: tripFromRoute(s.trip, next) }));
     } catch {
       /* brak sieci lub limit — HUD spróbuje ponownie za minutę */
@@ -151,7 +153,7 @@ function App() {
     if (!from) throw new Error("Brak pozycji startu — włącz GPS.");
     setRerouting(true);
     try {
-      const next = await fetchRoute(auth.token, from, navDest, settings.vehicle, Date.now(), settings.routeType, via);
+      const next = await fetchRoute(auth.token, from, navDest, settings.vehicle, Date.now(), settings.routeType, via, state.navRoute?.avoid);
       setState((s) => ({ ...s, navRoute: next, trip: tripFromRoute(s.trip, next) }));
     } finally {
       setRerouting(false);
@@ -361,7 +363,7 @@ function App() {
         settings={{ value: settings, onChange: (patch) => setState((s) => ({ ...s, settings: { ...s.settings, ...patch } })) }}
         mapMode={settings.navMap}
         onMapMode={(navMap) => setState((s) => ({ ...s, settings: { ...s.settings, navMap } }))}
-        nav={navOn ? { route: state.navRoute, dest: navDest, rerouting, onReroute: reroute, onVia: setVia, onEnd: endNav } : undefined}
+        nav={navOn ? { route: state.navRoute, dest: navDest, rerouting, onReroute: () => reroute(), onAvoid: reroute, onVia: setVia, onEnd: endNav } : undefined}
         planner={navOn && auth ? {
           token: auth.token,
           vehicle: settings.vehicle,

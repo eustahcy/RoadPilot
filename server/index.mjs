@@ -427,16 +427,19 @@ async function valhallaOnce(from, to, vehicle, exclude, routeType = "fastest", v
  * sprawdzamy trasę naszą bazą i przy twardym konflikcie (oś, masa, wysokość, szerokość, długość, zakaz) liczymy
  * od nowa z tym miejscem wykluczonym. Gdy objazdu nie ma — zostaje ostatnia wykonalna trasa z ostrzeżeniami.
  */
-async function valhallaRoute(from, to, vehicle, routeType = "fastest", via = []) {
+/** Najwięcej punktów „omiń blokadę” w jednym zapytaniu (kilka kolejnych blokad na trasie). */
+const MAX_AVOID = 12;
+
+async function valhallaRoute(from, to, vehicle, routeType = "fastest", via = [], avoid = []) {
   if (!VALHALLA_URL) return null;
   let veh;
   try {
     veh = parseVehicle(vehicle);
   } catch {
-    return withRoadInfo(await valhallaOnce(from, to, vehicle, [], routeType, via));
+    return withRoadInfo(await valhallaOnce(from, to, vehicle, [...avoid], routeType, via));
   }
-  // Manewry zgłoszone jako niemożliwe przez kilku kierowców — omijamy punkt tuż za nimi.
-  const exclude = await badTurnExcludes([from, ...via, to]);
+  // Manewry zgłoszone jako niemożliwe przez kilku kierowców — omijamy punkt tuż za nimi; do tego „Omiń blokadę” kierowcy.
+  const exclude = [...avoid, ...(await badTurnExcludes([from, ...via, to]))];
   const seen = new Set();
   let best = await valhallaOnce(from, to, vehicle, exclude, routeType, via);
   if (!best) return null;
@@ -561,6 +564,8 @@ routes["POST /api/nav/route"] = async (req, user) => {
   // Punkty pośrednie (przytrzymanie na mapie → „dodaj do trasy”); z nimi bez tras alternatywnych.
   const via = Array.isArray(body.via) ? body.via.map(validPoint) : [];
   if (via.length > MAX_VIA || via.some((p) => !p)) throw new HttpError(400, `Najwyżej ${MAX_VIA} punktów pośrednich.`);
+  // „Omiń blokadę drogi”: punkty na drodze przed kierowcą, których trasa ma nie przechodzić (tylko własny silnik).
+  const avoid = Array.isArray(body.avoid) ? body.avoid.slice(0, MAX_AVOID).map(validPoint).filter(Boolean) : [];
   const withAlts = body.alternatives === true && !via.length;
   const routeType = ROUTE_TYPES.has(body.routeType) ? body.routeType : "fastest";
   let url;
@@ -572,7 +577,7 @@ routes["POST /api/nav/route"] = async (req, user) => {
   const ownPossible = !!VALHALLA_URL && [from, ...via, to].every((p) => inPoland(p.lat, p.lon));
   // Trasy liczy zawsze własny silnik (wybór TomTom usunięty); TomTom tylko awaryjnie — poza Polską albo gdy Valhalla zawiedzie.
   if (ownPossible) {
-    const own = await valhallaRoute(from, to, body.vehicle, routeType, via);
+    const own = await valhallaRoute(from, to, body.vehicle, routeType, via, avoid);
     if (own) return [200, await finish({ route: own, alternatives: withAlts ? distinct(own, (await valhallaAlternates(from, to, body.vehicle, routeType)).map((a) => ({ ...a, engine: "roadpilot" }))) : [] })];
   }
   userDaily("route", user);

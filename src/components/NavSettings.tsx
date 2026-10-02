@@ -2,19 +2,12 @@ import { useState } from "react";
 import { DEFAULT_VEHICLE, NO_AVOID, ROUTE_TYPES, RouteAvoid, Vehicle } from "../nav";
 import { Settings } from "../state";
 import { NumberField, Toggle } from "./fields";
-import { Icon, IconName } from "./HudView";
 import { ADR_OPTIONS, AHEAD_KM_OPTIONS } from "./SettingsView";
 
 // Ustawienia prosto z Nawigacji (⋯ → Ustawienia): pojazd, jakimi drogami jechać, mapa i dźwięk, „po drodze”.
 // Te same pola co w Ustawieniach aplikacji — zapis od razu (synchronizowane z kontem jak reszta ustawień).
 
-type Tab = "route" | "vehicle" | "map" | "ahead";
-const TABS: { id: Tab; label: string; icon: IconName }[] = [
-  { id: "route", label: "Trasa", icon: "route" },
-  { id: "vehicle", label: "Pojazd", icon: "truck" },
-  { id: "map", label: "Mapa", icon: "nav" },
-  { id: "ahead", label: "Miejsca", icon: "parking" },
-];
+export type SettingsSection = "look" | "voice" | "planning" | "vehicle" | "ahead";
 
 const AVOID: { id: keyof RouteAvoid; label: string; hint: string }[] = [
   { id: "tolls", label: "Unikaj dróg płatnych", hint: "Bez bramek i odcinków płatnych (A1, A2, A4…), jeśli da się dojechać inaczej." },
@@ -30,25 +23,41 @@ export interface NavSettingsProps {
   onReroute?: () => void;
 }
 
-export function NavSettings({ settings, onChange, voice, onReroute }: NavSettingsProps) {
-  const [tab, setTab] = useState<Tab>("route");
+/** Jedna strona ustawień (menu ⋯ → Ustawienia → …) — zapis od razu; przy zmianie trasy / pojazdu przycisk „Przelicz trasę”. */
+export function NavSettingsPage({ section, settings, onChange, voice, onReroute }: NavSettingsProps & { section: SettingsSection }) {
   const [changed, setChanged] = useState(false);
   const v = settings.vehicle;
   const avoid = v.avoid ?? NO_AVOID;
-  // Zmiana pojazdu albo dróg dotyczy trasy — proponujemy przeliczenie.
   const setV = (patch: Partial<Vehicle>) => { onChange({ vehicle: { ...v, ...patch } }); setChanged(true); };
   return (
     <div className="nav-settings">
-      <div className="stop-label">Ustawienia nawigacji</div>
-      <div className="nset-tabs" role="tablist">
-        {TABS.map((t) => (
-          <button key={t.id} role="tab" aria-selected={tab === t.id} className={tab === t.id ? "on" : ""} onClick={() => setTab(t.id)}>
-            <Icon name={t.icon} /><span>{t.label}</span>
-          </button>
-        ))}
-      </div>
+      {section === "look" && (
+        <div className="nset-body">
+          <span className="field-label">Motyw mapy</span>
+          <div className="nset-seg">
+            {([["auto", "Auto"], ["day", "Dzień"], ["night", "Noc"]] as const).map(([id, label]) => (
+              <button key={id} className={settings.mapTheme === id ? "on" : ""} aria-pressed={settings.mapTheme === id} onClick={() => onChange({ mapTheme: id })}>{label}</button>
+            ))}
+          </div>
+          <p className="muted small">Auto: dzień / noc z pogody, a bez niej z zegara (7–19).</p>
+          <span className="field-label">Widok mapy</span>
+          <div className="nset-seg">
+            {([["3d", "3D — pochylona"], ["2d", "2D — z góry"]] as const).map(([id, label]) => (
+              <button key={id} className={settings.navMap === id ? "on" : ""} aria-pressed={settings.navMap === id} onClick={() => onChange({ navMap: id })}>{label}</button>
+            ))}
+          </div>
+        </div>
+      )}
 
-      {tab === "route" && (
+      {section === "voice" && (
+        <div className="nset-body">
+          {voice.supported
+            ? <Toggle checked={voice.on} onChange={() => voice.toggle()} label="Komunikaty głosowe" hint="Manewry, pasy ruchu, ostrzeżenia (fotoradary, odcinkowy, ograniczenia) i bramki — po polsku." />
+            : <p className="muted">Ta przeglądarka nie obsługuje mowy.</p>}
+        </div>
+      )}
+
+      {section === "planning" && (
         <div className="nset-body">
           <span className="field-label">Rodzaj trasy</span>
           <div className="nset-pick">
@@ -65,7 +74,7 @@ export function NavSettings({ settings, onChange, voice, onReroute }: NavSetting
         </div>
       )}
 
-      {tab === "vehicle" && (
+      {section === "vehicle" && (
         <div className="nset-body">
           <p className="muted small">Cały zestaw — trasa omija za niskie wiadukty, za słabe mosty i zakazy dla takiego pojazdu.</p>
           <div className="form nset-form">
@@ -87,25 +96,7 @@ export function NavSettings({ settings, onChange, voice, onReroute }: NavSetting
         </div>
       )}
 
-      {tab === "map" && (
-        <div className="nset-body">
-          <span className="field-label">Wygląd mapy</span>
-          <div className="nset-seg">
-            {([["auto", "Auto"], ["day", "Dzień"], ["night", "Noc"]] as const).map(([id, label]) => (
-              <button key={id} className={settings.mapTheme === id ? "on" : ""} aria-pressed={settings.mapTheme === id} onClick={() => onChange({ mapTheme: id })}>{label}</button>
-            ))}
-          </div>
-          <span className="field-label">Widok</span>
-          <div className="nset-seg">
-            {([["3d", "3D — pochylona"], ["2d", "2D — z góry"]] as const).map(([id, label]) => (
-              <button key={id} className={settings.navMap === id ? "on" : ""} aria-pressed={settings.navMap === id} onClick={() => onChange({ navMap: id })}>{label}</button>
-            ))}
-          </div>
-          {voice.supported && <Toggle checked={voice.on} onChange={() => voice.toggle()} label="Komunikaty głosowe" hint="Manewry, pasy, ostrzeżenia i bramki." />}
-        </div>
-      )}
-
-      {tab === "ahead" && (
+      {section === "ahead" && (
         <div className="nset-body">
           <label className="field">
             <span className="field-label">Zasięg listy „Po drodze”</span>

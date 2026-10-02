@@ -54,6 +54,8 @@ export interface NavRoute {
   at: number;
   from: { lat: number; lon: number };
   to: NavPlace;
+  /** „Omiń blokadę drogi”: punkty, przez które trasa ma nie prowadzić — zostają przy kolejnych przeliczeniach. */
+  avoid?: { lat: number; lon: number }[];
   ferry: boolean;
   /** Którym silnikiem wyznaczona; fallback = TomTom niedostępny / limit, więc użyto własnego. */
   engine?: NavEngine;
@@ -267,9 +269,9 @@ export async function searchPlaces(token: string, q: string, near?: { lat: numbe
   return r.results;
 }
 
-export async function fetchRoute(token: string, from: { lat: number; lon: number }, to: NavPlace, vehicle: Vehicle, now: number, routeType: RouteType = "fastest", via: NavPlace[] = []): Promise<NavRoute> {
-  const r = await api<{ route: Omit<NavRoute, "at" | "from" | "to"> }>("POST", "/nav/route", { from, to: { lat: to.lat, lon: to.lon }, vehicle, routeType, via: via.map((p) => ({ lat: p.lat, lon: p.lon })) }, token);
-  return withWarnings(token, { ...r.route, at: now, from, to, via }, vehicle);
+export async function fetchRoute(token: string, from: { lat: number; lon: number }, to: NavPlace, vehicle: Vehicle, now: number, routeType: RouteType = "fastest", via: NavPlace[] = [], avoid: { lat: number; lon: number }[] = []): Promise<NavRoute> {
+  const r = await api<{ route: Omit<NavRoute, "at" | "from" | "to"> }>("POST", "/nav/route", { from, to: { lat: to.lat, lon: to.lon }, vehicle, routeType, via: via.map((p) => ({ lat: p.lat, lon: p.lon })), ...(avoid.length ? { avoid } : {}) }, token);
+  return withWarnings(token, { ...r.route, at: now, from, to, via, ...(avoid.length ? { avoid } : {}) }, vehicle);
 }
 
 /** Punkty pośrednie, których jeszcze nie minęliśmy (km po trasie dalej niż my, a nie tuż obok nas). */

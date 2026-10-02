@@ -14,6 +14,8 @@ export interface HudNavData {
   dest: NavPlace | null;
   rerouting: boolean;
   onReroute: () => void;
+  /** „Omiń blokadę drogi”: nowa trasa omijająca te punkty (i wcześniej omijane). */
+  onAvoid?: (pts: { lat: number; lon: number }[]) => Promise<void>;
   /** Otwiera wyszukiwarkę celu i porównanie tras w HUD (gdy jest). */
   onPlan?: () => void;
   /** Nowe punkty pośrednie → trasa liczona od nowa (od pozycji GPS, bez GPS od startu trasy). */

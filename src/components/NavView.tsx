@@ -17,8 +17,8 @@ import { GlVector } from "./GlMap";
 import { fmtDist, HudNav, HudNavData, HudRouteMap, ManeuverIcon, MapBrowse, NavTrack, PinInfo, POI_TITLE, poiVisible, useNavTrack } from "./HudNav";
 import { RULES } from "../core/rules";
 import { LatLon, MAX_VIEW_ZOOM, MIN_VIEW_ZOOM } from "./MapView";
-import { HudPlanner, HudRoutePicker, PickerStart } from "./HudRoutePicker";
-import { MenuItem, NavMenu } from "./NavMenu";
+import { HudPlanner, HudRoutePicker, PickerCategory, PickerStart } from "./HudRoutePicker";
+import { MenuItem, MenuPage, NavMenu } from "./NavMenu";
 import { arrivalInfo, fullscreenSupported, Icon, isStop, RouteLine, routeRefs, STALE_MS, toggleFullscreen, useFullscreen, useTick } from "./HudView";
 import { ReportKind, SnappedRoad } from "../collect";
 import { ReportSheet } from "./ReportSheet";
@@ -27,7 +27,8 @@ import { GapAnswer, GapReview } from "../core/gapfix";
 import { SectionLine, SectionPanel, sectionKey, sectionView, useSectionRun } from "./SectionControl";
 import { sectionLimit } from "../core/section";
 import { ActiveStopPanel, confirmStartDay, fmtTimer, StopControlsProps, StopPicker } from "./StopControls";
-import { NavSettings } from "./NavSettings";
+import { NavSettingsPage, SettingsSection } from "./NavSettings";
+import { isFavorite, toggleFavorite } from "../core/places";
 import { Settings } from "../state";
 
 // Nawigacja — osobny ekran (zakładka „Nawigacja”), niezależny od HUD: mapa w perspektywie, manewr i pasy,
@@ -84,7 +85,9 @@ const NO_NAV: HudNavData = { route: null, dest: null, rerouting: false, onRerout
 export function NavView(p: NavViewProps) {
   const now = useTick(1000);
   /** Menu „więcej” (zgłoszenie, postój, dzień, pełny ekran, koniec nawigacji). */
-  const [menu, setMenu] = useState(false);
+  const [menuPage, setMenuPage] = useState<MenuKey | null>(null);
+  const menu = menuPage !== null;
+  const setMenu = (open: boolean) => setMenuPage(open ? "main" : null);
   /** Telefon pionowo: kafelki „przerwa” i „trasa” rozwinięte pod przyjazdem. */
   const [tilesOpen, setTilesOpen] = useState(false);
   /** Lista najbliższych manewrów (przycisk „›” na karcie). */
@@ -101,9 +104,10 @@ export function NavView(p: NavViewProps) {
   const [reportAt, setReportAt] = useState<SnappedRoad | null>(null);
   const [warnList, setWarnList] = useState(false);
   const [aheadList, setAheadList] = useState(false);
+  /** Filtr listy „Po drodze” przy otwarciu (kategoria z wyszukiwarki). */
+  const [aheadFilter, setAheadFilter] = useState<PickerCategory>("all");
   /** Wyszukiwarka celu: null = zamknięta; start = od czego zaczynamy (zakładka, od razu dom). */
   const [planning, setPlanning] = useState<PickerStart | null>(null);
-  const [settingsOpen, setSettingsOpen] = useState(false);
   const [sideOpen, setSideOpen] = useState(() => readSideOpen());
   const setSide = (open: boolean) => { setSideOpen(open); try { localStorage.setItem(SIDE_KEY, open ? "1" : "0"); } catch { /* bez pamięci — tylko na tę sesję */ } };
   const [zoomOffset, setZoomOffset] = useState(0);
@@ -185,11 +189,11 @@ export function NavView(p: NavViewProps) {
   const home = p.planner?.places.home;
   const menuItems: MenuItem[] = [
     ...(p.planner ? [
-      { id: "search", icon: "search" as const, label: "Szukaj", onClick: go(() => setPlanning({ tab: undefined })) },
+      { id: "search", icon: "search" as const, label: "Szukaj", onClick: go(() => setPlanning({ search: true })) },
       { id: "home", icon: "home" as const, label: "Jedź do domu", onClick: go(() => setPlanning(home ? { go: home } : { tab: "home" })) },
       { id: "recent", icon: "recent" as const, label: "Ostatnie cele", onClick: go(() => setPlanning({ tab: "recent" })) },
     ] : []),
-    ...(route ? [{ id: "route", icon: "route" as const, label: "Aktualna trasa", onClick: go(() => setManeuvers(true)) }] : []),
+    ...(route ? [{ id: "route", icon: "route" as const, label: "Aktualna trasa", onClick: () => setMenuPage("route") }] : []),
     ...(p.planner ? [{ id: "places", icon: "places" as const, label: "Moje miejsca", onClick: go(() => setPlanning({ tab: "fav" })) }] : []),
     { id: "break", icon: "break", label: sc.stop ? (sc.stop.dayEnd ? "Odpoczynek" : "Trwający postój") : "Przerwa", dot: !!sc.stop, onClick: go(() => setSheet(true)) },
     sc.stop?.dayEnd
@@ -197,11 +201,45 @@ export function NavView(p: NavViewProps) {
       : { id: "day", icon: "dayEnd", label: "Zakończ dzień", onClick: go(() => { endDay(); }) },
     ...(p.report ? [{ id: "report", icon: "report" as const, label: "Zgłoś", onClick: go(() => { setReportAt(null); setReporting(true); }) }] : []),
     ...(p.gapReview && p.onGapAnswer ? [{ id: "gap", icon: "gap" as const, label: "Co robiłem bez aplikacji", dot: !p.gapReview.answer, onClick: go(() => setGapOpen(true)) }] : []),
-    ...(p.settings ? [{ id: "settings", icon: "settings" as const, label: "Ustawienia", onClick: go(() => setSettingsOpen(true)) }] : []),
+    ...(p.settings ? [{ id: "settings", icon: "settings" as const, label: "Ustawienia", onClick: () => setMenuPage("settings") }] : []),
     ...(fullscreenSupported() ? [{ id: "fs", icon: "fullscreen" as const, label: fullscreen ? "Zamknij pełny ekran" : "Pełny ekran", onClick: go(toggleFullscreen) }] : []),
     ...(p.nav?.onEnd && (p.nav.route || p.nav.dest) ? [{ id: "end", icon: "endNav" as const, label: "Zakończ nawigację", tone: "danger" as const, onClick: go(endNav) }] : []),
     { id: "exit", icon: "exit", label: "Wyjdź z nawigacji", onClick: p.onExit },
   ];
+  // Aktualna trasa (jak w TomTom): pomiń postój, inna trasa, omiń blokadę, płatne, ulubione, wskazówki.
+  const viaLeft = route && p.nav?.onVia ? viaAhead(route, fresh) : [];
+  const avoidTolls = !!p.settings?.value.vehicle.avoid?.tolls;
+  const dest = p.nav?.dest;
+  const fav = !!dest && !!p.planner && isFavorite(p.planner.places, dest);
+  const routeItems: MenuItem[] = [
+    { id: "skip", icon: "skipStop", label: "Pomiń następny postój", sub: viaLeft[0]?.label, disabled: !viaLeft.length, onClick: go(() => { p.nav?.onVia?.(viaLeft.slice(1)).catch((e) => alert(e instanceof Error ? e.message : "Nie udało się wyznaczyć trasy.")); }) },
+    ...(p.planner && dest ? [{ id: "alt", icon: "altRoute" as const, label: "Znajdź inną trasę", onClick: go(() => setPlanning({ go: dest })) }] : []),
+    { id: "block", icon: "roadblock", label: "Omiń blokadę drogi", sub: "droga przez najbliższe ~2 km", disabled: !p.nav?.onAvoid || !pos || track.off, onClick: go(() => {
+      // Punkty na trasie 0,4–2 km przed nami — silnik szuka objazdu; zostają omijane przy kolejnych przeliczeniach.
+      const pts = [0.4, 0.8, 1.2, 1.6, 2].map((d) => pointAtKm(route!.points, pos!.km + d)).filter((x): x is NonNullable<typeof x> => !!x).map((x) => ({ lat: x.lat, lon: x.lon }));
+      p.nav!.onAvoid!(pts);
+    }) },
+    ...(p.settings ? [{ id: "tolls", icon: "avoidTolls" as const, label: avoidTolls ? "Nie omijaj dróg płatnych" : "Omijaj drogi płatne", sub: avoidTolls ? "teraz omijane" : undefined, onClick: go(() => {
+      const v = p.settings!.value.vehicle;
+      p.settings!.onChange({ vehicle: { ...v, avoid: { tolls: !avoidTolls, motorways: !!v.avoid?.motorways, ferries: !!v.avoid?.ferries } } });
+      // Przeliczenie po zapisie ustawień (nowy pojazd trafia do App w następnym renderze).
+      setTimeout(() => p.nav?.onReroute(), 50);
+    }) }] : []),
+    ...(p.planner && dest ? [{ id: "fav", icon: "favRoute" as const, label: fav ? "Usuń cel z ulubionych" : "Dodaj cel do ulubionych", sub: dest.label, onClick: go(() => p.planner!.onPlaces(toggleFavorite(p.planner!.places, dest))) }] : []),
+    { id: "dirs", icon: "directions", label: "Pokaż wskazówki", onClick: go(() => setManeuvers(true)) },
+    ...(p.nav?.onEnd ? [{ id: "end", icon: "endNav" as const, label: "Zakończ nawigację", tone: "danger" as const, onClick: go(endNav) }] : []),
+  ];
+  const settingsItems: MenuItem[] = SETTINGS_PAGES.map((x) => ({ id: x.id, icon: x.icon, label: x.label, onClick: () => setMenuPage(x.id) }));
+  const menuPages = (k: MenuKey): MenuPage => {
+    if (k === "main") return { title: p.nav?.dest ? `${refs ? `${refs} · ` : ""}${route ? fmtKm(route.lengthKm) : ""} → ${p.nav.dest.label}` : undefined, items: menuItems };
+    if (k === "route") return { heading: "Aktualna trasa", items: routeItems };
+    if (k === "settings") return { heading: "Ustawienia", items: settingsItems };
+    const sec = SETTINGS_PAGES.find((x) => x.id === k)!;
+    return {
+      heading: sec.label,
+      content: p.settings && <NavSettingsPage section={k} settings={p.settings.value} onChange={p.settings.onChange} voice={p.voice} onReroute={p.nav?.dest ? () => { p.nav!.onReroute(); setMenu(false); } : undefined} />,
+    };
+  };
 
   const stopItem = sc.stop
     ? { label: sc.stop.dayEnd ? "Odpoczynek" : "Postój", value: fmtTimer(Math.max(0, (now - sc.stop.start) / 60_000)), sub: sc.stop.targetMin !== null ? `z ${fmtDuration(sc.stop.targetMin)}` : "do ruszenia", tone: "active" }
@@ -269,7 +307,7 @@ export function NavView(p: NavViewProps) {
           </button>
         )}
         {p.planner && (
-          <button className="nm-btn" onClick={() => setPlanning({})} aria-label="Cel i trasy alternatywne">
+          <button className="nm-btn" onClick={() => setPlanning({ search: true })} aria-label="Szukaj celu">
             <Icon name="search" />
           </button>
         )}
@@ -364,7 +402,7 @@ export function NavView(p: NavViewProps) {
         )}
       </footer>
 
-      {menu && <NavMenu items={menuItems} title={p.nav?.dest ? `${refs ? `${refs} · ` : ""}${route ? fmtKm(route.lengthKm) : ""} → ${p.nav.dest.label}` : undefined} voice={p.voice} onClose={() => setMenu(false)} />}
+      {menuPage && <NavMenu page={menuPages(menuPage)} voice={p.voice} onBack={() => setMenuPage(MENU_PARENT[menuPage])} onRecenter={() => { setMenu(false); setBrowse(null); }} />}
       {gapOpen && p.gapReview && p.onGapAnswer && (
         <div className="hud-sheet" onClick={(e) => e.target === e.currentTarget && setGapOpen(false)}>
           <div className="hud-sheet-body">
@@ -424,7 +462,8 @@ export function NavView(p: NavViewProps) {
             setBrowse({ center: { lat: poi.lat, lon: poi.lon }, zoom: 15, bearing: 0 });
             setAheadList(false);
           } : undefined}
-          onClose={() => setAheadList(false)}
+          initialFilter={aheadFilter}
+          onClose={() => { setAheadList(false); setAheadFilter("all"); }}
         />
       )}
       {p.report && route && !track.off && <AlertVote warnings={route.warnings} km={pos?.km} onVote={p.report.onVote} />}
@@ -452,20 +491,9 @@ export function NavView(p: NavViewProps) {
           </div>
         </div>
       )}
-      {settingsOpen && p.settings && (
-        <div className="hud-sheet" onClick={(e) => e.target === e.currentTarget && setSettingsOpen(false)}>
-          <div className="hud-sheet-body">
-            <button className="hud-sheet-close" aria-label="Zamknij" onClick={() => setSettingsOpen(false)}>×</button>
-            <NavSettings settings={p.settings.value} onChange={p.settings.onChange} voice={p.voice} onReroute={p.nav?.dest ? () => { p.nav!.onReroute(); setSettingsOpen(false); } : undefined} />
-          </div>
-        </div>
-      )}
       {planning && p.planner && (
-        <div className="hud-sheet" onClick={(e) => e.target === e.currentTarget && setPlanning(null)}>
-          <div className="hud-sheet-body wide">
-            <button className="hud-sheet-close" aria-label="Zamknij" onClick={() => setPlanning(null)}>×</button>
-            <HudRoutePicker planner={p.planner} dest={p.nav?.dest ?? null} onClose={() => setPlanning(null)} start={planning} />
-          </div>
+        <div className="nmp">
+          <HudRoutePicker full planner={p.planner} dest={p.nav?.dest ?? null} onClose={() => setPlanning(null)} start={planning} onCategory={(c) => { setPlanning(null); setAheadFilter(c); setAheadList(true); }} />
         </div>
       )}
     </div>
@@ -498,6 +526,17 @@ const AHEAD_FILTERS: { id: AheadFilter; label: string; kinds: RoutePoi["kind"][]
   { id: "fuel", label: "Stacje", kinds: ["fuel", "services"] },
 ];
 /** Pasek pod prędkością: rodzaje w kolejności wyświetlania (MOP ze stacją liczy się jako MOP i jako stacja). */
+type MenuKey = "main" | "route" | "settings" | SettingsSection;
+const SETTINGS_PAGES: { id: SettingsSection; label: string; icon: MenuItem["icon"] }[] = [
+  { id: "look", label: "Wygląd", icon: "look" },
+  { id: "voice", label: "Głos", icon: "voice" },
+  { id: "planning", label: "Planowanie trasy", icon: "planning" },
+  { id: "vehicle", label: "Profil pojazdu", icon: "vehicle" },
+  { id: "ahead", label: "Po drodze", icon: "ahead" },
+];
+/** Strona wyżej w menu (powrót); z głównej — mapa. */
+const MENU_PARENT: Record<MenuKey, MenuKey | null> = { main: null, route: "main", settings: "main", look: "settings", voice: "settings", planning: "settings", vehicle: "settings", ahead: "settings" };
+
 /** Zwinięty panel przycisków — wygoda jednego urządzenia (localStorage), nie stan synchronizowany. */
 const SIDE_KEY = "roadpilot:navSide";
 function readSideOpen() {
@@ -557,8 +596,8 @@ function AheadIcon({ kind }: { kind: RoutePoi["kind"] }) {
 }
 
 /** MOP-y, parkingi TIR i stacje do `km` przed nami — po trasie, a bez niej w kierunku jazdy (w linii prostej). */
-function AheadSheet({ items, km, premium, gps, onShow, onClose }: { items: AheadItem[] | null; km: number; premium: boolean; gps: boolean; onShow?: (p: AheadItem["poi"]) => void; onClose: () => void }) {
-  const [filter, setFilter] = useState<AheadFilter>("all");
+function AheadSheet({ items, km, premium, gps, onShow, onClose, initialFilter = "all" }: { items: AheadItem[] | null; km: number; premium: boolean; gps: boolean; onShow?: (p: AheadItem["poi"]) => void; onClose: () => void; initialFilter?: AheadFilter }) {
+  const [filter, setFilter] = useState<AheadFilter>(initialFilter);
   const kinds = AHEAD_FILTERS.find((f) => f.id === filter)!.kinds;
   const shown = items?.filter((x) => kinds.includes(x.poi.kind)).slice(0, AHEAD_MAX);
   const straight = items?.some((x) => !x.onRoute);

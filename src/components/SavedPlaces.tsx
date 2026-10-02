@@ -11,34 +11,38 @@ export interface PlacesProps {
 }
 
 export type PlacesTab = "home" | "fav" | "recent";
-const PLACES_TABS: { id: PlacesTab; label: string; icon: string }[] = [
-  { id: "home", label: "Dom", icon: "⌂" },
-  { id: "fav", label: "Ulubione", icon: "★" },
-  { id: "recent", label: "Historia", icon: "↺" },
-];
 
-/** Skróty pod wyszukiwarką — zakładki Dom / Ulubione / Historia (dotknięcie = cel, „×” usuwa). */
+const ICO = {
+  home: <svg viewBox="0 0 24 24" aria-hidden><path d="M12 3 2 12h3v9h5v-6h4v6h5v-9h3z" /></svg>,
+  fav: <svg viewBox="0 0 24 24" aria-hidden><path d="m12 2.5 2.9 6.1 6.6.8-4.9 4.6 1.3 6.6L12 17.3l-5.9 3.3 1.3-6.6-4.9-4.6 6.6-.8z" /></svg>,
+  recent: <svg viewBox="0 0 24 24" aria-hidden><path d="M12 4a8 8 0 1 1-7.4 5" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" /><path d="M2.5 4.5 4.8 10l5-2.6z" /><path d="M12 8v4.5l3 2" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" /></svg>,
+};
+
+/**
+ * Skróty pod wyszukiwarką jak w TomTom GO: wiersze Dom / Ulubione / Ostatnie — Dom od razu wybiera cel,
+ * Ulubione i Ostatnie rozwijają listę (dotknięcie = cel, „×” usuwa). `initialTab` — od razu rozwinięta lista (z menu Nawigacji).
+ */
 export function PlaceShortcuts({ places, onPlaces, onPick, initialTab }: PlacesProps & { onPick: (p: Place) => void; initialTab?: PlacesTab }) {
   const { home, favorites, recent } = places;
-  const [tab, setTab] = useState<PlacesTab>(initialTab ?? (favorites.length ? "fav" : recent.length ? "recent" : "home"));
-  const count: Record<PlacesTab, number> = { home: home ? 1 : 0, fav: favorites.length, recent: recent.length };
+  const [open, setOpen] = useState<PlacesTab | null>(initialTab ?? null);
+  const toggle = (t: PlacesTab) => setOpen((o) => (o === t ? null : t));
   return (
-    <div className="places">
-      <div className="places-tabs" role="tablist">
-        {PLACES_TABS.map((t) => (
-          <button key={t.id} role="tab" aria-selected={tab === t.id} className={tab === t.id ? "on" : ""} onClick={() => setTab(t.id)}>
-            <i aria-hidden>{t.icon}</i>{t.label}{count[t.id] > 0 && t.id !== "home" && <em>{count[t.id]}</em>}
-          </button>
-        ))}
+    <div className="places rows">
+      <div className="place-line">
+        <button className={`place-row ${open === "home" ? "open" : ""}`} onClick={() => (home ? onPick(home) : toggle("home"))}>
+          <i>{ICO.home}</i>
+          <span><strong>Dom</strong>{home && <small>{home.label}{home.sub ? ` · ${home.sub}` : ""}</small>}</span>
+        </button>
+        {home && <button className="place-x" aria-label="Usuń adres domu" onClick={() => onPlaces(setHome(places, null))}>×</button>}
       </div>
-      {tab === "home" && (home ? (
-        <ul className="places-list">
-          <PlaceRow icon="⌂" title={home.label} sub={home.sub} onPick={() => onPick(home)} onRemove={() => onPlaces(setHome(places, null))} removeLabel="Usuń adres domu" />
-        </ul>
-      ) : (
-        <p className="places-empty">Brak adresu domu. Wyszukaj adres, wybierz go i dotknij „⌂ Ustaw jako dom”.</p>
-      ))}
-      {tab === "fav" && (favorites.length ? (
+      {open === "home" && !home && <p className="places-empty">Brak adresu domu. Wyszukaj adres, wybierz go i dotknij „⌂ Ustaw jako dom”.</p>}
+
+      <button className={`place-row ${open === "fav" ? "open" : ""}`} onClick={() => toggle("fav")} aria-expanded={open === "fav"}>
+        <i>{ICO.fav}</i>
+        <span><strong>Ulubione</strong></span>
+        {favorites.length > 0 && <em>{favorites.length}</em>}
+      </button>
+      {open === "fav" && (favorites.length ? (
         <ul className="places-list">
           {favorites.map((f) => (
             <PlaceRow key={`${f.lat},${f.lon}`} icon="★" title={f.label} sub={f.sub} onPick={() => onPick(f)} onRemove={() => onPlaces(toggleFavorite(places, f))} removeLabel={`Usuń ${f.label} z ulubionych`} />
@@ -47,7 +51,13 @@ export function PlaceShortcuts({ places, onPlaces, onPick, initialTab }: PlacesP
       ) : (
         <p className="places-empty">Brak ulubionych. Wybierz cel i dotknij „☆ Do ulubionych”.</p>
       ))}
-      {tab === "recent" && (recent.length ? (
+
+      <button className={`place-row ${open === "recent" ? "open" : ""}`} onClick={() => toggle("recent")} aria-expanded={open === "recent"}>
+        <i>{ICO.recent}</i>
+        <span><strong>Ostatnie</strong></span>
+        {recent.length > 0 && <em>{recent.length}</em>}
+      </button>
+      {open === "recent" && (recent.length ? (
         <ul className="places-list">
           {recent.map((r) => (
             <PlaceRow
@@ -57,7 +67,7 @@ export function PlaceShortcuts({ places, onPlaces, onPick, initialTab }: PlacesP
               sub={[fmtDay(r.at), r.lengthKm !== undefined ? fmtKm(r.lengthKm) : "", r.travelMin !== undefined ? `${fmtDuration(r.travelMin)} jazdy` : "", r.to.sub ?? ""].filter(Boolean).join(" · ")}
               onPick={() => onPick(r.to)}
               onRemove={() => onPlaces(removeRecent(places, r.to))}
-              removeLabel={`Usuń ${r.to.label} z historii`}
+              removeLabel={`Usuń ${r.to.label} z ostatnich`}
             />
           ))}
         </ul>

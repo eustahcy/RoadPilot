@@ -294,7 +294,8 @@ Motywy Nawigacji (Settings.mapTheme): auto / day / night / glass — day: jasne 
                    półprzezroczyste panele z backdrop-filter (mapa dzień / noc jak auto). Pasek „po drodze”: MOP ze stacją na zmianę co STRIP_SWAP_MS
                    „[dystrybutor] Orlen” ↔ „[P] MOP Morawica” (PoiIcons.tsx mergeStations łączy stację ≤ 0,6 km po tej samej stronie z MOP-em);
                    MOP i parking = „P”. Słupek kilometrowy: biały z dwoma czerwonymi paskami. Panel przycisków = szuflada (.nm-side-col tło przy lewej krawędzi, przyciski z odstępami, trapezowy uchwyt .nm-fold na środku; otwarta i zamknięta na tej samej wysokości).
-                   Pasy: zalecany pas wypełnia się na zielono od dołu i miga 3× (CSS lane-fill). Długie nazwy na pasku „po drodze”: NavView ScrollName (przedrostek MOP / Parking stoi, reszta przewija się tam i z powrotem).
+                   Pasy od NAV.lanesAheadKm 5 km przed miejscem wyboru; strzałka do jazdy wypełnia się na zielono od dołu (.go-fill clip-path) i pulsuje 3× do 2,2× (.go-pulse).
+                   Kafelek „do celu”: podpis, km, pod nim flaga i czas jazdy bez postojów (.nm-dest). Szuflada: kwadratowe przyciski z kreskami między nimi, niżej (margin-top 14u). Długie nazwy na pasku „po drodze”: NavView ScrollName (przedrostek MOP / Parking stoi, reszta przewija się tam i z powrotem).
                    valhallaOnce: przy błędzie 442 ponowienie z szerszym dopasowaniem punktów (SNAP_RETRIES) zanim TomTom.
 Menu ⋯ w Nawigacji to prostokąt .nm-menu-btn przy pasku na dole (grid area „more”).
 scripts/weekly-update.sh  timer systemd roadpilot-weekly (niedziela 01:00 UTC): osm-update → Valhalla w /opt/roadpilot-valhalla.new (Metin2 — jeśli

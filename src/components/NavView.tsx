@@ -254,6 +254,8 @@ export function NavView(p: NavViewProps) {
     if ((route.via ?? []).some((v) => Math.abs((locate(route.points, v)?.km ?? -99) - s1.place.km) < 1)) return undefined;
     return { ...s1, key: `${evs[iStop].start}:${s1.place.id}`, stop: evs[iStop], replace: undefined as NavPlace | undefined };
   })();
+  // Pod dystansem: czas jazdy do celu (albo punktu) — bez postojów; przyjazd z postojami jest na kafelku obok.
+  const driveText = fmtDuration(p.route.driveMinutes(0, Math.min(p.route.totalKm, target.km)));
   const flip = viaNext ? () => setToVia((x) => !x) : undefined;
   // Kafelek przerwy: w jeździe — ile z 4,5 h jazdy bez przerwy już za nami; na postoju — ile z zaplanowanego postoju minęło.
   const breakUsed = sc.stop
@@ -400,8 +402,7 @@ export function NavView(p: NavViewProps) {
           )}
         </button>
         <button className={`nm-tile ${flip ? "flip" : ""} ${showVia ? "via" : ""}`} onClick={flip} disabled={!flip} aria-label={flip ? "Przełącz: do celu / do punktu pośredniego" : undefined}>
-          <Icon name="flag" />
-          <span><small>{target.label}</small><b>{fmtKm(target.km)}</b></span>
+          <span className="nm-dest"><small>{target.label}</small><b>{fmtKm(target.km)}</b><i><Icon name="flag" />{driveText}</i></span>
         </button>
         <button className={`nm-tile ${!showVia && arrival.bad ? "bad" : ""} ${flip ? "flip" : ""} ${showVia ? "via" : ""}`} onClick={flip} disabled={!flip}>
           <Icon name="clock" />
@@ -521,7 +522,7 @@ export function NavView(p: NavViewProps) {
       {/* Tablet: pasek na dole — do celu, przyjazd i postęp trasy (zielone = przejechane, kropki = punkty pośrednie i postoje). */}
       <div className="nm-progress">
         {roadLine}
-        <button className={`nm-progress-item ${flip ? "flip" : ""} ${showVia ? "via" : ""}`} onClick={flip} disabled={!flip}><Icon name="flag" /><span><b>{fmtKm(target.km)}</b><small>{showVia ? `Pkt ${viaNext!.n || 1}` : target.label}</small></span></button>
+        <button className={`nm-progress-item ${flip ? "flip" : ""} ${showVia ? "via" : ""}`} onClick={flip} disabled={!flip}><span className="nm-dest"><small>{showVia ? `Pkt ${viaNext!.n || 1}` : target.label}</small><b>{fmtKm(target.km)}</b><i><Icon name="flag" />{driveText}</i></span></button>
         <button className={`nm-progress-item ${!showVia && arrival.bad ? "bad" : ""} ${flip ? "flip" : ""} ${showVia ? "via" : ""}`} onClick={flip} disabled={!flip}><Icon name="clock" /><span><b>{target.clock}</b><small>{target.left !== undefined ? `${showVia ? "Pkt" : "Przyjazd"} za ${target.left}` : target.note}</small></span></button>
         <button className={`nm-progress-item ${stopItem.tone}`} onClick={openSheet}><Icon name="coffee" /><span><b>{stopItem.value}</b><small>{stopItem.label}</small></span></button>
         <span className="nm-progress-item"><Icon name="road" /><span><b>{refs || (route ? "Drogi lokalne" : "Brak trasy")}</b><small>{route ? `Trasa · ${fmtKm(route.lengthKm)}` : "Trasa"}</small></span></span>

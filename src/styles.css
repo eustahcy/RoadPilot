@@ -1816,20 +1816,21 @@ svg .rb-exit { fill: currentColor; stroke: none; font: 900 7.5px system-ui, sans
 .scroll-name .sn-move { animation: sn-scroll var(--sn-dur, 6s) ease-in-out infinite; }
 @keyframes sn-scroll { 0%, 20% { transform: none; } 55%, 75% { transform: translateX(var(--shift)); } 100% { transform: none; } }
 
-/* Pas, którym jechać: zielone wypełnianie od dołu, po napełnieniu trzy mignięcia i od nowa. */
-.hud-lane.on { position: relative; overflow: hidden; }
-.hud-lane.on::before { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 100%; background: rgba(68, 240, 124, .38); transform-origin: 50% 100%; animation: lane-fill 3.6s ease-in-out infinite; }
-.hud-lane.on svg { position: relative; z-index: 1; }
-@keyframes lane-fill {
-  0% { transform: scaleY(0); opacity: 1; }
-  38% { transform: scaleY(1); opacity: 1; }
-  46% { opacity: .15; } 54% { opacity: 1; }
-  62% { opacity: .15; } 70% { opacity: 1; }
-  78% { opacity: .15; } 86% { opacity: 1; }
-  100% { transform: scaleY(1); opacity: 1; }
+/* Strzałka, którą jechać: wypełnia się na zielono od dołu, potem pulsuje 3× (ok. 2,2× większa) i od nowa. Tylko strzałki do jazdy. */
+.hud-lane.on { position: relative; overflow: visible; }
+.hud-lane.on svg { overflow: visible; position: relative; z-index: 2; }
+.hud-lane.on svg .go-base { color: #6b7a86; }
+.hud-lane.on svg .go-fill { color: var(--hud-green); clip-path: inset(100% 0 0 0); animation: lane-arrow-fill 4.2s linear infinite; }
+.hud-lane.on svg .go-pulse { transform-box: fill-box; transform-origin: 50% 60%; animation: lane-arrow-pulse 4.2s ease-in-out infinite; }
+@keyframes lane-arrow-fill { 0% { clip-path: inset(100% 0 0 0); } 30%, 100% { clip-path: inset(0 0 0 0); } }
+@keyframes lane-arrow-pulse {
+  0%, 32% { transform: scale(1); }
+  41% { transform: scale(2.2); } 50% { transform: scale(1); }
+  59% { transform: scale(2.2); } 68% { transform: scale(1); }
+  77% { transform: scale(2.2); } 86%, 100% { transform: scale(1); }
 }
 @media (prefers-reduced-motion: reduce) {
-  .hud-lane.on::before { animation: none; }
+  .hud-lane.on svg .go-fill, .hud-lane.on svg .go-pulse { animation: none; clip-path: none; }
   .scroll-name .sn-move { animation: none; }
 }
 
@@ -1857,3 +1858,18 @@ svg .rb-exit { fill: currentColor; stroke: none; font: 900 7.5px system-ui, sans
 }
 /* Pasek „po drodze” na telefonie pionowo: stała szerokość (nazwy przewijane), bez skakania przy zmianie MOP ↔ stacja. */
 @media (orientation: portrait) and (max-width: 743px) { .nm-ahead { width: calc(58 * var(--u)); } }
+
+/* Kafelek „do celu”: podpis wyżej, dystans, pod nim flaga i czas jazdy. */
+.nm-dest { display: grid; line-height: 1.08; }
+.nm-dest small { margin-bottom: calc(.2 * var(--u)); }
+.nm-dest i { display: flex; align-items: center; gap: calc(.8 * var(--u)); color: var(--hud-dim); font-style: normal; font-size: calc(2.2 * var(--u)); font-weight: 700; white-space: nowrap; }
+.nm-dest i .hud-ico { flex: none; width: calc(2.4 * var(--u)); height: calc(2.4 * var(--u)); color: inherit; }
+.nm-progress-item .nm-dest i { font-size: calc(1.9 * var(--u)); }
+.nm-progress-item .nm-dest small { order: 0; }
+
+/* Szuflada: przyciski jako kwadraty z odstępami (zaokrąglone rogi), kolumna niżej — bliżej prędkości. */
+.nm-side-col .nm-btn { border-radius: calc(1.8 * var(--u)); }
+.nm-side-btns > .nm-btn + .nm-btn { position: relative; }
+.nm-side-btns > .nm-btn + .nm-btn::before { content: ""; position: absolute; left: 15%; right: 15%; top: calc(-.9 * var(--u) - 1px); height: 1px; background: var(--nm-edge); }
+@media (orientation: landscape) and (max-height: 599px) { .nm-side-btns > .nm-btn + .nm-btn::before { left: calc(-.7 * var(--u) - 1px); right: auto; top: 15%; bottom: 15%; width: 1px; height: auto; } }
+@media not ((orientation: landscape) and (max-height: 599px)) { .nm-side { margin-top: calc(14 * var(--u)); } }

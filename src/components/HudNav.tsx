@@ -299,7 +299,10 @@ export function HudNav({ nav, track, compact, card, section, onManeuvers }: { na
               <span key={i} className={`hud-lane ${l.follow ? "on" : ""}`}>
                 <svg viewBox="0 0 24 24" aria-hidden>
                   {/* Strzałka, którą jedziemy, na wierzchu. */}
-                  {(l.dirs.length ? l.dirs : ["STRAIGHT"]).slice().sort((x, y) => Number(x === l.follow) - Number(y === l.follow)).map((d) => <Arrow key={d} className={l.follow === d ? "go" : ""} deg={LANE_ANGLES[d] ?? 0} />)}
+                  {(l.dirs.length ? l.dirs : ["STRAIGHT"]).slice().sort((x, y) => Number(x === l.follow) - Number(y === l.follow)).map((d) => l.follow === d
+                    // Strzałka do jazdy: szara podstawa + zielona kopia wypełniana od dołu, cała grupa pulsuje (CSS lane-arrow-*).
+                    ? <g key={d} className="go-pulse"><Arrow className="go-base" deg={LANE_ANGLES[d] ?? 0} /><Arrow className="go go-fill" deg={LANE_ANGLES[d] ?? 0} /></g>
+                    : <Arrow key={d} deg={LANE_ANGLES[d] ?? 0} />)}
                 </svg>
               </span>
             ))}

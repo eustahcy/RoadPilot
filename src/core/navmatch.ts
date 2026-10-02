@@ -111,8 +111,8 @@ export const NAV = {
   backOnRouteMs: 5_000,
   /** Kolejna próba (np. po błędzie sieci) nie częściej niż co tyle ms — trasy liczy nasz silnik (bez limitu TomTom). */
   rerouteEveryMs: 20_000,
-  /** Pasy (asystent pasa) pokazujemy od tylu km przed miejscem wyboru — praktycznie cały dojazd do niego. */
-  lanesAheadKm: 15,
+  /** Pasy (asystent pasa) pokazujemy od tylu km przed miejscem wyboru — wcześniej myliły (stała podpowiedź przez kilkanaście km). */
+  lanesAheadKm: 5,
   /** Bramki (punkt poboru opłat) pokazujemy na karcie od tylu km. */
   tollAheadKm: 3,
   /** Szukanie pozycji wokół poprzedniej: tyle punktów wstecz i naprzód (punkty co ~50 m). */

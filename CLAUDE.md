@@ -84,7 +84,8 @@ src/core/navmatch.ts  prowadzenie: pointAtKm, bearingAtKm, routeSlice, locate (r
                    bez trasy / poza nią: pushTrail (ślad GPS, HERE) → nav.ts useLimitHere → POST /api/nav/here (trace_attributes map_snap, limitHere)
                    „Po drodze” (NavView AheadSheet, przycisk P): MOP-y / parkingi TIR / stacje do settings.aheadKm (20/30/50/80, domyślnie 50) — z trasą route.pois (km po trasie, poiVisible),
                    bez trasy GET /api/nav/nearby (osm_pois w promieniu NEARBY_KM) → nav.ts useNearbyPois → core/stations placesAhead (kierunek ±aheadDeg, linia prosta);
-                   pasek pod prędkością (.nm-ahead-strip, settings.aheadStrip): najbliższy MOP / parking / stacja, każdy do wyłączenia
+                   pasek pod prędkością (.nm-ahead-strip, settings.aheadStrip): najbliższy MOP / parking / stacja, każdy do wyłączenia, kolejność wg odległości;
+                   stacja z marką (NavView stationLabel: Orlen, Shell, BP… z OSM brand/name; ogólne nazwy, MOP-y i zgłoszenia → „Stacja”)
 src/components/SectionControl.tsx  useSectionRun (stan odcinka z odczytów GPS), sectionView (zapowiedź / w trakcie / podsumowanie), SectionPanel w karcie HudNav (prop section)
 src/components/MapView.tsx  useMapGestures (1 palec = przesuwanie, 2 = szczypanie, kółko; tłumi klik po przeciągnięciu) + moveView (punkt pod palcem
                    zostaje pod palcem, z obrotem i przybliżeniem pochylenia; testy src/mapGestures.test.ts) — MapView z onMove, RouteCompare, HudRouteMap
@@ -136,6 +137,8 @@ src/components/NavView.tsx  nawigacja jako osobny system (nie HUD): HudRouteMap 
                    z numerem drogi (HudNav roadBadge: A/S/krajowe czerwone, wojewódzkie żółte, E zielone), „›” = lista najbliższych manewrów;
                    „⋯” = menu (zgłoszenie, postój, dzień, pełny ekran, zakończ nawigację, wyjdź).
                    Przycisk 2D/3D nad zoomem (Settings.navMap): 2D = HudRouteMap flat (pitch 0, FLAT_ZOOM −2, trasa na 25 km, bez horyzontu .nm-map.flat). Karty „szklane” gradientem, bez backdrop-filter;
+                   Manewr na każdym urządzeniu i w każdej orientacji (2026-10-02) jako „napisy na horyzoncie” (.nm-top .hud-nav.card bez tła, z cieniem
+                   pod tekstem; w dzień ciemne napisy z jasną poświatą) — telefon pionowo: pasy w drugim wierszu, poziomo i tablet: w jednym wierszu;
                    Tablet (wersja lżejsza 2026-10-01): mapa na cały ekran, zwarta półprzezroczysta karta manewru w lewym górnym rogu (40%,
                    bez kafelka kolejnego manewru — „›” = lista), przyciski pod nią, kafelki ukryte — dolny smukły pasek .nm-progress: do celu ·
                    przyjazd · przerwa · trasa + oś trasy jak w HUD (HudView RouteLine: Start, ciężarówka z %, postoje z planu „za X km” + godzina, Cel); odcinkowy pomiar na tablecie zastępuje tę oś
@@ -224,9 +227,10 @@ src/components/PrintoutTips.tsx  Pro tip na Planie: formułki na odwrót wydruku
 alert_votes        głosy „jest / nie ma” po minięciu fotoradaru/kontroli (POST /api/alerts/vote, applyVotes w warnings.mjs)
 server/osm.mjs     OSM → ograniczenia (height/weight/axle/width/length/hgv/speed_hgv), parseValue; osm-import.mjs → tabela osm_restrictions
 /opt/roadpilot-valhalla  dane i build.sh Valhalla (docker ghcr.io/valhalla/valhalla); kontener roadpilot-valhalla na 127.0.0.1:8002;
-                   budowa potrzebuje kilku GB RAM — na czas budowy zatrzymywany kontener Metin2 m2pb-06b67463-game (zgoda użytkownika)
+                   budowa potrzebuje kilku GB RAM; serwer Metin2 (m2pb-06b67463-*) zatrzymany na stałe od 2026-10-02 (restart=no)
 scripts/tiles-build.sh  własne kafelki wektorowe: tilemaker (server/tiles/config.json + process.lua: warstwy water, landuse, waterway, railway, road
-                   z tagami ograniczeń, building, place; z 6–14, gzip) → katalog VTILES_DIR (z/x/y.pbf) serwowany przez GET /api/vtiles/z/x/y
+                   z tagami ograniczeń, building, place; z 6–14, gzip; drogi: autostrady/ekspresowe/trunk od z6, krajowe primary od z7, secondary od z9 — oddalona mapa nie jest pusta;
+                   GlMap dorysowuje brakujący kafelek z rodzica do 3 poziomów) → katalog VTILES_DIR (z/x/y.pbf) serwowany przez GET /api/vtiles/z/x/y
                    (204 = pusty kafelek) i GET /api/vtiles/meta {available, bounds}; aplikacja używa własnych kafelków tylko w ich zasięgu
 scripts/osm-update.sh  pobranie Polski (lustro openstreetmap.fr — Geofabrik blokuje VPS) → osmium tags-filter → export → import; dane w /opt/roadpilot-osm
 server/conditional.mjs  ograniczenia warunkowe z OSM (`maxweight:conditional`, `hgv:conditional`): parseConditional (godziny, dni, PH = święta PL,
@@ -241,8 +245,8 @@ server/speeds.mjs  prędkości ciężarówek z gps_points: komórki ~250 m × ki
 src/core/gapfix.ts  luka z przesunięciem (≥ 15 min, ≥ 1 km): AppState.gapReview (stan tachografu sprzed luki, suma jazdy po niej; tylko lokalnie,
                    jak pendingGap) → GapSheet w Nawigacji (samo przy niewyjaśnionej, menu ⋯) i w Historii („Uzupełnij, co robiłem”): jazda / pauza (ile,
                    na początku / końcu) / postój → applyGapAnswer przelicza tachograf od stanu sprzed luki + postoje i jazda z historii po niej
-scripts/weekly-update.sh  timer systemd roadpilot-weekly (niedziela 01:00 UTC): osm-update → Valhalla w /opt/roadpilot-valhalla.new (Metin2 zatrzymany
-                   na czas budowy, zawsze wznawiany) → podmiana + test trasy (błąd = powrót) → kafelki → speed-build, suspects-build → restart API;
+scripts/weekly-update.sh  timer systemd roadpilot-weekly (niedziela 01:00 UTC): osm-update → Valhalla w /opt/roadpilot-valhalla.new (Metin2 — jeśli
+                   ktoś go uruchomi — zatrzymany na czas budowy i wznawiany) → podmiana + test trasy (błąd = powrót) → kafelki → speed-build, suspects-build → restart API;
                    log /var/log/roadpilot-weekly.log. Plan i stan: upgrade.md
 scripts/deploy-ftp.sh  `npm run deploy:tuike`: build z VITE_API_URL → FTPS do tuike.pl/roadpilot/ (dane w ~/.config/roadpilot/ftp.env)
 ```

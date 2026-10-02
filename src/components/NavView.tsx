@@ -277,7 +277,7 @@ export function NavView(p: NavViewProps) {
           {strip.map(({ k, x }) => (
             <span key={k.id}>
               <AheadIcon kind={k.id === "fuel" ? "fuel" : x.poi.kind} />
-              <b>{k.short}</b>
+              <b>{k.id === "fuel" ? stationLabel(x.poi.name) : k.short}</b>
               <strong>{fmtAheadKm(x.km)}</strong>
               <Icon name="chevron" className="nm-ahead-go" />
             </span>
@@ -463,6 +463,13 @@ const AHEAD_FILTERS: { id: AheadFilter; label: string; kinds: RoutePoi["kind"][]
   { id: "fuel", label: "Stacje", kinds: ["fuel", "services"] },
 ];
 /** Pasek pod prędkością: rodzaje w kolejności wyświetlania (MOP ze stacją liczy się jako MOP i jako stacja). */
+/** Stacja na pasku „po drodze”: marka (Orlen, Shell, BP…) — z OSM brand/name; ogólne nazwy i zgłoszenia kierowców → „Stacja”. */
+const GENERIC_STATION = /^(stacja( paliw| lpg)?|independent|zgłoszenie kierowcy|mop\b|miejsce obsługi)/i;
+const stationLabel = (name: string | undefined) => {
+  const n = (name ?? "").trim();
+  return !n || GENERIC_STATION.test(n) ? "Stacja" : n;
+};
+
 const AHEAD_STRIP: { id: keyof AheadStrip; short: string; kinds: RoutePoi["kind"][] }[] = [
   { id: "mop", short: "MOP", kinds: ["services", "mop"] },
   { id: "parking", short: "Parking", kinds: ["parking"] },

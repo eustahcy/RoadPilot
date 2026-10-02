@@ -1027,6 +1027,25 @@ svg .rb-exit { fill: currentColor; stroke: none; font: 900 7.5px system-ui, sans
 .nm-top .hud-nav.card .hud-lanes-guide small b { font-size: calc(2.9 * var(--u)); }
 .nm-card-more { position: absolute; z-index: 1; top: calc(2.2 * var(--u)); right: calc(2 * var(--u)); display: grid; place-items: center; width: calc(6.4 * var(--u)); height: calc(6.4 * var(--u)); padding: 0; border-radius: 50%; background: rgba(160, 195, 220, .22); border: 1px solid rgba(190, 215, 235, .4); color: #f2f6f9; }
 .nm-card-more .hud-ico { width: calc(3.4 * var(--u)); height: calc(3.4 * var(--u)); }
+/* Karta manewru — napisy na horyzoncie (każde urządzenie i orientacja): nie blok, a strzałka, odległość, droga i pasy na „niebie”
+   nad linią horyzontu, z cieniem pod tekstem. Telefon pionowo: pasy w drugim wierszu. */
+.nm-top { justify-self: stretch; }
+.nm-top .hud-nav.card { flex-wrap: wrap; justify-content: center; gap: calc(1 * var(--u)) calc(4 * var(--u)); padding: calc(.4 * var(--u)) calc(9 * var(--u)) 0; background: none; border: 0; box-shadow: none; text-shadow: 0 2px 10px rgba(0, 0, 0, .75); }
+.nm-top .hud-nav.card > * { flex: 0 1 auto; }
+.nm-top .hud-nav.card .hud-man { flex: 0 1 auto; }
+.nm-top .hud-nav.card .hud-man svg { width: calc(12 * var(--u)); height: calc(12 * var(--u)); filter: drop-shadow(0 2px 6px rgba(0, 0, 0, .6)); }
+.nm-top .hud-nav.card .hud-man b { font-size: calc(7.4 * var(--u)); }
+.nm-top .hud-nav.card .hud-man small { font-size: calc(3.6 * var(--u)); color: #fff; }
+.nm-top .hud-nav.card .hud-lanes-guide { flex-basis: 100%; justify-items: center; }
+.nm-top .hud-nav.card .hud-lanes-guide small { font-size: calc(3 * var(--u)); color: #fff; }
+.nm-top .hud-nav.card .hud-warn, .nm-top .hud-nav.card .hud-toll { flex: 0 1 auto; text-shadow: none; background: rgba(14, 22, 32, .9); }
+.nm-top .hud-nav.card.off, .nm-top .hud-nav.card.waiting { flex-direction: row; align-items: center; min-height: 0; }
+/* Motyw dzienny: jasne niebo — ciemne napisy z jasną poświatą. */
+.hud.navmode.day .nm-top .hud-nav.card { text-shadow: 0 1px 8px rgba(255, 255, 255, .9); }
+.hud.navmode.day .nm-top .hud-nav.card .hud-man small, .hud.navmode.day .nm-top .hud-nav.card .hud-lanes-guide small { color: #13202b; }
+.hud.navmode.day .nm-top .hud-nav.card .hud-man b, .hud.navmode.day .nm-top .hud-nav.card .hud-lanes-guide small b, .hud.navmode.day .nm-top .hud-nav.card .hud-man svg { color: #0d8a43; }
+.nm-card-more { top: calc(.6 * var(--u)); right: 0; }
+.hud.navmode.day .nm-card-more { background: rgba(13, 32, 43, .78); border-color: rgba(13, 32, 43, .4); color: #fff; }
 .hud-road { display: flex; align-items: center; gap: calc(1.2 * var(--u)); min-width: 0; }
 .hud-road span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .road-badge { flex: none; padding: calc(.25 * var(--u)) calc(1.1 * var(--u)); border-radius: calc(.8 * var(--u)); background: #d7262b; box-shadow: inset 0 0 0 2px rgba(255, 255, 255, .85); color: #fff; font-style: normal; font-weight: 900; letter-spacing: .02em; }
@@ -1069,7 +1088,7 @@ svg .rb-exit { fill: currentColor; stroke: none; font: 900 7.5px system-ui, sans
 .nm-ahead > span + span { border-top: 1px solid rgba(140, 175, 195, .16); }
 .nm-ahead .nm-ahead-ico { width: calc(5.4 * var(--u)); height: calc(5.4 * var(--u)); font-size: calc(2.8 * var(--u)); }
 .nm-ahead .nm-ahead-ico svg { width: calc(3.2 * var(--u)); height: calc(3.2 * var(--u)); }
-.nm-ahead b { min-width: calc(9 * var(--u)); color: #b9c7d1; font-size: calc(2.7 * var(--u)); font-weight: 750; }
+.nm-ahead b { min-width: calc(9 * var(--u)); max-width: calc(17 * var(--u)); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: #b9c7d1; font-size: calc(2.7 * var(--u)); font-weight: 750; }
 .nm-ahead strong { margin-left: auto; padding-left: calc(1.4 * var(--u)); font-size: calc(3.1 * var(--u)); font-weight: 850; font-variant-numeric: tabular-nums; }
 .nm-ahead-go { display: none; width: calc(3 * var(--u)); height: calc(3 * var(--u)); color: #9aabb8; }
 
@@ -1108,7 +1127,9 @@ svg .rb-exit { fill: currentColor; stroke: none; font: 900 7.5px system-ui, sans
 @media (orientation: landscape) and (max-height: 599px) {
   .hud.navmode { grid-template-columns: auto auto 1fr auto auto; grid-template-rows: auto 1fr auto auto;
     grid-template-areas: "top top top . side" ". . . ctl side" "speed ahead . ctl side" "tiles tiles tiles tiles tiles"; }
-  .nm-top { justify-self: start; width: min(46vw, 560px); }
+  .nm-top .hud-nav.card { flex-wrap: nowrap; }
+  .nm-top .hud-nav.card .hud-lanes-guide { flex-basis: auto; }
+  .nm-top .hud-nav.card .hud-lanes-guide small { white-space: nowrap; }
   .nm-side { align-self: start; gap: calc(1 * var(--u)); }
   .nm-btn, .nm-zoom { width: calc(8.6 * var(--u)); }
   .nm-btn { height: calc(8.6 * var(--u)); }
@@ -1143,25 +1164,14 @@ svg .rb-exit { fill: currentColor; stroke: none; font: 900 7.5px system-ui, sans
   .nm-speed-bar { display: block; }
   .nm-speed strong { font-size: calc(11 * var(--u)); }
   .nm-limit { width: calc(9.5 * var(--u)); height: calc(9.5 * var(--u)); font-size: calc(3.8 * var(--u)); }
-  /* Manewr nie jako blok, a napisy z symbolami na „niebie” nad linią horyzontu: strzałka, odległość, droga, pasy, podpowiedź. */
-  .nm-top { justify-self: stretch; }
-  .nm-top .hud-nav.card { flex-wrap: nowrap; justify-content: center; gap: calc(4 * var(--u)); padding: calc(.4 * var(--u)) calc(9 * var(--u)) 0; background: none; border: 0; box-shadow: none; text-shadow: 0 2px 10px rgba(0, 0, 0, .65); }
-  .nm-top .hud-nav.card > * { flex: 0 1 auto; }
-  .nm-top .hud-nav.card .hud-man { flex: 0 1 auto; }
-  .nm-top .hud-nav.card .hud-man svg { width: calc(9 * var(--u)); height: calc(9 * var(--u)); filter: drop-shadow(0 2px 6px rgba(0, 0, 0, .55)); }
+  /* Napisy na horyzoncie (reguły wspólne wyżej „Karta manewru — napisy na horyzoncie”) — na tablecie mniejsze względem --u. */
+  .nm-top .hud-nav.card { flex-wrap: nowrap; gap: calc(4 * var(--u)); padding: calc(.4 * var(--u)) calc(9 * var(--u)) 0; }
+  .nm-top .hud-nav.card .hud-man svg { width: calc(9 * var(--u)); height: calc(9 * var(--u)); }
   .nm-top .hud-nav.card .hud-man b { font-size: calc(6 * var(--u)); }
-  .nm-top .hud-nav.card .hud-man small { font-size: calc(3 * var(--u)); color: #fff; }
-  .nm-top .hud-nav.card .hud-lanes-guide { flex-basis: auto; justify-items: center; }
-  .nm-top .hud-nav.card .hud-lanes-guide small { font-size: calc(2.4 * var(--u)); color: #fff; }
-  .nm-top .hud-nav.card .hud-warn, .nm-top .hud-nav.card .hud-toll { flex: 0 1 auto; text-shadow: none; background: rgba(14, 22, 32, .9); }
-  .nm-top .hud-nav.card.off, .nm-top .hud-nav.card.waiting { flex-direction: row; align-items: center; min-height: 0; }
-  /* Motyw dzienny: jasne niebo — ciemne napisy z jasną poświatą. */
-  .hud.navmode.day .nm-top .hud-nav.card { text-shadow: 0 1px 8px rgba(255, 255, 255, .9); }
-  .hud.navmode.day .nm-top .hud-nav.card .hud-man small, .hud.navmode.day .nm-top .hud-nav.card .hud-lanes-guide small { color: #13202b; }
-  .hud.navmode.day .nm-top .hud-nav.card .hud-man b, .hud.navmode.day .nm-top .hud-nav.card .hud-lanes-guide small b, .hud.navmode.day .nm-top .hud-nav.card .hud-man svg { color: #0d8a43; }
-  .hud.navmode.day .nm-top .hud-nav.card .hud-man b { color: #0d8a43; }
-  .nm-card-more { top: calc(.6 * var(--u)); right: 0; }
-  .hud.navmode.day .nm-card-more { background: rgba(13, 32, 43, .78); border-color: rgba(13, 32, 43, .4); color: #fff; }
+  .nm-top .hud-nav.card .hud-man small { font-size: calc(3 * var(--u)); }
+  .nm-top .hud-nav.card .hud-lanes-guide { flex-basis: auto; }
+  .nm-top .hud-nav.card .hud-lanes-guide small { white-space: nowrap; }
+  .nm-top .hud-nav.card .hud-lanes-guide small { font-size: calc(2.4 * var(--u)); }
   /* Przyciski duże — łatwo trafić palcem w jeździe. */
   .nm-btn, .nm-zoom { width: calc(9.6 * var(--u)); }
   .nm-btn { height: calc(9.6 * var(--u)); }

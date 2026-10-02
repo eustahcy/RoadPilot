@@ -5,8 +5,8 @@
 #   3. własne kafelki wektorowe — scripts/tiles-build.sh (podmienia katalog po udanej budowie)
 #   4. prędkości z jazdy kierowców i podejrzane ograniczenia — speed-build.mjs, suspects-build.mjs
 #   5. restart API
-# Budowa Valhalli i kafelków potrzebuje kilku GB RAM — na ten czas zatrzymujemy serwer gry Metin2 (zgoda właściciela),
-# uruchamiany ponownie zawsze na końcu (także po błędzie). Log: /var/log/roadpilot-weekly.log.
+# Budowa Valhalli i kafelków potrzebuje kilku GB RAM — Metin2 jest wyłączony na stałe (2026-10-02); gdyby ktoś go uruchomił,
+# zatrzymujemy go na czas budowy i wznawiamy na końcu (także po błędzie). Log: /var/log/roadpilot-weekly.log.
 set -euo pipefail
 exec >>/var/log/roadpilot-weekly.log 2>&1
 

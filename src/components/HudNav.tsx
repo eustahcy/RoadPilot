@@ -2,6 +2,7 @@ import { useEffect, useRef } from "react";
 import { Live } from "../core/gps";
 import { alongRoute, bearingAtKm, isOffRoute, laneHint, lanesAhead, locate, NAV, NavInstruction, nextInstruction, pointAtKm, RoutePos, routeSlice, speedLimitAt, nextOffRoute, OFF_ROUTE_IDLE, OffRouteState, locateTrace, TrackFix, travelHeading, junctionZoom } from "../core/navmatch";
 import { isAhead, jamMatters, jamTone, NavPlace, NavRoute, RoutePoi, RouteWarning, TRAFFIC_ON, TrafficSection, warningText } from "../nav";
+import { QUIET_VEHICLE } from "./RouteCompare";
 import { GlLine, GlMapView, GlMarker, GlVector } from "./GlMap";
 import { LatLon, moveView, useMapGestures } from "./MapView";
 import { fmtAgo, Friend, STATUS_LABEL } from "../core/friends";
@@ -435,6 +436,44 @@ function useSmoothPosition(route: NavRoute | null, pos: RoutePos | undefined, of
 const PINS_AHEAD_KM = 20;
 /** Najwięcej pinezek naraz — przy przeglądaniu długiej trasy najpierw fotoradary i odcinki, potem najbliższe miejsca. */
 const PINS_MAX = 160;
+/** Przeglądanie oddalone poniżej tego zoomu: bez MOP-ów, stacji, parkingów, fotoradarów (zostają ograniczenia i punkty pośrednie),
+ *  za to tabliczki z numerami dróg na trasie i cicha mapa — widać, którędy prowadzi trasa (A4, A1, S7…). */
+const FAR_ZOOM = 11.5;
+
+/** Odcinki trasy po jednej drodze z numerem (A / S / DK / DW / E) z nazw ulic przy manewrach; sąsiednie z tym samym numerem sklejone. */
+export function routeRefStretches(route: NavRoute): { ref: string; kind: "red" | "yellow" | "green"; km: number; toKm: number }[] {
+  const out: { ref: string; kind: "red" | "yellow" | "green"; km: number; toKm: number }[] = [];
+  const ins = route.instructions;
+  ins.forEach((i, n) => {
+    const b = roadBadge(i.street);
+    const toKm = ins[n + 1]?.km ?? route.lengthKm;
+    // Sam numer („7”) to droga krajowa / wojewódzka tylko wtedy, gdy nazwa to wyłącznie numer — nie „3 Maja”.
+    if (!b || (/^\d+$/.test(b.ref) && b.rest) || toKm <= i.km) return;
+    const last = out.at(-1);
+    if (last && last.ref === b.ref && i.km - last.toKm < 2) last.toKm = toKm;
+    else out.push({ ref: b.ref, kind: b.kind, km: i.km, toKm });
+  });
+  return out;
+}
+
+/** Tabliczki numerów dróg na trasie (w połowie każdego odcinka; dłuższe — co `everyKm`), od km `fromKm`. */
+function routeRefMarkers(route: NavRoute, fromKm: number, everyKm: number): GlMarker[] {
+  const out: GlMarker[] = [];
+  for (const st of routeRefStretches(route)) {
+    const a = Math.max(st.km, fromKm), len = st.toKm - a;
+    if (len < everyKm * 0.12) continue;
+    const n = Math.max(1, Math.floor(len / everyKm));
+    for (let k = 0; k < n; k++) {
+      const at = pointAtKm(route.points, a + (len * (k + 0.5)) / n);
+      if (!at) continue;
+      const w = st.ref.length * 10 + 16;
+      out.push({ key: `rr${st.ref}${st.km}${k}`, ...at, box: [w + 6, 30], node: (
+        <g className={`route-ref ${st.kind}`}><rect x={-w / 2} y={-13} width={w} height={26} rx={5} /><text y={6}>{st.ref}</text></g>
+      ) });
+    }
+  }
+  return out;
+}
 
 /** Typ drogi trasy na danym km (z odcinków trasy). */
 function roadTypeAt(route: NavRoute, km: number) {
@@ -525,11 +564,13 @@ function TollIcon() {
 export const POI_TITLE: Record<RoutePoi["kind"], string> = { fuel: "Stacja paliw", services: "MOP ze stacją i barem", mop: "MOP — miejsce odpoczynku", parking: "Parking dla ciężarówek", toll: "Bramki — punkt poboru opłat" };
 
 /** Stacje / MOP-y / parkingi, fotoradary / odcinki i punkty pośrednie na kawałku trasy [fromKm, toKm] → znaczniki mapy; `gapKm` — min. odstęp. */
-function routePins(route: NavRoute, fromKm: number, toKm: number, gapKm = 0): { markers: GlMarker[]; info: PinInfo[] } {
+function routePins(route: NavRoute, fromKm: number, toKm: number, gapKm = 0, far = false): { markers: GlMarker[]; info: PinInfo[] } {
   const pins: { info: PinInfo; prio: number; node: React.ReactNode }[] = [];
   const inRange = (k: number) => k >= fromKm && k <= toKm;
   const add = (info: PinInfo, prio: number, node: React.ReactNode) => pins.push({ info, prio, node });
   for (const w of route.warnings ?? []) {
+    // Oddalony podgląd: tylko ograniczenia i zakazy (fotoradary, odcinki, kontrole znikają — liczy się, którędy jedziemy).
+    if (far && ["camera", "red_light", "section", "police", "itd"].includes(w.kind)) continue;
     const base = { name: w.name, details: w.source === "report" ? ["Zgłoszenie kierowcy"] : [], lat: w.lat, lon: w.lon };
     if (w.kind === "camera" || w.kind === "red_light") {
       const key = `w${w.source}${w.id}`;
@@ -557,7 +598,7 @@ function routePins(route: NavRoute, fromKm: number, toKm: number, gapKm = 0): { 
       }
     }
   }
-  for (const p of route.pois ?? []) {
+  for (const p of far ? [] : route.pois ?? []) {
     if (!inRange(p.km) || !poiVisible(route, p)) continue;
     const key = `p${p.id}`;
     const details = [`${p.side === "right" ? "Po prawej" : "Po lewej"} stronie, ok. ${Math.round(p.offM / 10) * 10} m od trasy`, ...(p.truck && p.kind !== "parking" ? ["Oznaczone dla ciężarówek"] : [])];
@@ -718,7 +759,10 @@ export function HudRouteMap({ nav, track, live, token, anchorY = 0.8, zoomOffset
     markers.push({ key: `l${j.t.km}`, ...at, node: <g className={`hud-map-delay ${j.tone}`}><rect x={-w / 2} y={-34} width={w} height={22} rx={11} /><text x={0} y={-18}>{text}</text></g> });
   }
   // Pinezki: stacje, MOP-y, parkingi, fotoradary, odcinkowe pomiary. W prowadzeniu tylko kawałek przed nami, przy przeglądaniu cała trasa.
-  const pins = route ? routePins(route, browse ? -Infinity : km - 0.3, browse ? Infinity : km + PINS_AHEAD_KM, browse ? pinGapKm(browse) : 0) : { markers: [], info: [] };
+  const far = !!browse && browse.zoom < FAR_ZOOM;
+  const pins = route ? routePins(route, browse ? -Infinity : km - 0.3, browse ? Infinity : km + PINS_AHEAD_KM, browse ? pinGapKm(browse) : 0, far) : { markers: [], info: [] };
+  // Numery dróg na trasie przy oddalonym przeglądaniu — tabliczki co ok. 160 px ekranu (pierwsze w kolejności — wygrywają z etykietami).
+  if (route && far) markers.unshift(...routeRefMarkers(route, browse!.overview ? km : 0, pinGapKm(browse!) * 4.7));
   markers.push(...pins.markers);
   pinInfo.current = new Map(pins.info.map((p) => [p.key, p]));
   for (const { f, p, km: fkm } of mates) {
@@ -739,7 +783,7 @@ export function HudRouteMap({ nav, track, live, token, anchorY = 0.8, zoomOffset
     if (me) markers.push({ key: "me", lat: me.lat, lon: me.lon, rotate: (b) => bearing - b, node: <path className="hud-map-me" d="M0 -30 L22 24 L0 12 L-22 24 Z" /> });
     return (
       <div className="hud-map" ref={box} {...(onBrowse ? gestures : {})}>
-        <GlMapView token={token} center={browse.center} zoom={browse.zoom} bearing={browse.bearing} pitch={0} anchorY={0.5} lines={lines} markers={markers} vector={vector} pickRef={pickRef} />
+        <GlMapView token={token} center={browse.center} zoom={browse.zoom} bearing={browse.bearing} pitch={0} anchorY={0.5} lines={lines} markers={markers} vector={vector && far ? { ...vector, vehicle: QUIET_VEHICLE, quiet: true } : vector} pickRef={pickRef} />
       </div>
     );
   }

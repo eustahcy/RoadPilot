@@ -150,7 +150,9 @@ src/components/NavView.tsx  nawigacja jako osobny system (nie HUD): HudRouteMap 
                    Panel przycisków (.nm-side) po lewej na każdym urządzeniu (poziomo rzędem pod manewrem), zwijany do lewej (.nm-fold, localStorage
                    „roadpilot:navSide”), „⋯” zostaje; po prawej tylko 2D/3D, +/−, „namierz” (zawsze widoczny).
                    Przycisk „namierz” w prowadzeniu = podgląd całej pozostałej trasy (NavView showOverview → MapBrowse.overview: z góry, nie wraca sam,
-                   bez paska „po drodze”); drugie dotknięcie = prowadzenie. Pinezki (HudNav routePins): ograniczenia jako znaki (restrictionPin: wysokość,
+                   bez paska „po drodze”); drugie dotknięcie = prowadzenie. Przeglądanie oddalone (zoom < FAR_ZOOM 11,5): routePins far — bez MOP-ów,
+                   stacji, fotoradarów, odcinków i kontroli (ograniczenia zostają), tabliczki numerów dróg na trasie (routeRefStretches z
+                   instructions[].street przez roadBadge; sam numer tylko gdy cała nazwa to numer), cicha mapa (quiet + QUIET_VEHICLE). Pinezki (HudNav routePins): ograniczenia jako znaki (restrictionPin: wysokość,
                    masa, oś, szerokość, długość, zakaz TIR, droga zamknięta, stromo, zakręt, POL/ITD; soft przygaszone), zgłoszenia kierowców i dodane
                    przez nich miejsca (poi id „r…”) z pomarańczową chorągiewką REPORT_BADGE. Okienka Nawigacji (zgłoś, ostrzeżenia, po drodze, postój,
                    wskazówki, luka) to strony NavPage (NavMenu.tsx) w stylu menu; ReportSheet = sekcje kafelków z podpisami.

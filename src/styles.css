@@ -1466,6 +1466,12 @@ svg .rb-exit { fill: currentColor; stroke: none; font: 900 7.5px system-ui, sans
 .vl-town { font-size: 14px; }
 .vl-village, .vl-hamlet { font-size: 12px; font-weight: 650; }
 .vl-street { fill: var(--label); font: 650 12px system-ui, sans-serif; text-anchor: middle; paint-order: stroke; stroke: var(--halo); stroke-width: 3px; stroke-linejoin: round; opacity: .9; }
+/* Numer drogi na trasie (podgląd trasy): większa tabliczka z białą obwódką i cieniem — odróżnia się od numerów innych dróg. */
+.route-ref rect { fill: #e8352d; stroke: #fff; stroke-width: 2.5; filter: drop-shadow(0 2px 4px rgba(0, 0, 0, .6)); }
+.route-ref.yellow rect { fill: #f2c230; }
+.route-ref.green rect { fill: #1f8a4c; }
+.route-ref text { fill: #fff; font: 900 16px system-ui, sans-serif; text-anchor: middle; }
+.route-ref.yellow text { fill: #1b2229; }
 .vl-ref rect { fill: #e8352d; stroke: #fff; stroke-width: 1.5; }
 .vl-ref text { fill: #fff; font: 800 12px system-ui, sans-serif; text-anchor: middle; }
 /* Dzień: niebo i mgła jasne (paleta day), nocą jak dotąd */

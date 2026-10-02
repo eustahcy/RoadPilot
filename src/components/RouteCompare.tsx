@@ -26,7 +26,7 @@ function fit(routes: NavRoute[], w: number, h: number): { center: LatLon; zoom: 
 }
 
 /** Mały pojazd do tła porównania: bez czerwonych zakazów — na mapie liczą się tylko trasy (ograniczenia są w zestawieniu). */
-const QUIET_VEHICLE: Vehicle = { heightM: 1, widthM: 1, lengthM: 2, weightKg: 1000, axleWeightKg: 500, axles: 2, adr: "none", maxKmh: 90 };
+export const QUIET_VEHICLE: Vehicle = { heightM: 1, widthM: 1, lengthM: 2, weightKg: 1000, axleWeightKg: 500, axles: 2, adr: "none", maxKmh: 90 };
 
 /**
  * Miejsce na dymek trasy: punkt najdalej od pozostałych tras (tam, gdzie warianty się rozchodzą), z dala od początku i końca,

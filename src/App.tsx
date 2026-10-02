@@ -18,7 +18,7 @@ import { LicensePanel, licenseStatus } from "./components/License";
 import { PlanView } from "./components/PlanView";
 import { RouteView } from "./components/RouteView";
 import { SettingsCategory, SettingsView } from "./components/SettingsView";
-import { ALERTS_REFRESH, fetchRoute, LIVE_TRAFFIC, refreshLiveTraffic, refreshTraffic, TRAFFIC_ON, TRAFFIC_REFRESH, NavAccess, NavPlace, NavRoute, refreshWarnings, viaAhead, voteAlert, withWarnings } from "./nav";
+import { ALERTS_REFRESH, POIS_VERSION, fetchRoute, LIVE_TRAFFIC, refreshLiveTraffic, refreshTraffic, TRAFFIC_ON, TRAFFIC_REFRESH, NavAccess, NavPlace, NavRoute, refreshWarnings, viaAhead, voteAlert, withWarnings } from "./nav";
 import { locate } from "./core/navmatch";
 import { planForDeadline } from "./core/deadline";
 import { GPS, recentSpeed } from "./core/gps";
@@ -162,7 +162,7 @@ function App() {
   };
   // Trasa sprzed ostrzeżeń (albo z innej wersji) — dociągamy ostrzeżenia raz, bez nowej trasy z TomTom.
   const navRouteAt = state.navRoute?.at;
-  const needWarnings = navAccess === "premium" && !!state.navRoute && (!state.navRoute.warnings || !state.navRoute.pois);
+  const needWarnings = navAccess === "premium" && !!state.navRoute && (!state.navRoute.warnings || !state.navRoute.pois || state.navRoute.poisV !== POIS_VERSION);
   useEffect(() => {
     if (!needWarnings || !auth || !state.navRoute) return;
     const r = state.navRoute;
@@ -234,7 +234,7 @@ function App() {
   const hudItems = settings.hudItems[settings.hudStyle];
   const inVtilesNow = inVtiles(vtiles, live);
   /** Styl własnej mapy (dzień / noc, pojazd do zakazów) — Nawigacja i porównanie tras. */
-  const mapStyle = { theme: settings.mapTheme === "auto" ? autoTheme(weather.data?.isDay, now) : settings.mapTheme, vehicle: settings.vehicle };
+  const mapStyle = { theme: settings.mapTheme === "auto" || settings.mapTheme === "glass" ? autoTheme(weather.data?.isDay, now) : settings.mapTheme, vehicle: settings.vehicle };
   const roads = useRoads(live, online && hudItems.road, now);
   const today = state.history.find((d) => d.date === dayKey(now));
   const avgKmh = today ? daySummary(today).avgKmh : undefined;

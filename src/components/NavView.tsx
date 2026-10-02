@@ -29,6 +29,7 @@ import { SectionLine, SectionPanel, sectionKey, sectionView, useSectionRun } fro
 import { sectionLimit } from "../core/section";
 import { ActiveStopPanel, confirmStartDay, fmtTimer, StopControlsProps, StopPicker } from "./StopControls";
 import { NavSettingsPage, SettingsSection } from "./NavSettings";
+import { FuelGlyph, LetterGlyph, mergeStations, POI_COLOR, TollGlyph } from "./PoiIcons";
 import { breakStopFor } from "../core/breakstop";
 import { SupportContent } from "./Support";
 import { isFavorite, toggleFavorite } from "../core/places";
@@ -160,12 +161,22 @@ export function NavView(p: NavViewProps) {
   const stripOn = !!p.mapToken && AHEAD_STRIP.some((k) => p.ahead.strip[k.id]);
   const nearby = useNearbyPois(p.mapToken, fresh, (aheadList || stripOn) && !onRoute, p.ahead.km);
   const aheadItems: AheadItem[] | null = onRoute
-    ? route.pois?.filter((x) => x.km > pos.km && x.km <= pos.km + p.ahead.km && poiVisible(route, x)).map((x) => ({ poi: x, km: x.km - pos.km, side: x.side, onRoute: true })) ?? []
+    ? mergeStations(route.pois ?? []).filter((x) => x.km > pos.km && x.km <= pos.km + p.ahead.km && poiVisible(route, x)).map((x) => ({ poi: x, km: x.km - pos.km, side: x.side, onRoute: true })) ?? []
     : nearby && fresh ? placesAhead(nearby, fresh, fresh.heading, p.ahead.km).map(({ item, km }) => ({ poi: item, km, onRoute: false })) : null;
   // Pod prędkością: najbliższy z każdego włączonego rodzaju (najwyżej 3).
-  const placeRows: StripRow[] = stripOn && aheadItems ? AHEAD_STRIP.filter((k) => p.ahead.strip[k.id]).flatMap((k) => {
-    const x = aheadItems.find((i) => k.kinds.includes(i.poi.kind));
-    return x ? [{ key: k.id, icon: <AheadIcon kind={k.id === "fuel" ? "fuel" : x.poi.kind} />, label: stripLabel(k.id, x.poi), km: x.km, tone: k.id === "toll" ? "toll" : undefined }] : [];
+  // MOP ze stacją to jedno miejsce: gdy najbliższa stacja jest w najbliższym MOP-ie, zostaje jeden wiersz „Krzyżanów · MOL”.
+  const nearestOf = (k: (typeof AHEAD_STRIP)[number]) => aheadItems?.find((i) => k.kinds.includes(i.poi.kind));
+  const mopItem = nearestOf(AHEAD_STRIP[0]);
+  const placeRows: StripRow[] = stripOn && aheadItems ? AHEAD_STRIP.filter((k) => p.ahead.strip[k.id]).flatMap((k): StripRow[] => {
+    const x = nearestOf(k);
+    if (k.id === "fuel" && x && p.ahead.strip.mop && x === mopItem) return [];
+    if (!x) return [];
+    // MOP ze stacją: wiersz na zmianę co STRIP_SWAP_MS — „[dystrybutor] Orlen” i „[P] MOP Morawica”.
+    if (x.poi.kind === "services" && (x.poi as RoutePoi).brand && k.id !== "toll") {
+      const fuelPhase = Math.floor(now / STRIP_SWAP_MS) % 2 === 0;
+      return [{ key: `${k.id}:${fuelPhase}`, icon: <AheadIcon kind={fuelPhase ? "fuel" : "mop"} />, label: fuelPhase ? stationLabel((x.poi as RoutePoi).brand) : (x.poi.name || "MOP"), km: x.km, tone: fuelPhase ? "swap fuel" : "swap" }];
+    }
+    return [{ key: k.id, icon: <AheadIcon kind={k.id === "fuel" ? "fuel" : x.poi.kind} />, label: stripLabel(k.id, x.poi), km: x.km, tone: k.id === "toll" ? "toll" : undefined }];
   }) : [];
   // Fotoradar i początek odcinkowego pomiaru — z ostrzeżeń trasy, w czerwonej ramce (przejazd przez odcinek pokazuje karta / oś).
   const alertRows: StripRow[] = p.mapToken && p.ahead.strip.camera !== false && onRoute ? ALERT_STRIP.flatMap((a) => {
@@ -199,13 +210,22 @@ export function NavView(p: NavViewProps) {
     return { label: `Do ${name}`, arrLabel: `Przyjazd · pkt ${viaNext.n || 1}`, km, clock: t ? fmtClock(t, now) : "—", left: t ? fmtDuration(Math.max(0, t - now) / 60_000) : undefined, note: viaNext.v.label };
   })();
   // Nad paskiem: droga, którą jedziemy, i kilometr drogi (słupki z OSM), np. „S19 · Droga ekspresowa im. Lecha Kaczyńskiego · km 432”.
-  const road = onRoute ? roadAt(route.instructions, pos.km) : undefined;
+  // Droga z manewrów; gdy słupki przy trasie mówią o innej drodze (wjazd na A1 bez nazwy w manewrze) — numer ze słupków.
+  const insRoad = onRoute ? roadAt(route.instructions, pos.km) : undefined;
+  const msRef = onRoute ? route.milestones?.filter((m) => m.ref && Math.abs(m.km - pos.km) <= 2).sort((a, b) => Math.abs(a.km - pos.km) - Math.abs(b.km - pos.km))[0]?.ref : undefined;
+  const road = msRef && insRoad?.ref?.replace(/^D[KW]\s?/, "") !== msRef.replace(/^([AS]\d{1,2})[a-z]$/i, "$1") ? { ref: msRef.replace(/^([AS]\d{1,2})[a-z]$/i, "$1") } as { ref?: string; name?: string } : insRoad;
   const roadKm = onRoute ? milestoneAt(route.milestones, pos.km, road?.ref) : undefined;
   const roadLine = road && (road.ref || road.name) ? (
     <div className="nm-roadline">
       {road.ref && <b className={`nm-roadref ${/^\d{3}$/.test(road.ref) ? "yellow" : /^E/.test(road.ref) ? "green" : ""}`}>{road.ref}</b>}
       {road.name && <span>{road.name}</span>}
-      {roadKm !== undefined && <em>{Math.round(roadKm)}. km</em>}
+      {roadKm !== undefined && (
+        <em>
+          {/* Słupek kilometrowy: biały słupek z dwoma czerwonymi paskami u góry. */}
+          <svg viewBox="0 0 12 22" aria-hidden><rect x="2" y="1" width="8" height="20" rx="2.2" fill="#fff" stroke="#1b2229" strokeWidth="1" /><rect x="2.5" y="3.2" width="7" height="2.4" fill="#e8322c" /><rect x="2.5" y="7.2" width="7" height="2.4" fill="#e8322c" /></svg>
+          {Math.round(roadKm)} km
+        </em>
+      )}
     </div>
   ) : null;
   // Propozycja miejsca na przerwę: najdalszy MOP / parking TIR, do którego dojedziemy z zapasem przed przerwą z planu.
@@ -333,7 +353,7 @@ export function NavView(p: NavViewProps) {
         const inMin = st ? (st.start - now) / 60_000 : undefined;
         return st
           ? { label: st.kind === "break" ? "Przerwa za" : "Odpoczynek za", value: inMin! <= 1 ? "teraz" : fmtDuration(inMin!), sub: `${fmtDuration((st.end - st.start) / 60_000)} o ${fmtClock(st.start, now)}`, tone: inMin! <= 30 ? "warn" : "" }
-          : { label: "Przerwa", value: "—", sub: "dojedziesz bez postoju", tone: "" };
+          : { label: "Przerwa", value: "Bez przerwy", sub: "dojedziesz bez postoju", tone: "" };
       })();
 
   const notice = !p.gpsOn ? (
@@ -346,7 +366,7 @@ export function NavView(p: NavViewProps) {
   ) : null;
 
   return (
-    <div className={`hud navmode ${p.mapVector?.theme === "day" ? "day" : ""}`}>
+    <div className={`hud navmode ${p.mapVector?.theme === "day" ? "day" : ""} ${p.settings?.value.mapTheme === "glass" ? "glass" : ""}`}>
       <NavVoice nav={p.nav} track={track} kmh={fresh?.kmh ?? null} enabled={p.voice.on} section={sectionVoice} />
       <div className={`nm-map ${browse ? "browsing" : ""} ${p.mapMode === "2d" ? "flat" : ""}`}>
         {p.nav && p.mapToken ? <HudRouteMap nav={p.nav} track={track} live={lastLive} token={p.mapToken} anchorY={p.mapMode === "2d" ? 0.62 : 0.7} zoomOffset={zoomOffset} flat={p.mapMode === "2d"} friends={p.friends} vector={p.mapVector} browse={browse} onBrowse={setBrowse} onPin={(x) => { setPin(x); setHold(null); }} onHold={(x) => { setHold(x); setPin(null); }} /> : <div className="hud-map empty" />}
@@ -374,7 +394,7 @@ export function NavView(p: NavViewProps) {
           {!tilesOpen && (
             <span className="nm-break-mini">
               <Icon name={sc.stop ? "bed" : "coffee"} />
-              <b>{stopItem.value === "—" ? "bez przerwy" : sc.stop ? stopItem.value : `za ${stopItem.value}`}</b>
+              <b>{stopItem.value === "Bez przerwy" ? "bez przerwy" : sc.stop ? stopItem.value : `za ${stopItem.value}`}</b>
               <em aria-hidden><i style={{ width: `${Math.round(breakUsed * 100)}%` }} /></em>
             </span>
           )}
@@ -654,6 +674,8 @@ const MENU_PARENT: Record<MenuKey, MenuKey | null> = { main: null, route: "main"
 const WARN_ICON: Record<string, string> = { axle: "weight", hgv: "truck_ban", red_light: "camera", width: "height", length: "height", incline: "other", curve: "other" };
 
 const WORKS_KEY = "roadpilot:worksOpen";
+/** MOP ze stacją na pasku: co tyle ms zmiana „stacja (marka)” ↔ „parking (nazwa MOP-u)”. */
+const STRIP_SWAP_MS = 3500;
 /** Podpis punktu pośredniego dodanego z propozycji przerwy — po nim rozpoznajemy „nasz” postój do ponownego sprawdzenia. */
 const BREAK_VIA = "Przerwa";
 
@@ -706,7 +728,7 @@ function stripLabel(id: keyof AheadStrip, p: Pick<RoutePoi, "kind" | "name"> & {
   const n = (p.name ?? "").trim();
   const generic = !n || /^(zgłoszenie kierowcy|parking|mop|miejsce obsługi podróżnych)$/i.test(n);
   if (id === "fuel") return stationLabel(p.brand ?? (p.kind === "fuel" ? n : ""));
-  if (id === "mop") return generic ? "MOP" : n.replace(/^(MOP|Miejsce Obsługi Podróżnych)\s+/i, "");
+  if (id === "mop") return generic ? "MOP" : n;
   if (id === "parking") return generic ? "Parking TIR" : n;
   if (id === "toll") return generic || /^(bramki|ppo)/i.test(n) ? "Bramki" : n.replace(/^PPO\s*/i, "Bramki ");
   return n || id;
@@ -725,10 +747,14 @@ interface AheadItem {
 }
 
 function AheadIcon({ kind }: { kind: RoutePoi["kind"] }) {
+  const c = POI_COLOR[kind];
   return (
     <i className={`nm-ahead-ico k-${kind}`} aria-hidden>
-      {kind === "fuel" ? <svg viewBox="-12 -12 24 24"><path d="M-7 8V-8h9v16zM-5 -6v5h5v-5zM2 -3h2.5l2 2v7a1.5 1.5 0 0 0 3 0V-5l-3-3" fill="#fff" stroke="#fff" strokeWidth="1.2" strokeLinejoin="round" /></svg>
-        : kind === "toll" ? <svg viewBox="-12 -12 24 24"><path d="M-8 8V-6" stroke="#fff" strokeWidth="3" strokeLinecap="round" /><rect x="-8" y="-8" width="17" height="5" rx="1.5" fill="#fff" /></svg> : kind === "mop" || kind === "services" ? "M" : "P"}
+      <svg viewBox="-12 -12 24 24">
+        {kind === "fuel" ? <FuelGlyph cut={c} scale={0.95} />
+          : kind === "toll" ? <TollGlyph cut={c} scale={0.85} />
+          : <LetterGlyph letter="P" size={15} />}
+      </svg>
     </i>
   );
 }

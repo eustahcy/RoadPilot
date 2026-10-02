@@ -72,7 +72,8 @@ export interface Settings {
   /** Znajomi widzą moją pozycję, postój, cel i stan tachografu (tylko zaakceptowani, tylko przy włączonym GPS). */
   friendsShare: boolean;
   /** Styl własnej mapy w HUD: dzień / noc / automatycznie (pogoda albo zegar). */
-  mapTheme: "auto" | "day" | "night";
+  /** Motyw Nawigacji: auto / dzień / noc, glass = szkło (mapa dzień / noc jak auto, panele półprzezroczyste z rozmyciem). */
+  mapTheme: "auto" | "day" | "night" | "glass";
   /** Nawigacja → „Po drodze”: zasięg listy (km) i które najbliższe miejsca pokazać pod prędkością. */
   aheadKm: number;
   aheadStrip: AheadStrip;

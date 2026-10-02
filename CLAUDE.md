@@ -290,6 +290,11 @@ Na mapie: znaki ograniczeń przy drogach (glVector limit labels: „10t”, „3
 Propozycja przerwy: core/breakstop breakStopFor (najdalszy MOP / parking TIR przed przerwą z planu minus Settings.breakStop.marginMin) →
                    karta „Dodaj do trasy” w Nawigacji (punkt pośredni z sub „Przerwa” = BREAK_VIA); gdy do niego nie zdążymy — karta „Zmień postój” z bliższym miejscem; ustawienia w Po drodze.
                    Vehicle.avoid.unpaved → Valhalla exclude_unpaved, TomTom avoid=unpavedRoads.
+Motywy Nawigacji (Settings.mapTheme): auto / day / night / glass — day: jasne panele (ciepła biel, --nm-glass beż, ciemny tekst), glass:
+                   półprzezroczyste panele z backdrop-filter (mapa dzień / noc jak auto). Pasek „po drodze”: MOP ze stacją na zmianę co STRIP_SWAP_MS
+                   „[dystrybutor] Orlen” ↔ „[P] MOP Morawica” (PoiIcons.tsx mergeStations łączy stację ≤ 0,6 km po tej samej stronie z MOP-em);
+                   MOP i parking = „P”. Słupek kilometrowy: biały z dwoma czerwonymi paskami. Uchwyt panelu .nm-fold = trapez (szufladka).
+                   valhallaOnce: przy błędzie 442 ponowienie z szerszym dopasowaniem punktów (SNAP_RETRIES) zanim TomTom.
 Menu ⋯ w Nawigacji to prostokąt .nm-menu-btn przy pasku na dole (grid area „more”).
 scripts/weekly-update.sh  timer systemd roadpilot-weekly (niedziela 01:00 UTC): osm-update → Valhalla w /opt/roadpilot-valhalla.new (Metin2 — jeśli
                    ktoś go uruchomi — zatrzymany na czas budowy i wznawiany) → podmiana + test trasy (błąd = powrót) → kafelki → speed-build, suspects-build → restart API;

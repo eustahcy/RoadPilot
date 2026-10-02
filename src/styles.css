@@ -1028,8 +1028,10 @@ svg .rb-exit { fill: currentColor; stroke: none; font: 900 7.5px system-ui, sans
 .nm-ahead-ico { flex: none; display: grid; place-items: center; width: 34px; height: 34px; border-radius: 50%; background: #2f6fd6; color: #fff; font-style: normal; font-weight: 900; font-size: 17px; }
 .nm-ahead-ico.k-toll { background: #6d4bd1; }
 .nm-ahead-ico.k-fuel { background: #e07a1f; }
-.nm-ahead-ico svg { width: 20px; height: 20px; }
-.nm-ahead-ico.k-services { box-shadow: inset 0 0 0 3px #e07a1f; }
+.nm-ahead-ico > svg:first-child { width: 24px; height: 24px; }
+.nm-ahead-ico { position: relative; }
+.nm-ahead-ico > svg { overflow: visible; }
+/* MOP ze stacją: plakietka z dystrybutorem w prawym górnym rogu kółka „M”. */
 /* Fotoradar / odcinkowy: biała tarcza w czerwonej obwódce, wiersz paska w czerwonej ramce. */
 .nm-ahead-ico.k-camera, .nm-ahead-ico.k-section { background: #fff; box-shadow: inset 0 0 0 3px #e5484d; }
 .nm-ahead-name { flex: 1; min-width: 0; display: grid; gap: 2px; }
@@ -1189,11 +1191,13 @@ svg .rb-exit { fill: currentColor; stroke: none; font: 900 7.5px system-ui, sans
 .nm-tiles, .nm-progress { position: relative; }
 .nm-roadline { position: absolute; left: calc(1 * var(--u)); right: calc(1 * var(--u)); bottom: calc(100% + 1 * var(--u)); display: flex; align-items: center; justify-content: center; gap: calc(1.2 * var(--u)); min-width: 0; pointer-events: none; color: #fff; text-shadow: 0 1px 6px rgba(0, 0, 0, .9); white-space: nowrap; }
 .nm-roadline span { min-width: 0; overflow: hidden; text-overflow: ellipsis; font-size: calc(2.8 * var(--u)); font-weight: 750; }
-.nm-roadline em { flex: none; padding: calc(.2 * var(--u)) calc(1 * var(--u)); border-radius: calc(.8 * var(--u)); background: rgba(12, 22, 32, .8); font-size: calc(2.6 * var(--u)); font-style: normal; font-weight: 850; font-variant-numeric: tabular-nums; text-shadow: none; }
+.nm-roadline em { flex: none; display: inline-flex; align-items: center; gap: calc(.7 * var(--u)); padding: calc(.2 * var(--u)) calc(1 * var(--u)) calc(.2 * var(--u)) calc(.6 * var(--u)); border-radius: calc(.8 * var(--u)); background: rgba(12, 22, 32, .85); color: #fff; font-size: calc(2.6 * var(--u)); font-style: normal; font-weight: 850; font-variant-numeric: tabular-nums; text-shadow: none; }
 .nm-roadref { flex: none; padding: calc(.15 * var(--u)) calc(1 * var(--u)); border-radius: calc(.6 * var(--u)); background: #e8352d; border: 2px solid #fff; color: #fff; font-size: calc(2.7 * var(--u)); font-weight: 900; text-shadow: none; }
 .nm-roadref.yellow { background: #f2c230; color: #1b2229; }
 .nm-roadref.green { background: #1f8a4c; }
 .hud.navmode.day .nm-roadline { color: #13202b; text-shadow: 0 1px 6px rgba(255, 255, 255, .95); }
+.nm-roadline em svg { width: calc(2.2 * var(--u)); height: calc(3.6 * var(--u)); }
+.hud.navmode.day .nm-roadline em { background: #fff; color: #13202b; box-shadow: 0 1px 4px rgba(0, 0, 0, .25); }
 /* „Koniec robót” — pływający przycisk nad paskiem (po zgłoszeniu robót z „zaznaczę koniec”). */
 .nm-works-end { position: absolute; z-index: 4; left: 50%; bottom: calc(30 * var(--u)); transform: translateX(-50%); display: flex; gap: 6px; }
 .nm-works-end .end { display: flex; align-items: center; gap: 10px; min-height: 54px; padding: 6px 18px 6px 8px; border-radius: 99px; background: #f2a230; border: 2px solid #fff; color: #1b2229; font: inherit; font-size: 17px; font-weight: 900; box-shadow: 0 8px 22px rgba(0, 0, 0, .45); }
@@ -1308,9 +1312,14 @@ svg .rb-exit { fill: currentColor; stroke: none; font: 900 7.5px system-ui, sans
 .nm-ahead > span.toll + span, .nm-ahead > span + span.toll { border-top: 0; }
 .nm-ahead > span.toll b { color: #d9ccff; }
 .nm-ahead .nm-ahead-ico { width: calc(5.4 * var(--u)); height: calc(5.4 * var(--u)); font-size: calc(2.8 * var(--u)); }
-.nm-ahead .nm-ahead-ico svg { width: calc(3.2 * var(--u)); height: calc(3.2 * var(--u)); }
-.nm-ahead b { min-width: calc(9 * var(--u)); max-width: calc(21 * var(--u)); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: #b9c7d1; font-size: calc(2.7 * var(--u)); font-weight: 750; }
-.nm-ahead strong { margin-left: auto; padding-left: calc(1.4 * var(--u)); font-size: calc(3.1 * var(--u)); font-weight: 850; font-variant-numeric: tabular-nums; }
+.nm-ahead > span { min-width: 0; }
+.nm-ahead b { flex: 0 1 auto; min-width: 0 !important; }
+/* Wiersz zmienny (MOP ze stacją): łagodne przejście ikony i nazwy. */
+.nm-ahead > span.swap .nm-ahead-ico, .nm-ahead > span.swap b { animation: nm-swap .35s ease-out; }
+@keyframes nm-swap { from { opacity: .3; transform: translateY(15%); } to { opacity: 1; transform: none; } }
+.nm-ahead .nm-ahead-ico > svg:first-child { width: calc(3.8 * var(--u)); height: calc(3.8 * var(--u)); }
+.nm-ahead b { min-width: calc(9 * var(--u)); max-width: calc(27 * var(--u)); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: #b9c7d1; font-size: calc(2.7 * var(--u)); font-weight: 750; }
+.nm-ahead strong { margin-left: auto; padding-left: calc(1 * var(--u)); font-size: calc(2.8 * var(--u)); white-space: nowrap; font-weight: 850; font-variant-numeric: tabular-nums; }
 .nm-ahead-go { display: none; width: calc(3 * var(--u)); height: calc(3 * var(--u)); color: #9aabb8; }
 
 /* Kafelki */
@@ -1392,11 +1401,11 @@ svg .rb-exit { fill: currentColor; stroke: none; font: 900 7.5px system-ui, sans
   /* Tablet (lżej): mapa na cały ekran, zwarta karta manewru w lewym górnym rogu, przyciski pod nią, prędkość w lewym dole,
      „po drodze” i mapa w prawym; na dole jeden smukły pasek: do celu · przyjazd · przerwa · trasa + oś trasy. */
   .hud.navmode { --u: min(.74vh, .58vw); grid-template-columns: minmax(0, 40%) 1fr auto auto; grid-template-rows: auto 1fr auto auto;
-    grid-template-areas: "top top top top" "side . ctl ctl" "speed . ahead ahead" "progress progress progress more"; gap: calc(1.4 * var(--u)); }
+    grid-template-areas: "top top top top" "side . ctl ctl" "speed ahead ahead ahead" "progress progress progress more"; gap: calc(1.4 * var(--u)); }
   .nm-tiles { display: none; }
   .nm-side { align-self: start; justify-self: start; }
   .nm-ctl { justify-self: end; }
-  .nm-ahead { justify-self: end; width: calc(40 * var(--u)); }
+  .nm-ahead { justify-self: end; width: calc(50 * var(--u)); max-width: 100%; box-sizing: border-box; }
   .nm-ahead strong { white-space: nowrap; }
   .nm-ahead-go { display: block; }
   .nm-speed { padding-bottom: calc(2.6 * var(--u)); }
@@ -1715,3 +1724,84 @@ svg .rb-exit { fill: currentColor; stroke: none; font: 900 7.5px system-ui, sans
 @media (orientation: landscape) and (max-height: 599px) { .nm-roadline { left: 45%; justify-content: flex-end; } }
 .nm-break-suggest small.late { color: var(--amber); }
 .nm-break-suggest:has(small.late) { border-color: rgba(232, 180, 76, .7); }
+
+/* ── Nawigacja w motywie dziennym: jasne panele (ciepła biel, lekki beż) i ciemny tekst — zamiast ciemnych kart na jasnej mapie. ── */
+.hud.navmode.day {
+  --nm-glass: linear-gradient(180deg, rgba(252, 249, 242, .97), rgba(243, 238, 228, .97));
+  --nm-edge: rgba(120, 105, 80, .22);
+  --hud-dim: #6c6457;
+  --nm-ink: #1f2a33;
+}
+.hud.navmode.day :is(.nm-top .hud-nav.card, .nm-speed, .nm-ahead, .nm-tiles, .nm-btn, .nm-zoom, .nm-progress, .nm-menu-btn) { color: var(--nm-ink); box-shadow: 0 6px 18px rgba(60, 50, 30, .18), inset 0 1px 0 rgba(255, 255, 255, .8); }
+.hud.navmode.day :is(.nm-top .hud-nav.card) { box-shadow: none; }
+.hud.navmode.day .nm-zoom button, .hud.navmode.day .nm-btn .hud-ico, .hud.navmode.day .nm-menu-btn .hud-ico { color: var(--nm-ink); }
+.hud.navmode.day .nm-zoom button + button { border-top-color: rgba(120, 105, 80, .2); }
+.hud.navmode.day .nm-btn.report { background: linear-gradient(180deg, #fbe9e6, #f5d9d4); border-color: rgba(200, 60, 50, .45); }
+.hud.navmode.day .nm-btn.report .hud-ico { color: #c4302b; }
+.hud.navmode.day .nm-btn.warn .hud-ico { color: #b7790b; }
+.hud.navmode.day .nm-recenter.on .hud-ico { color: #0d8a43; }
+.hud.navmode.day .nm-fold { background: rgba(250, 246, 238, .95); border-color: var(--nm-edge); color: var(--nm-ink); box-shadow: 0 4px 12px rgba(60, 50, 30, .18); }
+.hud.navmode.day .nm-speed strong.none { color: #b8b0a2; }
+.hud.navmode.day .nm-speed-bar { background: rgba(120, 105, 80, .18); }
+.hud.navmode.day .nm-ahead b { color: #4a4337; }
+.hud.navmode.day .nm-ahead strong { color: var(--nm-ink); }
+.hud.navmode.day .nm-ahead > span + span { border-top-color: rgba(120, 105, 80, .16); }
+.hud.navmode.day .nm-ahead > span.alert { background: rgba(229, 72, 77, .1); }
+.hud.navmode.day .nm-ahead > span.alert b { color: #b4232a; }
+.hud.navmode.day .nm-ahead > span.toll { background: rgba(109, 75, 209, .1); }
+.hud.navmode.day .nm-ahead > span.toll b { color: #5a3cb8; }
+.hud.navmode.day .nm-ahead-go { color: #8f8676; }
+.hud.navmode.day .nm-tile > .hud-ico, .hud.navmode.day .nm-progress-item .hud-ico { color: #4a4337; }
+.hud.navmode.day .nm-tile + .nm-tile, .hud.navmode.day .nm-tiles > .nm-tile { border-color: rgba(120, 105, 80, .16); }
+.hud.navmode.day .nm-tiles-handle:has(.nm-break-mini) { border-bottom-color: rgba(120, 105, 80, .16); }
+.hud.navmode.day .nm-break-mini { color: #4a4337; }
+.hud.navmode.day .nm-break-mini em, .hud.navmode.day .nm-tile-bar { background: rgba(120, 105, 80, .18); }
+.hud.navmode.day .nm-tile.via small, .hud.navmode.day .nm-tile.via b, .hud.navmode.day .nm-progress-item.via small, .hud.navmode.day .nm-progress-item.via b { color: #6a42d6; }
+.hud.navmode.day .nm-progress-item { border-right-color: rgba(120, 105, 80, .18); }
+.hud.navmode.day .nm-roadline em { background: #fbf8f1; }
+.hud.navmode.day .nm-break-suggest, .hud.navmode.day .nm-works-msg { background: rgba(251, 248, 241, .98); color: var(--nm-ink); box-shadow: 0 10px 26px rgba(60, 50, 30, .25); }
+.hud.navmode.day .nm-break-suggest span { color: #5d5649; }
+.hud.navmode.day .nm-break-suggest small { color: #0d8a43; }
+.hud.navmode.day .nm-break-suggest .ghost { background: #efe8da; color: var(--nm-ink); border-color: rgba(120, 105, 80, .25); }
+.hud.navmode.day .nm-works-end .x { background: rgba(251, 248, 241, .95); color: var(--nm-ink); }
+.hud.navmode.day .nm-card-more { background: rgba(251, 248, 241, .92); border-color: var(--nm-edge); color: var(--nm-ink); }
+.hud.navmode.day .nm-top .hud-nav.card .hud-warn, .hud.navmode.day .nm-top .hud-nav.card .hud-toll { background: rgba(251, 248, 241, .95); color: var(--nm-ink); }
+.hud.navmode.day .nm-pin-card { background: rgba(251, 248, 241, .98); color: var(--nm-ink); }
+/* Oś trasy na pasku (tablet) w jasnym motywie. */
+.hud.navmode.day .nm-progress :is(.hud-rl-label, .rl-label, small) { color: #5d5649; }
+
+/* ── Styl „Szkło” (glassmorphism): półprzezroczyste panele z rozmyciem mapy pod spodem, cienka jasna krawędź. ──
+   backdrop-filter jest kosztowny — tylko w tym stylu (wybór kierowcy), nie w zwykłych motywach. */
+.hud.navmode.glass { --nm-glass: rgba(20, 32, 44, .38); --nm-edge: rgba(255, 255, 255, .28); }
+.hud.navmode.glass.day { --nm-glass: rgba(255, 252, 245, .45); --nm-edge: rgba(255, 255, 255, .7); }
+.hud.navmode.glass :is(.nm-speed, .nm-ahead, .nm-tiles, .nm-btn, .nm-zoom, .nm-progress, .nm-menu-btn, .nm-fold, .nm-break-suggest) {
+  -webkit-backdrop-filter: blur(14px) saturate(1.5); backdrop-filter: blur(14px) saturate(1.5);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, .22), inset 0 1px 0 rgba(255, 255, 255, .35), inset 0 0 0 1px rgba(255, 255, 255, .06);
+}
+.hud.navmode.glass:not(.day) .nm-fold { background: rgba(20, 32, 44, .38); }
+.hud.navmode.glass .nm-break-suggest { background: rgba(20, 32, 44, .55); }
+.hud.navmode.glass.day .nm-break-suggest { background: rgba(255, 252, 245, .7); }
+.hud.navmode.glass .nm-btn.report { background: rgba(200, 40, 40, .45); }
+.hud.navmode.glass.day .nm-btn.report { background: rgba(255, 220, 214, .6); }
+.hud.navmode.day .nm-progress .hud-route-end small { color: #5d5649; }
+.hud.navmode.day .nm-progress .hud-dashes i:not(.on) { background: #d4ccbd; }
+.hud.navmode.day .nm-progress .hud-dashes::before, .hud.navmode.day .nm-progress .hud-dashes::after { background: #bdb3a2; }
+.hud.navmode.day .nm-progress .hud-truck b { color: #0d8a43; }
+.hud.navmode.day .nm-progress .hud-truck .hud-ico { background: #1f2a33; color: #fbf8f1; }
+.hud.navmode.day .nm-progress :is(.hud-stop, .hud-stops) small { color: #5d5649; }
+
+/* Szufladka panelu przycisków: uchwyt jak trapez (bok przy panelu szeroki, boki ścięte do środka) — przy otwartym panelu
+   przylega do kolumny przycisków, po zwinięciu do lewej krawędzi ekranu. */
+.nm-fold { width: calc(6 * var(--u)); height: calc(14 * var(--u)); border: 0; border-radius: 0; background: var(--nm-glass);
+  clip-path: polygon(0 0, 100% 16%, 100% 84%, 0 100%); box-shadow: none; filter: drop-shadow(0 4px 10px rgba(0, 0, 0, .35)); }
+.nm-side:not(.folded) .nm-fold { margin-left: calc(-1 * var(--u)); }
+.nm-side.folded .nm-fold { margin-left: calc(-2 * var(--u) - env(safe-area-inset-left)); width: calc(7 * var(--u) + env(safe-area-inset-left)); padding-left: env(safe-area-inset-left); }
+.hud.navmode.day .nm-fold { background: linear-gradient(180deg, #fcf9f2, #f1ebdf); box-shadow: none; filter: drop-shadow(0 3px 8px rgba(60, 50, 30, .25)); }
+@media (orientation: landscape) and (max-height: 599px) {
+  .nm-fold { width: calc(5.4 * var(--u)); height: calc(9.6 * var(--u)); }
+  .nm-side.folded .nm-fold { margin-left: calc(-2 * var(--u) - env(safe-area-inset-left)); }
+}
+.hud.navmode.glass:not(.day) .nm-fold { background: rgba(40, 58, 74, .72); }
+.hud.navmode.glass.day .nm-fold { background: rgba(255, 252, 245, .8); }
+.nm-fold { background: linear-gradient(90deg, rgba(36, 54, 70, .96), rgba(22, 34, 46, .96)); }
+.hud.navmode.day .nm-fold { background: linear-gradient(90deg, #fcf9f2, #ece5d6); }

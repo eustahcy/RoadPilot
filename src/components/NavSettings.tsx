@@ -37,11 +37,11 @@ export function NavSettingsPage({ section, settings, onChange, voice, onReroute 
         <div className="nset-body">
           <span className="field-label">Motyw mapy</span>
           <div className="nset-seg">
-            {([["auto", "Auto"], ["day", "Dzień"], ["night", "Noc"]] as const).map(([id, label]) => (
+            {([["auto", "Auto"], ["day", "Dzień"], ["night", "Noc"], ["glass", "Szkło"]] as const).map(([id, label]) => (
               <button key={id} className={settings.mapTheme === id ? "on" : ""} aria-pressed={settings.mapTheme === id} onClick={() => onChange({ mapTheme: id })}>{label}</button>
             ))}
           </div>
-          <p className="muted small">Auto: dzień / noc z pogody, a bez niej z zegara (7–19).</p>
+          <p className="muted small">Auto: dzień / noc z pogody, a bez niej z zegara (7–19). Szkło: półprzezroczyste panele z rozmyciem mapy (na starszych telefonach może działać wolniej).</p>
           <span className="field-label">Widok mapy</span>
           <div className="nset-seg">
             {([["3d", "3D — pochylona"], ["2d", "2D — z góry"]] as const).map(([id, label]) => (

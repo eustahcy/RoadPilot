@@ -3,6 +3,7 @@ import { Live } from "../core/gps";
 import { alongRoute, bearingAtKm, isOffRoute, laneHint, lanesAhead, locate, NAV, NavInstruction, nextInstruction, pointAtKm, RoutePos, routeSlice, speedLimitAt, nextOffRoute, OFF_ROUTE_IDLE, OffRouteState, locateTrace, TrackFix, travelHeading, junctionZoom } from "../core/navmatch";
 import { isAhead, jamMatters, jamTone, NavPlace, NavRoute, RoutePoi, RouteWarning, SHOW_TRAFFIC, TrafficSection, warningText } from "../nav";
 import { QUIET_VEHICLE } from "./RouteCompare";
+import { FuelGlyph, mergeStations, TollGlyph } from "./PoiIcons";
 import { GlLine, GlMapView, GlMarker, GlVector } from "./GlMap";
 import { LatLon, moveView, useMapGestures } from "./MapView";
 import { fmtAgo, Friend, STATUS_LABEL } from "../core/friends";
@@ -496,10 +497,6 @@ function Pin({ id, fill, stroke = "#fff", children }: { id: string; fill: string
 }
 
 const PIN_P = <text x="0" y="6.5" textAnchor="middle" fontSize="19" fontWeight="900" fill="#fff" fontFamily="Inter, system-ui, sans-serif">P</text>;
-const PIN_M = <text x="0" y="6.5" textAnchor="middle" fontSize="18" fontWeight="900" fill="#fff" fontFamily="Inter, system-ui, sans-serif">M</text>;
-/** Bramki: szlaban (belka w pasy) na słupku. */
-const PIN_TOLL = <g><path d="M-8 8V-6" stroke="#fff" strokeWidth="3" strokeLinecap="round" /><rect x="-8" y="-8" width="17" height="5" rx="1.5" fill="#fff" /><path d="M-3 -8v5M3 -8v5" stroke="#e8322c" strokeWidth="2.4" /></g>;
-const PIN_FUEL = <path d="M-7 8V-8h9v16zM-5 -6v5h5v-5zM2 -3h2.5l2 2v7a1.5 1.5 0 0 0 3 0V-5l-3-3" fill="#fff" stroke="#fff" strokeWidth="1.2" strokeLinejoin="round" />;
 const PIN_CAMERA = <><rect x="-9" y="-5" width="14" height="10" rx="2" fill="#1b2229" /><path d="M5 -2l5-3v10l-5-3z" fill="#1b2229" /><circle cx="-2" cy="0" r="2.6" fill="#fff" /></>;
 /** Odcinkowy pomiar: dwie kreski z odcinkiem między nimi i „km/h” ukryte w prostym symbolu |—|. */
 const PIN_SECTION = <><path d="M-9 -7v14M9 -7v14M-9 0h18" stroke="#1b2229" strokeWidth="3" strokeLinecap="round" /><circle cx="0" cy="0" r="3.2" fill="#e8322c" /></>;
@@ -600,18 +597,23 @@ function routePins(route: NavRoute, fromKm: number, toKm: number, gapKm = 0, far
       }
     }
   }
-  for (const p of far ? [] : route.pois ?? []) {
+  // Stacja w MOP-ie = jedna pinezka „M” z plakietką dystrybutora (mergeStations).
+  for (const p of far ? [] : mergeStations(route.pois ?? [])) {
     if (!inRange(p.km) || !poiVisible(route, p)) continue;
     const key = `p${p.id}`;
     const details = [`${p.side === "right" ? "Po prawej" : "Po lewej"} stronie, ok. ${Math.round(p.offM / 10) * 10} m od trasy`, ...(p.truck && p.kind !== "parking" ? ["Oznaczone dla ciężarówek"] : [])];
     const node = p.kind === "toll"
-      ? <Pin id={key} fill="#6d4bd1">{PIN_TOLL}</Pin>
+      ? <Pin id={key} fill="#6d4bd1"><TollGlyph cut="#6d4bd1" scale={0.85} /></Pin>
       : p.kind === "fuel"
-      ? <Pin id={key} fill="#e07a1f">{PIN_FUEL}</Pin>
-      : <Pin id={key} fill="#2f6fd6">{p.kind === "parking" ? PIN_P : PIN_M}{p.kind === "services" && <circle cx="11" cy="-11" r="5" fill="#e07a1f" stroke="#fff" strokeWidth="1.5" />}</Pin>;
+      ? <Pin id={key} fill="#e07a1f"><FuelGlyph cut="#e07a1f" scale={0.85} /></Pin>
+      : p.kind === "services"
+      // Stacja + parking: pinezka z dystrybutorem i plakietką „P” (jak na pasku: stacja | P).
+      ? <Pin id={key} fill="#e07a1f"><FuelGlyph cut="#e07a1f" scale={0.8} /><g transform="translate(12 -12)"><circle r="8" fill="#2f6fd6" stroke="#fff" strokeWidth="1.8" /><text y="4.6" textAnchor="middle" fontSize="12" fontWeight="900" fill="#fff" fontFamily="Inter, system-ui, sans-serif">P</text></g></Pin>
+      : <Pin id={key} fill="#2f6fd6">{PIN_P}</Pin>;
     // Miejsce zgłoszone przez kierowców (id „r…”) — z chorągiewką, żeby było widać, co sami dodaliśmy.
     const reported = p.id.startsWith("r");
     if (reported) details.push("Dodane przez kierowców RoadPilot");
+    if (p.kind === "services" && p.brand) details.unshift(`Stacja: ${p.brand}`);
     add({ key, kind: p.kind, title: POI_TITLE[p.kind], name: p.name, details, km: p.km, lat: p.lat, lon: p.lon }, 1, reported ? <g>{node}{REPORT_BADGE}</g> : node);
   }
   // Punkty pośrednie zawsze (bez rozrzedzania) — to Twój wybór.

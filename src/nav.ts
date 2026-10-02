@@ -1,3 +1,4 @@
+import { mergeStations } from "./components/PoiIcons";
 // Nawigacja dla ciężarówek (beta): wyszukiwanie celu i trasa przez RoadPilot API → TomTom.
 // Klucz TomTom jest tylko na serwerze; tu wysyłamy cel, punkt startu i dane pojazdu. Tylko konta Premium.
 
@@ -72,6 +73,8 @@ export interface NavRoute {
   speedLimits: { km: number; toKm: number; kmh: number }[];
   /** Rodzaj drogi wg przepisów (obszar zabudowany / poza / autostrada i ekspresowa) — limity ciężarówki; brak w starszych trasach. */
   roads?: RoadSection[];
+  /** Wersja pinezek (POIS_VERSION) — starsze dociągamy ponownie. */
+  poisV?: number;
   /** Słupki kilometrowe przy trasie (server withMilestones) — pikietaż nad paskiem. */
   milestones?: Milestone[];
   /** Korki, roboty i zamknięcia na trasie (TomTom, w chwili wyznaczenia); level 1 = małe … 3 = duże, 4 = zamknięte. */
@@ -208,11 +211,14 @@ function curveWarnings(route: NavRoute, vehicle: Vehicle, from = -Infinity, to =
 export async function withWarnings(token: string, route: NavRoute, vehicle: Vehicle): Promise<NavRoute> {
   try {
     const r = await api<{ warnings: RouteWarning[]; pois?: RoutePoi[] }>("POST", "/nav/warnings", { points: route.points, vehicle, tolls: true, lengthKm: route.lengthKm, travelMin: route.travelMin }, token);
-    return { ...route, warnings: [...r.warnings, ...curveWarnings(route, vehicle)].sort((a, b) => a.km - b.km), pois: r.pois ?? [] };
+    return { ...route, warnings: [...r.warnings, ...curveWarnings(route, vehicle)].sort((a, b) => a.km - b.km), pois: mergeStations(r.pois ?? []), poisV: POIS_VERSION };
   } catch {
     return route;
   }
 }
+
+/** Wersja danych miejsc przy trasie — starsza (np. bez marek stacji w MOP-ach) jest pobierana od nowa. */
+export const POIS_VERSION = 2;
 
 /** Po minięciu fotoradaru / kontroli: „nadal jest” (+1) / „nie ma” (-1). */
 export function voteAlert(token: string, w: RouteWarning, vote: 1 | -1) {

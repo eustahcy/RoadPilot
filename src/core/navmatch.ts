@@ -35,13 +35,15 @@ const normRef = (r: string) => r.toUpperCase().replace(/\s/g, "").replace(/^D[KW
  * { ref: "A1", name: "Autostrada Bursztynowa" }. E-numery pomijamy, gdy jest krajowy.
  */
 export function roadAt(instructions: NavInstruction[], km: number): { ref?: string; name?: string } | undefined {
-  let ins: NavInstruction | undefined;
+  // Nazwy z manewru; bez nich (trasy TomTom) — numery dróg z treści („Podążaj A1/E75 w kierunku Gdańsk”).
+  const namesOf = (i: NavInstruction) => i.names ?? (i.street ? [i.street] : [...i.text.matchAll(/\b((?:[AS]|DK|DW)\s?\d{1,3}|E\s?\d{2,3})\b/g)].map((m) => m[1]));
+  let names: string[] = [];
   for (const i of instructions) {
     if (i.km > km + 0.01) break;
-    if (i.street || i.names) ins = i;
+    const n = namesOf(i);
+    if (n.length) names = n;
   }
-  if (!ins) return undefined;
-  const names = ins.names ?? (ins.street ? [ins.street] : []);
+  if (!names.length) return undefined;
   const ref = names.find((n) => REF_RE.test(n.trim()));
   const name = names.find((n) => !REF_RE.test(n.trim()) && !/^E\s?\d{2,3}$/i.test(n.trim()));
   const e = names.find((n) => /^E\s?\d{2,3}$/i.test(n.trim()));

@@ -190,6 +190,8 @@ describe("droga i pikietaż nad paskiem", () => {
     const ins = [{ km: 0, maneuver: "DEPART", text: "", street: "Katowicka" }, { km: 5, maneuver: "STRAIGHT", text: "", street: "A1", names: ["A1", "E 75", "Autostrada Bursztynowa"] }];
     expect(roadAt(ins, 2)).toEqual({ ref: undefined, name: "Katowicka" });
     expect(roadAt(ins, 7)).toEqual({ ref: "A1", name: "Autostrada Bursztynowa" });
+    // Trasa TomTom: bez nazw — numer z treści manewru.
+    expect(roadAt([...ins, { km: 10, maneuver: "FOLLOW", text: "Podążaj S10/A1/E75 w kierunku Gdańsk" }], 12)).toEqual({ ref: "S10", name: undefined });
   });
   it("milestoneAt: interpolacja, kierunek malejący i inna droga pomijana", () => {
     const ms = [{ km: 10, v: 432, ref: "S19" }, { km: 11, v: 431, ref: "S19" }, { km: 11.5, v: 88, ref: "91" }, { km: 12, v: 430, ref: "S19" }];

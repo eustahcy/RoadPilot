@@ -412,16 +412,34 @@ async function roadInfoFor(route) {
   }
 }
 
+/**
+ * Gdy start albo cel leży na drodze, z której ciężarówka nie wyjedzie (droga serwisowa, strefa zakazu w centrum, MOP),
+ * Valhalla odpowiada „brak trasy” (442). Wtedy ponawiamy z szerszym dopasowaniem punktów (SNAP_RETRIES) — trasa kończy się
+ * na najbliższej dostępnej dla ciężarówki drodze, a TomTom zostaje tylko na prawdziwe awarie / poza Polską.
+ */
+const SNAP_RETRIES = [{ radius: 400 }, { radius: 400, search_filter: { min_road_class: "tertiary" } }];
+
 async function valhallaOnce(from, to, vehicle, exclude, routeType = "fastest", via = []) {
-  let r;
-  try {
-    r = await fetch(`${VALHALLA_URL}/route`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(valhallaRequest(from, to, vehicle, exclude, 0, routeType, via)), signal: AbortSignal.timeout(30_000) });
-  } catch {
-    return null;
+  for (const snap of [null, ...SNAP_RETRIES]) {
+    const q = valhallaRequest(from, to, vehicle, exclude, 0, routeType, via);
+    if (snap) for (const l of q.locations) Object.assign(l, snap);
+    let r;
+    try {
+      r = await fetch(`${VALHALLA_URL}/route`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(q), signal: AbortSignal.timeout(30_000) });
+    } catch {
+      return null;
+    }
+    const json = await r.json().catch(() => null);
+    const route = r.ok ? parseValhalla(json) : null;
+    // Zapytanie zostaje przy trasie — withRoadInfo dociąga z nim pasy ruchu.
+    if (route) return { ...route, _q: q };
+    if (json?.error_code !== 442) {
+      console.warn("valhalla: brak trasy", json?.error_code ?? r.status, json?.error ?? "");
+      return null;
+    }
   }
-  const route = r.ok ? parseValhalla(await r.json().catch(() => null)) : null;
-  // Zapytanie zostaje przy trasie — withRoadInfo dociąga z nim pasy ruchu.
-  return route && { ...route, _q: valhallaRequest(from, to, vehicle, exclude, 0, routeType, via) };
+  console.warn("valhalla: brak trasy dla ciężarówki także po szerszym dopasowaniu", JSON.stringify({ from, to }));
+  return null;
 }
 
 /**
@@ -598,6 +616,7 @@ routes["POST /api/nav/route"] = async (req, user) => {
     const own = await valhallaRoute(from, to, body.vehicle, routeType, via, avoid);
     if (own) return [200, await finish({ route: own, alternatives: withAlts ? distinct(own, (await valhallaAlternates(from, to, body.vehicle, routeType)).map((a) => ({ ...a, engine: "roadpilot" }))) : [] })];
   }
+  if (ownPossible) console.warn("trasa: własny silnik nie dał trasy — TomTom awaryjnie");
   userDaily("route", user);
   try {
     await spend("route");

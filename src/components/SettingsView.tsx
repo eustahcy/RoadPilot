@@ -105,7 +105,7 @@ export function SettingsView({ initialCategory, navAccess, state, now, onSetting
 
       {cat === "account" && <AccountSection {...account} />}
 
-      {cat === "friends" && <FriendsSettings api={friends.api} share={settings.friendsShare} onShare={(friendsShare) => set({ friendsShare })} gpsOn={friends.gpsOn} onLogin={account.onLogin} me={friends.me} now={now} mapToken={navAccess === "premium" ? account.token : null} mapStyle={{ theme: settings.mapTheme === "auto" ? autoTheme(undefined, now) : settings.mapTheme, vehicle: settings.vehicle }} />}
+      {cat === "friends" && <FriendsSettings api={friends.api} share={settings.friendsShare} onShare={(friendsShare) => set({ friendsShare })} gpsOn={friends.gpsOn} onLogin={account.onLogin} me={friends.me} now={now} mapToken={navAccess === "premium" ? account.token : null} mapStyle={{ theme: settings.mapTheme === "auto" || settings.mapTheme === "glass" ? autoTheme(undefined, now) : settings.mapTheme, vehicle: settings.vehicle }} />}
 
       {cat === "planning" && (
         <>
@@ -352,7 +352,7 @@ function HudSection({ settings, onChange }: { settings: Settings; onChange: (pat
       <section className="card">
         <div className="eyebrow">Mapa w nawigacji</div>
         <div className="hud-style-pick engines">
-          {([["auto", "Automatycznie", "Dzień / noc z pogody, a bez niej z zegara (7–19)."], ["day", "Dzień", "Jasne tło, szare drogi."], ["night", "Noc", "Ciemne tło — jak dotąd."]] as const).map(([id, label, hint]) => (
+          {([["auto", "Automatycznie", "Dzień / noc z pogody, a bez niej z zegara (7–19)."], ["day", "Dzień", "Jasne tło, szare drogi."], ["night", "Noc", "Ciemne tło — jak dotąd."], ["glass", "Szkło", "Półprzezroczyste panele z rozmyciem; mapa dzień / noc jak w Auto."]] as const).map(([id, label, hint]) => (
             <button key={id} className={`hud-style-opt ${settings.mapTheme === id ? "active" : ""}`} aria-pressed={settings.mapTheme === id} onClick={() => onChange({ mapTheme: id })}>
               <strong>{label}</strong>
               <small>{hint}</small>
